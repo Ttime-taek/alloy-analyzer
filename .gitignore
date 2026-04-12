@@ -17,3 +17,8 @@ frontend/dist/
 frontend/node_modules/
 frontend/.eslintcache
 .gstack/
+
+# Design QA 리포트·스크린샷(재생성 가능)
+.design-audit/
+.gstack-design-audit/
+frontend/.design-audit/
