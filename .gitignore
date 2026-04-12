@@ -1,0 +1,19 @@
+# 키·환경
+.gemini_api_key
+gemini_api_key.txt
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+venv/
+.venv/
+
+# 캐시·프론트 빌드(재생성됨)
+literature_cache.json
+frontend/dist/
+frontend/node_modules/
+frontend/.eslintcache
+.gstack/

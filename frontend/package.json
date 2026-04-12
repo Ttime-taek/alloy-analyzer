@@ -1,0 +1,29 @@
+{
+  "name": "alloy-analyzer-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "api": "node ../scripts/run_api_child.mjs",
+    "dev:all": "node ../scripts/dev_all.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint \"./src/**/*.{js,jsx}\"",
+    "lint:fix": "eslint \"./src/**/*.{js,jsx}\" --fix"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.4.0",
+    "vite": "^5.0.0",
+    "vite-plugin-checker": "^0.12.0"
+  }
+}

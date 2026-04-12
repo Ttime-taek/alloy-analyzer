@@ -1,0 +1,18 @@
+{
+  "profile_preset": "AUTO",
+  "profile_tune": {
+    "ramp_rate": 2.0,
+    "preheat_time": 60.0,
+    "over_liquidus_time": 43.0,
+    "cool_rate": 2.0,
+    "peak_margin": 40.0
+  },
+  "literature_mode": "fast",
+  "imc_substrate": "Cu-OSP",
+  "imc_tal_mode": "AUTO(profile)",
+  "imc_tal_ref": "Liquidus",
+  "imc_tal_delta_c": 3.0,
+  "imc_tal_sec": 138.0,
+  "imc_view_style": "표준",
+  "imc_demo_preset": "AUTO"
+}

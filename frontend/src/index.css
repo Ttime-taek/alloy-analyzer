@@ -1,0 +1,425 @@
+/* 전역 베이스: 다크 앱 UI, 포커스 가시성, 토큰(인라인 스타일과 공유) */
+html {
+  color-scheme: dark;
+}
+
+:root {
+  --bg-page: #020617;
+  --bg-elevated: #0b1220;
+  --bg-table-head: #0f172a;
+  --border-default: #1e293b;
+  --border-muted: #1f2937;
+  --border-accent: #334155;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+  --link: #93c5fd;
+  --accent: #60a5fa;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* 모바일에서 숫자 필드 포커스 시 자동 확대 완화(iOS) */
+input,
+select,
+textarea {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 키보드 사용자: 본문으로 건너뛰기 */
+.skip-to-content {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.skip-to-content:focus {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 10000;
+  width: auto;
+  height: auto;
+  padding: 10px 14px;
+  overflow: visible;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 분석 결과 본문: 가독성·계층 (App.jsx AnalysisProse) */
+.result-prose-scroll {
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  border: 1px solid var(--border-default);
+  padding: 14px 16px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.result-prose-scroll--tall {
+  max-height: min(60vh, 520px);
+}
+
+.result-prose {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-prose--compact {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 연구소 기술 보고서: 섹션 대비·숫자 가독성 */
+.result-prose--lab-report {
+  font-variant-numeric: tabular-nums;
+}
+
+.result-prose--lab-report .result-prose-head {
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: #93c5fd;
+  margin: 22px 0 12px 0;
+  padding: 8px 0 8px 10px;
+  border-left: 3px solid rgba(96, 165, 250, 0.65);
+  border-bottom: none;
+  background: linear-gradient(90deg, rgba(30, 58, 138, 0.35), transparent);
+  border-radius: 0 6px 6px 0;
+}
+
+.result-prose--lab-report .result-prose-head--section {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 10px 12px 10px 12px;
+}
+
+.result-prose-sec-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(30, 64, 175, 0.85), rgba(59, 130, 246, 0.45));
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  color: #e0f2fe;
+  line-height: 1.2;
+}
+
+.result-prose-sec-title {
+  flex: 1 1 12rem;
+  font-size: 14px;
+  font-weight: 650;
+  color: #f1f5f9;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
+}
+
+.result-prose--lab-report .result-prose-head:first-child {
+  margin-top: 0;
+}
+
+.result-prose--lab-report .result-prose-p {
+  margin-bottom: 14px;
+}
+
+.result-prose--lab-report .result-prose-kv {
+  margin-bottom: 10px;
+}
+
+.result-prose--lab-report .result-prose-li {
+  margin-bottom: 8px;
+}
+
+.result-prose-muted {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.result-prose-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 18px 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-muted);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-prose-head:first-child {
+  margin-top: 0;
+}
+
+.result-prose-p {
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  white-space: pre-line;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-prose-p:last-child {
+  margin-bottom: 0;
+}
+
+.result-prose-kv {
+  display: grid;
+  grid-template-columns: minmax(0, 12em) minmax(0, 1fr);
+  gap: 6px 14px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border-radius: 8px;
+  border: 1px solid var(--border-muted);
+}
+
+.result-prose-kv:last-of-type {
+  margin-bottom: 0;
+}
+
+.result-prose-kv-key {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.result-prose-kv-val {
+  font-size: 13px;
+  color: var(--text-primary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-prose-ul {
+  margin: 0 0 14px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result-prose-li {
+  position: relative;
+  padding-left: 1.15em;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-prose-li:last-child {
+  margin-bottom: 0;
+}
+
+.result-prose-li::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.result-imc-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.result-imc-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 8px;
+  color: #bfdbfe;
+  cursor: help;
+  word-break: keep-all;
+}
+
+.result-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 8px 0;
+}
+
+.result-plain-pre {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.result-risk-grid h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+@media (max-width: 520px) {
+  .result-prose-kv {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 분석 버튼 스피너 */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* 분석 결과 빈 상태 가이드 */
+.empty-state-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-state-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: min(100%, 440px);
+  text-align: left;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.empty-state-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 1번 안내: "(예: Sn → Ag → Cu)" 가 잘리지 않고 한 줄로 보이도록 */
+.empty-state-step:first-child > span:last-child {
+  white-space: nowrap;
+}
+
+.empty-state-step-num {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(96, 165, 250, 0.15);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 본문 기본 14px — 리포트의 12px 과밀 완화(인라인 스타일은 그대로 두되 베이스만 상향) */
+.app-shell {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 메인 2컬럼: 좁은 화면에서 한 열로 */
+.app-main-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .app-main-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .app-shell {
+    padding: 16px !important;
+  }
+}
