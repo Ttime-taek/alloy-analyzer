@@ -16,6 +16,9 @@ html {
   --text-dim: #94a3b8;
   --link: #93c5fd;
   --accent: #60a5fa;
+  /* 요약 카드 밖 각주(젖음·인장) — 카드 그라데이션과 톤만 맞춤 */
+  --summary-footnote-wetting-label: #7dd3fc;
+  --summary-footnote-tensile-label: #86efac;
 }
 
 *,
@@ -461,4 +464,33 @@ summary:focus-visible,
   .result-prose-head {
     font-size: 13px;
   }
+}
+
+/* 분석 결과: 젖음·물성 DB 설명(카드 밖) — DESIGN.md 토큰 사용 */
+.summary-wetting-tensile-footnotes {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding-left: 2px;
+  max-width: min(100%, 52rem);
+}
+
+.summary-wetting-tensile-footnotes p {
+  margin: 0;
+}
+
+.summary-wetting-tensile-footnotes p:not(:last-child) {
+  margin-bottom: 6px;
+}
+
+.summary-footnote-label--wetting {
+  color: var(--summary-footnote-wetting-label);
+  font-weight: 600;
+}
+
+.summary-footnote-label--tensile {
+  color: var(--summary-footnote-tensile-label);
+  font-weight: 600;
 }

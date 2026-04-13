@@ -1956,7 +1956,8 @@ export default function App() {
                     gridTemplateColumns:
                       "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
                     gap: 8,
-                    marginBottom: 16
+                    marginBottom: 8,
+                    alignItems: "stretch"
                   }}
                 >
                   <SummaryCard
@@ -1985,6 +1986,7 @@ export default function App() {
                     variant="tensileDb"
                   />
                 </div>
+                <SummaryWettingTensileFootnotes />
                 <CollapsibleSection
                   title="온도별 젖음 (BD Fmax·T₀)"
                   open={wettingSectionOpen}
@@ -2025,7 +2027,8 @@ export default function App() {
                     gridTemplateColumns:
                       "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
                     gap: 8,
-                    marginBottom: 16
+                    marginBottom: 8,
+                    alignItems: "stretch"
                   }}
                 >
                   <SummaryCard
@@ -2069,6 +2072,7 @@ export default function App() {
                     variant="tensileDb"
                   />
                 </div>
+                <SummaryWettingTensileFootnotes />
                 <CollapsibleSection
                   title="온도별 젖음 (BD Fmax·T₀)"
                   open={wettingSectionOpen}
@@ -2900,8 +2904,29 @@ const SUMMARY_VARIANT_HINT = {
   liquidus: "완전 액상(추정)",
   peak: "DSC/DTA 등 주요 열역학 신호(추정)",
   wetting:
-    "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 BD 온도(또는 자동) 선택 후 분석"
+    "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 BD 온도(또는 자동) 선택 후 분석",
+  tensileDb: "물성 DB 최근접 합금의 인장강도(MPa)"
 };
+
+/** 하단 힌트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
+const SUMMARY_COMPACT_VALUE_VARIANTS = new Set(["wetting", "tensileDb"]);
+
+function SummaryWettingTensileFootnotes() {
+  return (
+    <div className="summary-wetting-tensile-footnotes">
+      <p>
+        <span className="summary-footnote-label--wetting">젖음 Fmax</span>
+        {" — "}
+        {SUMMARY_VARIANT_HINT.wetting}
+      </p>
+      <p>
+        <span className="summary-footnote-label--tensile">물성 DB 인장</span>
+        {" — "}
+        {SUMMARY_VARIANT_HINT.tensileDb}
+      </p>
+    </div>
+  );
+}
 
 function formatWettingFmaxPrimary(props) {
   const f = Number(props?.wetting_fmax_pred_mn);
@@ -3147,9 +3172,20 @@ function SummaryCard({ label, value, variant }) {
     }
   };
   const g = variant && gradients[variant] ? gradients[variant] : null;
+  const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
+  const hintText =
+    variant &&
+    SUMMARY_VARIANT_HINT[variant] &&
+    !SUMMARY_COMPACT_VALUE_VARIANTS.has(variant)
+      ? SUMMARY_VARIANT_HINT[variant]
+      : null;
   return (
     <div
       style={{
+        height: "100%",
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
         padding: 10,
         borderRadius: 10,
         border: g ? g.border : "1px solid var(--border-muted)",
@@ -3163,36 +3199,48 @@ function SummaryCard({ label, value, variant }) {
           color: g ? g.labelColor : "#9ca3af",
           marginBottom: 4,
           fontWeight: g ? 600 : 400,
-          letterSpacing: g ? 0.02 : undefined
+          letterSpacing: g ? 0.02 : undefined,
+          flexShrink: 0
         }}
       >
         {label}
       </div>
       <div
         style={{
-          fontSize: 16,
-          fontWeight: 700,
-          color: g ? g.valueColor : undefined,
-          wordBreak: "break-word",
-          lineHeight: 1.35,
-          textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
-          whiteSpace: variant === "wetting" ? "pre-line" : undefined
+          flex: "1 1 auto",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          minHeight: 0
         }}
       >
-        {value}
-      </div>
-      {variant && SUMMARY_VARIANT_HINT[variant] ? (
         <div
           style={{
-            fontSize: 11,
-            marginTop: 8,
-            lineHeight: 1.35,
-            fontWeight: 400,
-            color: g ? g.labelColor : "#94a3b8",
-            opacity: g ? 0.88 : 0.95
+            fontSize: compactValue ? 18 : 16,
+            fontWeight: 700,
+            color: g ? g.valueColor : undefined,
+            wordBreak: "break-word",
+            lineHeight: compactValue ? 1.3 : 1.35,
+            textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
+            whiteSpace: variant === "wetting" ? "pre-line" : undefined
           }}
         >
-          {SUMMARY_VARIANT_HINT[variant]}
+          {value}
+        </div>
+      </div>
+      {hintText ? (
+        <div
+          style={{
+            fontSize: compactValue ? 9 : 11,
+            marginTop: compactValue ? 6 : 8,
+            lineHeight: compactValue ? 1.32 : 1.35,
+            fontWeight: 400,
+            color: g ? g.labelColor : "#94a3b8",
+            opacity: compactValue ? 0.82 : g ? 0.88 : 0.95,
+            flexShrink: 0
+          }}
+        >
+          {hintText}
         </div>
       ) : null}
     </div>
