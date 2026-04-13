@@ -28,9 +28,16 @@ if [[ ! -d "$WIN_GSTACK" ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BROWSE="$WIN_GSTACK/browse/dist/browse"
+# dist may contain only .version after a bad copy — repair from WSL gstack or build
+if [[ ! -f "$BROWSE" ]] || [[ ! -x "$BROWSE" ]]; then
+  echo "browse missing or not executable; attempting repair..."
+  bash "$SCRIPT_DIR/repair-gstack-browse.sh" || exit 1
+fi
 BROWSE="$WIN_GSTACK/browse/dist/browse"
 if [[ ! -f "$BROWSE" ]]; then
-  echo "browse binary missing: $BROWSE" >&2
+  echo "browse binary still missing: $BROWSE" >&2
   exit 1
 fi
 
