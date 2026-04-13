@@ -464,6 +464,36 @@ summary:focus-visible,
   .result-prose-head {
     font-size: 13px;
   }
+
+  /* 주기율표 7열 그리드: 뷰포트가 좁으면 셀 너비가 44px 미만이 됨 → 최소 폭 보장 + 가로 스크롤 (감사 FINDING-002) */
+  .periodic-element-grid-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    margin-left: -2px;
+    margin-right: -2px;
+    padding-bottom: 4px;
+  }
+
+  .periodic-element-grid {
+    /* 7×44px + 열 사이 간격 6px×6 */
+    min-width: calc(7 * 44px + 6 * 6px);
+  }
+
+  .periodic-element-grid > button {
+    min-width: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 4px !important;
+    touch-action: manipulation;
+    white-space: pre-line;
+    line-height: 1.2;
+  }
 }
 
 /* 분석 결과: 젖음·물성 DB 설명(카드 밖) — DESIGN.md 토큰 사용 */

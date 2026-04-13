@@ -1388,8 +1388,10 @@ export default function App() {
             </div>
             </div>
 
-            {/* 주기율표 스타일(솔더 관련 원소) 버튼 */}
+            {/* 주기율표 스타일(솔더 관련 원소) 버튼 — narrow 뷰 터치 타겟은 index.css `.periodic-element-grid` */}
+            <div className="periodic-element-grid-wrap">
             <div
+              className="periodic-element-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
@@ -1419,6 +1421,7 @@ export default function App() {
                   {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
                 </button>
               ))}
+            </div>
             </div>
 
             <button
@@ -1605,7 +1608,9 @@ export default function App() {
                 </div>
 
                 {/* 조성 B용 주기율표 버튼 */}
+                <div className="periodic-element-grid-wrap">
                 <div
+                  className="periodic-element-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
@@ -1635,6 +1640,7 @@ export default function App() {
                       {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
                     </button>
                   ))}
+                </div>
                 </div>
 
                 <button

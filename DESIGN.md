@@ -28,6 +28,10 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 - **`.app-shell`**: root wrapper; base `font-size: 14px` (see `index.css`).
 - **`.app-main-grid`**: two-column main grid; below **720px** width stacks to a single column with tighter gap.
 
+### Touch targets (narrow viewports)
+
+Below **720px**, primary controls use at least **44×44px** (see `index.css` `@media (max-width: 720px)`). The **periodic element** grid (7 columns) uses **`.periodic-element-grid-wrap`** + **`.periodic-element-grid`**: the grid has a **minimum width** so each cell can stay ≥44px wide; if the viewport is narrower, the wrapper **scrolls horizontally** instead of shrinking cells below 44px.
+
 ## UX (audit follow-ups)
 
 - API unreachable: amber **API 오프라인** banner (not silent failure).
