@@ -22,3 +22,6 @@ frontend/.eslintcache
 .design-audit/
 .gstack-design-audit/
 frontend/.design-audit/
+
+# 로컬 IDE(워크스페이스별 설정 — 저장소에 포함하지 않음)
+.vscode/
