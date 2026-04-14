@@ -35,7 +35,7 @@ def _imc_line_to_plain_korean(s: str) -> str:
         return t
     low = t.lower()
     if "규칙 기반으로는 지배적" in t:
-        return "이 조성만으로는 어떤 막이 가장 두드러지는지 특정하기 어렵습니다."
+        return "이 조성만으로는 어떤 합금층이 가장 두드러지는지 특정하기 어렵습니다."
     if "ag3sn" in low or "sn-ag" in low:
         return "은과 주석이 만나 생기는 단단한 층(약칭: Ag3Sn)"
     if "cu6sn5" in low:

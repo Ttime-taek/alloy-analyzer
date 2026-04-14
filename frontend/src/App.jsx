@@ -126,7 +126,7 @@ export default function App() {
   const [wettingGridRows, setWettingGridRows] = useState(null);
   const [wettingGridLoading, setWettingGridLoading] = useState(false);
   const [wettingGridError, setWettingGridError] = useState("");
-  /** 온도별 젖음(BD 격자) 블록 접기/펼치기 — 기본은 접음 */
+  /** 온도별 젖음(격자) 블록 접기/펼치기 — 기본은 접음 */
   const [wettingSectionOpen, setWettingSectionOpen] = useState(false);
   /** 리플로우: 피크 온도 + 구간 튜닝 (데스크톱 peak-based 템플릿과 동일) */
   const [reflowPeakUser, setReflowPeakUser] = useState(null);
@@ -1230,7 +1230,7 @@ export default function App() {
                     minWidth: 200
                   }}
                 >
-                  <option value="auto">자동 (액상선+30℃ → BD 격자)</option>
+                  <option value="auto">자동 (액상선+30℃)</option>
                   <option value="250">250 ℃</option>
                   <option value="260">260 ℃</option>
                   <option value="270">270 ℃</option>
@@ -2154,7 +2154,7 @@ export default function App() {
                 <CollapsibleSection
                   title={
                     reportMode === "eng"
-                      ? "납땜 온도·기판과의 막 (쉬운 설명)"
+                      ? "납땜 온도·합금층 (쉬운 설명)"
                       : "상분석 / IMC"
                   }
                   open={sectionOpen.phase}
@@ -2165,7 +2165,7 @@ export default function App() {
                   </div>
                   <div className="result-section-label">
                     {reportMode === "eng"
-                      ? "기판과 만날 때 생길 수 있는 막"
+                      ? "기판과 만날 때 생길 수 있는 합금층"
                       : "예상 IMC"}
                   </div>
                   <p style={{ fontSize: 13, color: "var(--text-dim)", margin: "0 0 10px 0" }}>
@@ -3019,15 +3019,15 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
             color: "var(--text-primary)"
           }}
         >
-          젖음 예측 (BD 온도 격자 · IDW)
+          젖음 예측 (IDW)
         {Number.isFinite(Number(proxyTemp)) ? (
           <span style={{ fontWeight: 500, color: "#94a3b8", marginLeft: 8 }}>
             {basis === "user" && Number.isFinite(Number(targetC))
-              ? `대표 행: 선택 ${Number(targetC).toFixed(0)}℃ → BD ${Number(proxyTemp).toFixed(0)}℃`
+              ? `대표 행: 선택 ${Number(targetC).toFixed(0)}℃ · ${Number(proxyTemp).toFixed(0)}℃`
               : basis === "auto_liq_plus_30" &&
                   Number.isFinite(Number(liquidus)) &&
                   Number.isFinite(Number(targetC))
-                ? `대표 행: 액상선 ${Number(liquidus).toFixed(1)}℃ +30°(목표≈${Number(targetC).toFixed(1)}℃) → BD ${Number(proxyTemp).toFixed(0)}℃`
+                ? `대표 행: 액상선 ${Number(liquidus).toFixed(1)}℃ +30°(목표≈${Number(targetC).toFixed(1)}℃) · ${Number(proxyTemp).toFixed(0)}℃`
                 : `대표 행: ${Number(proxyTemp).toFixed(0)}℃`}
           </span>
         ) : null}
@@ -3258,6 +3258,26 @@ function compareCompSumPct(comp) {
   return Object.values(comp).reduce((s, v) => s + (Number(v) || 0), 0);
 }
 
+/** 비교 헤더용: 입력 조성(wt%) — DB 최근접명(best.name)과 혼동되지 않게 표시 */
+function formatCompareCompositionLabel(comp) {
+  if (!comp || typeof comp !== "object") return "—";
+  const keys = Object.keys(comp).filter((k) => Number(comp[k]) > 0);
+  if (keys.length === 0) return "—";
+  keys.sort((a, b) => {
+    if (a === "Sn") return -1;
+    if (b === "Sn") return 1;
+    return a.localeCompare(b);
+  });
+  const parts = [];
+  for (const k of keys) {
+    const v = Number(comp[k]);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    const t = Number.isInteger(v) ? String(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+    parts.push(`${k} ${t}%`);
+  }
+  return parts.length ? parts.join(" · ") : "—";
+}
+
 function fmtDelta(na, nb, unit = "") {
   if (!Number.isFinite(na) || !Number.isFinite(nb)) return "-";
   const d = nb - na;
@@ -3480,19 +3500,47 @@ function CompareView({ data, compA, compB }) {
       >
         <AiSessionUsageRow usage={data?.ai_usage_snapshot} />
       </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 8
-        }}
-      >
-        <div style={{ fontSize: 15, fontWeight: 600 }}>비교 결과</div>
-        <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "right" }}>
-          <div>
-            A: {a?.name || "합금 A"} / B: {b?.name || "합금 B"}
+      <div style={{ marginBottom: 10 }}>
+        <div
+          style={{
+            fontSize: 15,
+            fontWeight: 600,
+            marginBottom: 8,
+            whiteSpace: "nowrap",
+            lineHeight: 1.3
+          }}
+        >
+          비교 결과
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: "#9ca3af",
+            lineHeight: 1.55,
+            wordBreak: "keep-all",
+            overflowWrap: "anywhere",
+            maxWidth: "100%"
+          }}
+        >
+          <div
+            title="왼쪽에 입력한 wt% (DB 최근접 합금명과 다를 수 있음)"
+            style={{ marginBottom: 4 }}
+          >
+            <span style={{ color: "#60a5fa", fontWeight: 600 }}>A</span>
+            {": "}
+            {formatCompareCompositionLabel(compA)}
           </div>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ color: "#fb923c", fontWeight: 600 }}>B</span>
+            {": "}
+            {formatCompareCompositionLabel(compB)}
+          </div>
+          {(a?.name || b?.name) && (
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
+              DB 근접명: {a?.name || "—"} · {b?.name || "—"}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: "#64748b" }}>
             온도·수치 차이 열은 <strong style={{ color: "#94a3b8" }}>B − A</strong> (기준: 조성{" "}
             <strong style={{ color: "#60a5fa" }}>A</strong>)
           </div>

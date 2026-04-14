@@ -107,7 +107,7 @@ _raw_db = [
     {"name": "Sn57.6Bi0.4Ag", "comp": {"Bi": 57.6, "Ag": 0.4, "Sn": 42.0}, "solidus": 139, "liquidus": 144},
     {"name": "Sn57.8Bi0.2Ag", "comp": {"Bi": 57.8, "Ag": 0.2, "Sn": 42.0}, "solidus": 136, "liquidus": 143},
     {"name": "Sn3.9Ag0.6Cu", "comp": {"Ag": 3.9, "Cu": 0.6, "Sn": 95.5}, "solidus": 217, "liquidus": 218},
-    {"name": "Sn3.5Ag0.5Bi8.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 8.0, "Sn": 88.0}, "solidus": 197, "liquidus": 208},
+    {"name": "Sn3.5Ag0.5Bi8.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 8.0, "Sn": 88.0}, "solidus": 198, "liquidus": 210},
     {"name": "Sn10Sb", "comp": {"Sb": 10.0, "Sn": 90.0}, "solidus": 245, "liquidus": 251},
     {"name": "Sn100", "comp": {"Sn": 100.0}, "solidus": 231.9, "liquidus": 231.9},
     {"name": "Sn0.3Ag0.7Cu", "comp": {"Ag": 0.3, "Cu": 0.7, "Sn": 99.0}, "solidus": 217, "liquidus": 227},
@@ -118,6 +118,7 @@ _raw_db = [
     {"name": "Sn3Ag15Bi", "comp": {"Ag": 3.0, "Bi": 15.0, "Sn": 82.0}, "solidus": 139, "liquidus": 206},
     {"name": "Sn1Ag25Bi", "comp": {"Ag": 1.0, "Bi": 25.0, "Sn": 74.0}, "solidus": 137.8, "liquidus": 196.6},
     {"name": "Sn1Ag25Bi0.5Cu", "comp": {"Ag": 1.0, "Bi": 25.0, "Cu": 0.5, "Sn": 73.5}, "solidus": 137.5, "liquidus": 194.9},
+    {"name": "Sn1Ag25Bi0.7Cu", "comp": {"Ag": 1.0, "Bi": 25.0, "Cu": 0.7, "Sn": 73.3}, "solidus": 137.53, "liquidus": 197.68},
     {"name": "Sn3Ag25Bi", "comp": {"Ag": 3.0, "Bi": 25.0, "Sn": 72.0}, "solidus": 138.3, "liquidus": 193.4},
 ]
 

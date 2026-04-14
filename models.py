@@ -7,6 +7,7 @@ import math
 from .utils import composition_distance
 from .utils import log_exception
 from .wetting_db import WETTING_DB, WETTING_TEMPS_C
+from .interp_pchip import interp_pchip_1d
 
 
 def snap_wetting_temp_to_bd_grid(target_c: float) -> float:
@@ -128,19 +129,36 @@ class PropertyModels:
 
     @staticmethod
     def _interp_1d(x, xs, ys):
-        # Linear interpolation with endpoint clamping.
+        """온도 축 등 1D 그리드 — PCHIP(단조 Hermite), scipy 없으면 선형 폴백."""
         if not xs or len(xs) != len(ys):
             return None
-        if x <= xs[0]:
-            return ys[0]
-        if x >= xs[-1]:
-            return ys[-1]
-        for i in range(len(xs) - 1):
-            x0, x1 = xs[i], xs[i + 1]
-            if x0 <= x <= x1:
-                t = (x - x0) / (x1 - x0) if x1 != x0 else 0.0
-                return ys[i] + t * (ys[i + 1] - ys[i])
-        return ys[-1]
+        xf = float(x)
+        if xf <= float(xs[0]):
+            return float(ys[0])
+        if xf >= float(xs[-1]):
+            return float(ys[-1])
+        v = interp_pchip_1d(xf, [float(t) for t in xs], [float(y) for y in ys])
+        if v != v:  # NaN
+            return None
+        return float(v)
+
+    @staticmethod
+    def _idw_comp_weight(dist: float, comp: dict) -> float:
+        """
+        Cu ~0.55–0.72 wt% 구간은 실측 격자가 성길 때 이웃 가중 전환이 급격해질 수 있음.
+        거리 바닥(floor)과 멱을 살짝 올려 IDW 절벽을 완화.
+        """
+        floor = 1e-6
+        power = 1.0
+        try:
+            cu = float(comp.get("Cu", 0) or 0)
+            if 0.55 <= cu <= 0.72:
+                floor = max(floor, 0.035)
+                power = 1.15
+        except (TypeError, ValueError):
+            pass
+        d = max(0.0, float(dist))
+        return 1.0 / (d + floor) ** power
 
     @staticmethod
     def _rec_fmax_t0_at_temp(rec, temp_c):
@@ -205,7 +223,7 @@ class PropertyModels:
 
         for rec in WETTING_DB:
             d = composition_distance(comp, rec["comp"])
-            w = 1.0 / (d + 1e-6)
+            w = PropertyModels._idw_comp_weight(d, comp)
             f_i, t_i = self._rec_fmax_t0_at_temp(rec, t_test)
             if f_i is None or t_i is None:
                 continue

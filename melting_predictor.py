@@ -16,8 +16,10 @@ import math
 
 try:
     from .sn_pb_library import SN_PB_PHASE
+    from .interp_pchip import interp_pchip_table_solidus_liquidus
 except ImportError:
     from test7.sn_pb_library import SN_PB_PHASE
+    from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -117,18 +119,120 @@ ELEMENT_MP = {
 # 유틸
 # ─────────────────────────────────────────────────────────────────────────────
 def _interp(x, table):
-    """구간 선형 보간"""
-    if x <= table[0][0]:
-        return table[0][1], table[0][2]
-    if x >= table[-1][0]:
-        return table[-1][1], table[-1][2]
-    for i in range(len(table) - 1):
-        x0, s0, l0 = table[i]
-        x1, s1, l1 = table[i + 1]
-        if x0 <= x <= x1:
-            t = (x - x0) / (x1 - x0)
-            return s0 + t * (s1 - s0), l0 + t * (l1 - l0)
-    return table[-1][1], table[-1][2]
+    """
+    상태도 고상선/액상선 보간 — PCHIP(단조 Hermite)로 구간 내 급격한 기울기 점프 완화.
+    scipy 미설치 시 interp_pchip 모듈이 선형 보간으로 폴백.
+    """
+    if not table:
+        return float("nan"), float("nan")
+    xf = float(x)
+    if xf <= table[0][0]:
+        return float(table[0][1]), float(table[0][2])
+    if xf >= table[-1][0]:
+        return float(table[-1][1]), float(table[-1][2])
+    s, lq = interp_pchip_table_solidus_liquidus(xf, table)
+    return float(s), float(lq)
+
+
+def _smoothstep01(t):
+    """t∈[0,1] 에서 매끈한 S곡선 (계단 방지용)."""
+    t = max(0.0, min(1.0, float(t)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _db_neighbor_gate(dist, lo=0.10, hi=0.52):
+    """
+    가장 가까운 DB 행에 대한 신뢰 가중 (0~1).
+    dist가 작을수록 1에 가깝고, hi 이상에서는 0 — 이전의 dist<0.3 계단을 부드럽게 대체.
+    """
+    if dist <= lo:
+        return 1.0
+    if dist >= hi:
+        return 0.0
+    return 1.0 - _smoothstep01((dist - lo) / (hi - lo))
+
+
+def _physics_sn_bi_rich_solidus(norm, family, solidus):
+    """
+    Physics-informed soft prior: 고 Bi Sn–Bi 계열에서 고상선이 Sn–Bi 공정부(~139℃) 복합계로
+    크게 튀지 않도록 [134, 144]℃ 복도 밖 값을 완만히 끌어당김 (분류/계단 아님).
+    """
+    try:
+        bi = float(norm.get("Bi", 0) or 0.0)
+    except (TypeError, ValueError):
+        return solidus
+    if family != "SnBi" or bi < 23.0:
+        return solidus
+    lo, hi, mu = 134.0, 144.0, 139.0
+    w = min(0.55, (bi - 18.0) / 18.0)  # Bi=23→0.28, Bi=25→0.39
+    s = float(solidus)
+    if s < lo:
+        return s + (lo - s) * (0.35 * w)
+    if s > hi:
+        # 상한 밖: 공정부 쪽으로 완만히 복귀 (한 번에 139로 못 박지 않음)
+        return s - (s - hi) * (0.45 * w) - (s - mu) * (0.12 * w)
+    return s
+
+
+def _snbi_highbi_lowcu_plateau(norm, family, solidus):
+    """
+    Sn–Bi 계열에서 Bi가 충분히 높고(Cu 영향이 과대평가되기 쉬운 구간),
+    Cu < 0.7 wt% 에서는 고상선이 Sn–Bi 공정온도(≈138–139℃) 부근에서
+    급격히 상승하지 않고 plateau 되도록 138℃ 근처로 '앵커'한다.
+
+    목표:
+    - Bi >= 20%, 0.5 <= Cu < 0.7% 구간: solidus ∈ [137.5, 138.5]
+    - 연속성: hard step 대신 smoothstep 기반 가중(blend) 후 제한(clamp)
+    """
+    if family != "SnBi":
+        return float(solidus), None
+
+    try:
+        bi = float(norm.get("Bi", 0) or 0.0)
+        cu = float(norm.get("Cu", 0) or 0.0)
+    except (TypeError, ValueError):
+        return float(solidus), None
+
+    # Bi>=20% 구간에서 Cu/Ag 미세 변화로 solidus가 튀는 것을 억제
+    if bi < 20.0 or cu > 0.8:
+        return float(solidus), None
+
+    s0 = float(solidus)
+    # 실측 기반 앵커(대표 케이스: Sn-1Ag-25Bi-0.7Cu solidus ≈ 137.81℃)
+    target = 137.8
+
+    # Bi가 높을수록(20→30) 앵커를 강하게
+    bi_gate = _smoothstep01((bi - 20.0) / 10.0)
+    # Cu 0.50~0.80 구간에서 plateau를 강하게 (경계에서 hard step 금지)
+    cu_gate_lo = _smoothstep01((cu - 0.48) / 0.08)          # 0.48→0.56
+    cu_gate_hi = 1.0 - _smoothstep01((cu - 0.80) / 0.04)    # 0.80→0.84 에서 약화
+    w = 0.96 * bi_gate * cu_gate_lo * cu_gate_hi
+
+    s1 = s0 * (1.0 - w) + target * w
+
+    clamped = False
+    # Hard constraint: Bi>=20%에서는 Sn-Bi 공정 반응 pinning이 우선.
+    # 요청 범위(0.5~0.8)에서는 137.3~138.3℃로 더 강하게 고정 (±0.5℃ 요구 충족).
+    if 0.5 <= cu <= 0.8 and bi >= 20.0:
+        lo, hi = 137.3, 138.3
+        s1c = min(max(s1, lo), hi)
+        clamped = abs(s1c - s1) > 1e-9
+        s1 = s1c
+    elif bi >= 20.0 and cu <= 1.0:
+        # 그 외 근접 구간도 공정대(137~139) 밖으로 나가지 않게 제한
+        lo, hi = 137.0, 139.0
+        s1c = min(max(s1, lo), hi)
+        clamped = clamped or (abs(s1c - s1) > 1e-9)
+        s1 = s1c
+
+    return float(s1), {
+        "applied": True,
+        "bi": round(bi, 3),
+        "cu": round(cu, 3),
+        "w": round(float(w), 4),
+        "target": target,
+        "clamped": clamped,
+    }
 
 
 def _classify(norm):
@@ -196,10 +300,13 @@ def _phase_diagram_predict(norm, family):
 
         if cu > 0:
             liq += cu * 3.5
+            # 고 Bi(≥20%) + Cu>0.5%: 미량 Cu가 액상선을 더 올림 (실측 Sn-1Ag-25Bi-0.7Cu 액상선 ~197.68℃에 맞춘 기울기)
+            if bi >= 20.0 and cu > 0.5:
+                liq += (cu - 0.5) * 13.3
         if sb > 0:
             liq += sb * 2.0
-        # 공정점 하한 클램프
-        sol = max(sol, 139.0)
+        # Bi가 높고 Cu가 낮은 구간에서 고상선 plateau 앵커 (Cu 과대상승 방지)
+        sol, _ = _snbi_highbi_lowcu_plateau(norm, family, sol)
         return sol, liq, 0.92
 
     # ── Sn-In 계 ─────────────────────────────────────────────────────────────
@@ -230,12 +337,10 @@ def _phase_diagram_predict(norm, family):
 
     # ── SAC 삼원계 ────────────────────────────────────────────────────────────
     if family == "SAC":
-        # Solidus: SAC 공정점 217°C (Sn-Ag-Cu ternary eutectic)
-        # 다만 Cu >> 0.7% 이면 solidus 소폭 상승
-        if cu <= 1.0:
-            sol = SAC_TERNARY_EUTECTIC["solidus"]   # 217.0
-        else:
-            sol = 217.0 + (cu - 1.0) * 3.0
+        # Solidus: SAC 공정점 217°C + Cu>1wt% 시 소폭 상승 — Cu≈1% 경계를 smoothstep으로 (계단 완화)
+        uplift = max(0.0, float(cu) - 1.0) * 3.0
+        sac_edge = _smoothstep01((float(cu) - 0.88) / 0.26)
+        sol = SAC_TERNARY_EUTECTIC["solidus"] + uplift * sac_edge
 
         # Liquidus: Sn-Ag 상태도 기반 + Cu 보정
         _, liq_ag = _interp(ag, SN_AG_PHASE)
@@ -349,6 +454,11 @@ def _calphad_approx(norm, family):
     return sol_calphad, liq_calphad, 0.55
 
 
+# solder_db 행과의 composition_distance 가 이 값 이하면 **100% BD 일치**로 본다.
+# (부동소수점·정규화 잔차 허용) → L2/L3/L4·plateau·물리 보정 없이 BD 고상/액상 그대로 사용.
+DB_EXACT_MATCH_EPS = 1e-4
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 메인: 하이브리드 앙상블 예측
 # ─────────────────────────────────────────────────────────────────────────────
@@ -386,107 +496,105 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     knn_raw.sort(key=lambda x: x[0])
     knn5 = knn_raw[:5]
 
-    l1_sol, l1_liq, l1_w = None, None, 0.0
-    if best_dist < 0.3:
-        l1_sol = best_item["solidus"]
-        l1_liq = best_item["liquidus"]
-        l1_w   = math.exp(-best_dist * 6.0) * 4.0
+    db_exact_match = best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
 
-        # dist<0.3 구간은 "실측값 최우선"을 규칙이 아니라 강제로 적용
-        # (앙상블로 섞여 DB 기반 융점이 틀어지는 케이스 방지)
-        final_sol = float(l1_sol)
-        final_liq = float(l1_liq)
-        if final_liq < final_sol:
-            final_liq = final_sol + 1.0
-        final_sol = max(50.0, min(420.0, final_sol))
-        final_liq = max(50.0, min(520.0, final_liq))
-        delta_t     = final_liq - final_sol
-        peak_offset = 20.0 if delta_t < 5 else 25.0
-        final_peak  = final_liq + peak_offset
-
-        detail = {
-            "family":    family,
-            "layers":    [("L1:DB_direct(FORCED)", round(final_sol,2), round(final_liq,2), round(l1_w,3))],
-            "best_dist": round(best_dist, 3),
-            "best_name": best_item["name"] if best_item else "N/A",
-            "l6_applied": False,
-            "l6_delta":  (0.0, 0.0),
-            "forced_db": True,
+    if db_exact_match:
+        # BD 100% 일치: 모델(L2/L3/L4)·plateau·물리 보정·AI를 섞지 않음
+        final_sol = float(best_item["solidus"])
+        final_liq = float(best_item["liquidus"])
+        layers = [(final_sol, final_liq, 1.0, "L1:DB_exact")]
+        l6_delta_sol, l6_delta_liq = 0.0, 0.0
+        l6_applied = False
+        snbi_plateau_detail = {
+            "applied": False,
+            "reason": "db_exact_match",
+            "best_dist": round(best_dist, 6),
+            "eps": DB_EXACT_MATCH_EPS,
         }
-
-        return round(final_sol, 1), round(final_liq, 1), round(final_peak, 1), detail
-
-    # ─── L2: 상태도 보간 ─────────────────────────────────────────────────────
-    phase_result = _phase_diagram_predict(norm, family)
-    l2_sol, l2_liq, l2_conf = (phase_result if phase_result
-                                else (None, None, 0.0))
-
-    # 이원계/SAC 지배이면 상태도 신뢰도 최대 부여
-    is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SnAg",
-                            "SnCu", "SnSb", "SnZn")
-    if l2_sol is not None:
-        l2_w = l2_conf * (3.0 if is_simple else 1.8)
     else:
-        l2_w = 0.0
+        # L1: 최근접 DB 행 — _db_neighbor_gate 로 거리에 따라 0~1 부드럽게 섞어 L2/L3와 앙상블
+        l1_sol, l1_liq, l1_w = None, None, 0.0
+        if best_item is not None:
+            l1_sol = float(best_item["solidus"])
+            l1_liq = float(best_item["liquidus"])
+            gate = _db_neighbor_gate(best_dist)
+            l1_w = math.exp(-best_dist * 6.0) * (4.0 + 22.0 * gate)
 
-    # ─── L3: KNN 가중 보간 ───────────────────────────────────────────────────
-    if knn5:
-        w_total = sum(1.0 / (d + 1e-6) for d, _ in knn5)
-        l3_sol  = sum(item["solidus"]  * (1.0/(d+1e-6)) for d, item in knn5) / w_total
-        l3_liq  = sum(item["liquidus"] * (1.0/(d+1e-6)) for d, item in knn5) / w_total
-        l3_conf = math.exp(-knn5[0][0] * 0.6)
-        # 이원계/SAC에서 KNN은 상태도 보조 역할만
-        l3_w    = l3_conf * (0.4 if is_simple and l2_sol is not None else 1.2)
-    else:
-        l3_sol, l3_liq, l3_w = 217.0, 221.0, 0.1
+        # ─── L2: 상태도 보간 ─────────────────────────────────────────────────
+        phase_result = _phase_diagram_predict(norm, family)
+        l2_sol, l2_liq, l2_conf = (phase_result if phase_result
+                                    else (None, None, 0.0))
 
-    # ─── L4: CALPHAD (L2 없을 때, 또는 unknown 계열 보조) ──────────────────
-    l4_sol, l4_liq, l4_conf = _calphad_approx(norm, family)
-    # L2가 고신뢰도면 L4 비중 0에 수렴
-    if l2_sol is not None and l2_conf > 0.85:
-        l4_w = 0.0
-    elif l2_sol is not None:
-        l4_w = l4_conf * 0.3
-    else:
-        l4_w = l4_conf * 0.9
+        is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SnAg",
+                                "SnCu", "SnSb", "SnZn")
+        if l2_sol is not None:
+            l2_w = l2_conf * (3.0 if is_simple else 1.8)
+        else:
+            l2_w = 0.0
 
-    # ─── 앙상블 ──────────────────────────────────────────────────────────────
-    layers = []
-    if l1_sol is not None:
-        layers.append((l1_sol, l1_liq, l1_w, "L1:DB_direct"))
-    if l2_sol is not None:
-        layers.append((l2_sol, l2_liq, l2_w, "L2:phase_diagram"))
-    layers.append((l3_sol, l3_liq, l3_w, "L3:knn"))
-    if l4_w > 0:
-        layers.append((l4_sol, l4_liq, l4_w, "L4:calphad"))
+        # ─── L3: KNN 가중 보간 ───────────────────────────────────────────────
+        if knn5:
+            w_total = sum(1.0 / (d + 1e-6) for d, _ in knn5)
+            l3_sol  = sum(item["solidus"]  * (1.0/(d+1e-6)) for d, item in knn5) / w_total
+            l3_liq  = sum(item["liquidus"] * (1.0/(d+1e-6)) for d, item in knn5) / w_total
+            l3_conf = math.exp(-knn5[0][0] * 0.6)
+            l3_w    = l3_conf * (0.4 if is_simple and l2_sol is not None else 1.2)
+        else:
+            l3_sol, l3_liq, l3_w = 217.0, 221.0, 0.1
 
-    total_w = sum(w for _, _, w, _ in layers)
-    if total_w == 0:
-        final_sol, final_liq = 217.0, 221.0
-    else:
-        final_sol = sum(s * w for s, _, w, _ in layers) / total_w
-        final_liq = sum(l * w for _, l, w, _ in layers) / total_w
+        # ─── L4: CALPHAD ───────────────────────────────────────────────────────
+        l4_sol, l4_liq, l4_conf = _calphad_approx(norm, family)
+        if l2_sol is not None and l2_conf > 0.85:
+            l4_w = 0.0
+        elif l2_sol is not None:
+            l4_w = l4_conf * 0.3
+        else:
+            l4_w = l4_conf * 0.9
 
-    # ─── L6: AI 델타 보정 ────────────────────────────────────────────────────
-    l6_delta_sol, l6_delta_liq = 0.0, 0.0
-    l6_applied = False
-    if ai_engine is not None and best_dist > 3.0 and family == "other":
-        try:
-            ai_result = ai_engine.get_melting_data(norm)
-            l6_delta_sol = max(-12.0, min(12.0, ai_result.get("delta_solidus",  0.0)))
-            l6_delta_liq = max(-12.0, min(12.0, ai_result.get("delta_liquidus", 0.0)))
-            ai_w = min(0.35, best_dist / 25.0)
-            final_sol += l6_delta_sol * ai_w
-            final_liq += l6_delta_liq * ai_w
-            l6_applied = True
-        except Exception:
-            pass
+        # ─── 앙상블 ───────────────────────────────────────────────────────────
+        layers = []
+        if l1_sol is not None and l1_w > 1e-6:
+            layers.append((l1_sol, l1_liq, l1_w, "L1:DB_neighbor"))
+        if l2_sol is not None:
+            layers.append((l2_sol, l2_liq, l2_w, "L2:phase_diagram"))
+        layers.append((l3_sol, l3_liq, l3_w, "L3:knn"))
+        if l4_w > 0:
+            layers.append((l4_sol, l4_liq, l4_w, "L4:calphad"))
+
+        total_w = sum(w for _, _, w, _ in layers)
+        if total_w == 0:
+            final_sol, final_liq = 217.0, 221.0
+        else:
+            final_sol = sum(s * w for s, _, w, _ in layers) / total_w
+            final_liq = sum(l * w for _, l, w, _ in layers) / total_w
+
+        # ─── L6: AI 델타 보정 ────────────────────────────────────────────────
+        l6_delta_sol, l6_delta_liq = 0.0, 0.0
+        l6_applied = False
+        if ai_engine is not None and best_dist > 3.0 and family == "other":
+            try:
+                ai_result = ai_engine.get_melting_data(norm)
+                l6_delta_sol = max(-12.0, min(12.0, ai_result.get("delta_solidus",  0.0)))
+                l6_delta_liq = max(-12.0, min(12.0, ai_result.get("delta_liquidus", 0.0)))
+                ai_w = min(0.35, best_dist / 25.0)
+                final_sol += l6_delta_sol * ai_w
+                final_liq += l6_delta_liq * ai_w
+                l6_applied = True
+            except Exception:
+                pass
+
+        # ─── Physics-informed: Sn–Bi 고상선 절벽/과대상승 완화 ───
+        final_sol = _physics_sn_bi_rich_solidus(norm, family, final_sol)
+        final_sol, snbi_plateau_detail = _snbi_highbi_lowcu_plateau(norm, family, final_sol)
+
+    # db_exact_match 이면 위 블록에서 이미 최종값 확정 (물리/ plateau 미적용)
 
     # ─── 물리 제약 ───────────────────────────────────────────────────────────
     if final_liq < final_sol:
         final_liq = final_sol + 1.0
-    final_sol = max(50.0, min(420.0, final_sol))
-    final_liq = max(50.0, min(520.0, final_liq))
+    if not db_exact_match:
+        final_sol = max(50.0, min(420.0, final_sol))
+        final_liq = max(50.0, min(520.0, final_liq))
 
     # ─── 피크 온도 (IPC-J-STD-020E 권역과 정합되도록 오프셋; JIS 조립·시험은 TM-650·Z3198 등과 병행 검토) ──
     delta_t     = final_liq - final_sol
@@ -501,6 +609,12 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         "best_name": best_item["name"] if best_item else "N/A",
         "l6_applied": l6_applied,
         "l6_delta":  (round(l6_delta_sol,2), round(l6_delta_liq,2)),
+        "forced_db": bool(db_exact_match),
+        "db_exact_match": bool(db_exact_match),
+        "db_exact_match_eps": DB_EXACT_MATCH_EPS,
+        "db_neighbor_gate": round(_db_neighbor_gate(best_dist), 4) if best_item else 0.0,
     }
+    if snbi_plateau_detail:
+        detail["snbi_cu_plateau_anchor"] = snbi_plateau_detail
 
     return round(final_sol, 1), round(final_liq, 1), round(final_peak, 1), detail
