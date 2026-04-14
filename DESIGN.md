@@ -16,6 +16,7 @@ Single source of implementation: `frontend/src/index.css` (`:root`). Update both
 | `--text-secondary` | `#9ca3af` | Secondary |
 | `--text-muted` | `#64748b` | Muted |
 | `--text-dim` | `#94a3b8` | Dim |
+| `--text-soft` | `#cbd5e1` | 표 헤더·보조 라벨 (`App.jsx` 인라인과 공유) |
 | `--link` | `#93c5fd` | Links |
 | `--accent` | `#60a5fa` | Accent / focus |
 

@@ -82,13 +82,13 @@ const ruleTh = {
   textAlign: "left",
   padding: "8px 10px",
   borderBottom: "1px solid var(--border-muted)",
-  color: "#cbd5e1",
+  color: "var(--text-soft)",
   fontWeight: 700
 };
 
 const ruleTd = {
   padding: "8px 10px",
-  borderBottom: "1px solid #0f172a",
+  borderBottom: "1px solid var(--bg-table-head)",
   color: "var(--text-primary)",
   verticalAlign: "top",
   lineHeight: 1.45
@@ -106,7 +106,7 @@ export default function App() {
   const [mode, setMode] = useState("single"); // "single" | "compare"
   const [reportMode, setReportMode] = useState("eng"); // "eng" | "lab"
   const [literatureMode, setLiteratureMode] = useState("fast"); // "fast" | "deep"
-  /** 젖음 대표 온도: auto = 액상선+30℃→BD 스냅, 그 외 BD 고정 격자(250–290) */
+  /** 젖음 대표 온도: auto = 액상선+30℃ 후 측정 DB(250–290℃)에 맞춤, 그 외 고정 온도 */
   const [wettingTempSelect, setWettingTempSelect] = useState("auto");
   const [showMetalsOnly, setShowMetalsOnly] = useState(true);
   const [favorites, setFavorites] = useState([]);
@@ -989,7 +989,7 @@ export default function App() {
               padding: "3px 12px",
               borderRadius: 999,
               border: "1px solid #334155",
-              background: "#0f172a"
+              background: "var(--bg-table-head)"
             }}
           >
             {aboutInfo ? `v${aboutInfo.version}` : "웹 UI"}
@@ -1064,7 +1064,7 @@ export default function App() {
               background: "var(--bg-elevated)",
               fontSize: 13,
               lineHeight: 1.6,
-              color: "#cbd5e1"
+              color: "var(--text-soft)"
             }}
           >
             <div style={{ fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>처리 개요</div>
@@ -1214,7 +1214,7 @@ export default function App() {
                   htmlFor="wetting-temp-select"
                   style={{ fontSize: 13, color: "#9ca3af", fontWeight: 600 }}
                 >
-                  젖음 예측 온도 (BD)
+                  젖음 예측 온도
                 </label>
                 <select
                   id="wetting-temp-select"
@@ -1224,7 +1224,7 @@ export default function App() {
                     background: "var(--bg-page)",
                     color: "#e5e7eb",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
+                    border: "1px solid var(--border-muted)",
                     fontSize: 13,
                     padding: "6px 10px",
                     minWidth: 200
@@ -1329,7 +1329,7 @@ export default function App() {
                       background: "var(--bg-page)",
                       color: "#e5e7eb",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
+                      border: "1px solid var(--border-muted)",
                       fontSize: 13,
                       padding: "3px 6px"
                     }}
@@ -1351,7 +1351,7 @@ export default function App() {
                       padding: "4px 8px",
                       borderRadius: 6,
                       border: "1px solid #7f1d1d",
-                      background: selectedFavoriteName ? "#7f1d1d" : "#1f2937",
+                      background: selectedFavoriteName ? "#7f1d1d" : "var(--border-muted)",
                       color: "white",
                       fontSize: 13,
                       cursor: selectedFavoriteName ? "pointer" : "default"
@@ -1376,8 +1376,8 @@ export default function App() {
                     padding: "3px 7px",
                     borderRadius: 6,
                     border: "1px solid #334155",
-                    background: "#0f172a",
-                    color: "#cbd5e1",
+                    background: "var(--bg-table-head)",
+                    color: "var(--text-soft)",
                     fontSize: 13,
                     cursor: "pointer"
                   }}
@@ -1409,7 +1409,7 @@ export default function App() {
                     borderRadius: 6,
                     border: comp[el]
                       ? "1px solid rgba(96, 165, 250, 0.65)"
-                      : "1px solid #1f2937",
+                      : "1px solid var(--border-muted)",
                     background: comp[el] ? "rgba(37, 99, 235, 0.12)" : "var(--bg-page)",
                     color: "#e5e7eb",
                     fontSize: 13,
@@ -1461,7 +1461,7 @@ export default function App() {
                 background: "var(--bg-page)",
                 color: "#e5e7eb",
                 borderRadius: 6,
-                border: "1px solid #1f2937",
+                border: "1px solid var(--border-muted)",
                 fontSize: 13,
                 padding: "6px 8px"
               }}
@@ -1498,7 +1498,7 @@ export default function App() {
                       flex: 1,
                       background: "var(--bg-page)",
                       borderRadius: 6,
-                      border: "1px solid #1f2937",
+                      border: "1px solid var(--border-muted)",
                       padding: "6px 8px",
                       color: "#e5e7eb"
                     }}
@@ -1512,7 +1512,7 @@ export default function App() {
                       padding: "6px 8px",
                       borderRadius: 6,
                       border: "1px solid #475569",
-                      background: "#1e293b",
+                      background: "var(--border-default)",
                       color: "#e5e7eb",
                       fontSize: 13,
                       cursor: "pointer"
@@ -1530,7 +1530,7 @@ export default function App() {
                   style={{
                     marginTop: 10,
                     marginBottom: 4,
-                    borderTop: "1px solid #1f2937",
+                    borderTop: "1px solid var(--border-muted)",
                     paddingTop: 8,
                     fontWeight: 600
                   }}
@@ -1573,7 +1573,7 @@ export default function App() {
                           background: "var(--bg-page)",
                           color: "#e5e7eb",
                           borderRadius: 6,
-                          border: "1px solid #1f2937",
+                          border: "1px solid var(--border-muted)",
                           fontSize: 13,
                           padding: "3px 6px"
                         }}
@@ -1595,7 +1595,7 @@ export default function App() {
                           padding: "4px 8px",
                           borderRadius: 6,
                           border: "1px solid #7f1d1d",
-                          background: selectedFavoriteNameB ? "#7f1d1d" : "#1f2937",
+                          background: selectedFavoriteNameB ? "#7f1d1d" : "var(--border-muted)",
                           color: "white",
                           fontSize: 13,
                           cursor: selectedFavoriteNameB ? "pointer" : "default"
@@ -1628,7 +1628,7 @@ export default function App() {
                         borderRadius: 6,
                         border: compB[el]
                           ? "1px solid rgba(96, 165, 250, 0.65)"
-                          : "1px solid #1f2937",
+                          : "1px solid var(--border-muted)",
                         background: compB[el] ? "rgba(37, 99, 235, 0.12)" : "var(--bg-page)",
                         color: "#e5e7eb",
                         fontSize: 13,
@@ -1678,7 +1678,7 @@ export default function App() {
                     background: "var(--bg-page)",
                     color: "#e5e7eb",
                     borderRadius: 6,
-                    border: "1px solid #1f2937",
+                    border: "1px solid var(--border-muted)",
                     fontSize: 13,
                     padding: "6px 8px"
                   }}
@@ -1717,7 +1717,7 @@ export default function App() {
                           flex: 1,
                           background: "var(--bg-page)",
                           borderRadius: 6,
-                          border: "1px solid #1f2937",
+                          border: "1px solid var(--border-muted)",
                           padding: "6px 8px",
                           color: "#e5e7eb"
                         }}
@@ -1731,7 +1731,7 @@ export default function App() {
                           padding: "6px 8px",
                           borderRadius: 6,
                           border: "1px solid #475569",
-                          background: "#1e293b",
+                          background: "var(--border-default)",
                           color: "#e5e7eb",
                           fontSize: 13,
                           cursor: "pointer"
@@ -1819,7 +1819,7 @@ export default function App() {
                   style={{
                     marginTop: 6,
                     padding: 8,
-                    border: "1px solid #1f2937",
+                    border: "1px solid var(--border-muted)",
                     borderRadius: 8,
                     background: "#0b1220",
                     maxHeight: 120,
@@ -1827,7 +1827,7 @@ export default function App() {
                   }}
                 >
                   {analysisLogs.map((x, i) => (
-                    <div key={`${x.t}-${i}`} style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.45 }}>
+                    <div key={`${x.t}-${i}`} style={{ fontSize: 13, color: "var(--text-soft)", lineHeight: 1.45 }}>
                       [{String(x.t).padStart(2, "0")}s] {x.msg}
                     </div>
                   ))}
@@ -1870,7 +1870,7 @@ export default function App() {
                     marginLeft: 6,
                     border: "1px solid #334155",
                     background: "#111827",
-                    color: "#cbd5e1",
+                    color: "var(--text-soft)",
                     borderRadius: 8,
                     padding: "4px 10px",
                     fontSize: 13,
@@ -2254,7 +2254,7 @@ export default function App() {
                           margin: 0,
                           paddingLeft: 18,
                           fontSize: 13,
-                          color: "#cbd5e1",
+                          color: "var(--text-soft)",
                           lineHeight: 1.5
                         }}
                       >
@@ -2655,7 +2655,7 @@ function CollapsibleSection({ title, open, onToggle, children, rightHint = "" })
           gap: 8,
           textAlign: "left",
           background: "#0b1220",
-          border: "1px solid #1f2937",
+          border: "1px solid var(--border-muted)",
           borderRadius: 8,
           color: "#e5e7eb",
           padding: "8px 10px",
@@ -2849,7 +2849,7 @@ function SourceListItem({ s }) {
           {text}
         </a>
       ) : (
-        <span style={{ color: "#cbd5e1" }}>{text}</span>
+        <span style={{ color: "var(--text-soft)" }}>{text}</span>
       )}
     </li>
   );
@@ -3310,7 +3310,7 @@ function CompareSummaryPair({ title, textA, textB, isLast }) {
     margin: first ? 0 : "12px 0 0 0",
     fontSize: 13,
     lineHeight: 1.65,
-    color: "#cbd5e1",
+    color: "var(--text-soft)",
     whiteSpace: "pre-line",
     wordBreak: "keep-all",
     overflowWrap: "anywhere"
@@ -3318,7 +3318,7 @@ function CompareSummaryPair({ title, textA, textB, isLast }) {
   const card = (accent) => ({
     padding: "12px 14px",
     borderRadius: 10,
-    border: "1px solid #1e293b",
+    border: "1px solid var(--border-default)",
     background: "#0b1220",
     borderLeft: `3px solid ${accent}`,
     minWidth: 0
@@ -3428,7 +3428,7 @@ function CompareView({ data, compA, compB }) {
 
   const compareLabelTd = {
     padding: "6px 8px 6px 2px",
-    borderBottom: "1px solid #0f172a",
+    borderBottom: "1px solid var(--bg-table-head)",
     whiteSpace: "nowrap",
     verticalAlign: "middle",
     color: "#e2e8f0",
@@ -3438,7 +3438,7 @@ function CompareView({ data, compA, compB }) {
   };
   const compareNumTd = {
     padding: "6px 6px",
-    borderBottom: "1px solid #0f172a",
+    borderBottom: "1px solid var(--bg-table-head)",
     fontVariantNumeric: "tabular-nums",
     verticalAlign: "middle"
   };
@@ -3583,7 +3583,7 @@ function CompareView({ data, compA, compB }) {
             border: "1px solid #334155",
             background: "#0b1220",
             fontSize: 13,
-            color: "#cbd5e1",
+            color: "var(--text-soft)",
             lineHeight: 1.5
           }}
         >
@@ -3719,7 +3719,7 @@ function CompareView({ data, compA, compB }) {
           marginTop: 8,
           marginBottom: 4,
           paddingTop: 12,
-          borderTop: "1px solid #1e293b"
+          borderTop: "1px solid var(--border-default)"
         }}
       >
         <CompareSummaryPair title="IMC 요약" textA={a?.imc_line} textB={b?.imc_line} />
@@ -3776,7 +3776,7 @@ function PropertyBars({ a, b }) {
       style={{
         marginTop: 6,
         paddingTop: 6,
-        borderTop: "1px solid #0f172a"
+        borderTop: "1px solid var(--bg-table-head)"
       }}
     >
       <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
@@ -4205,7 +4205,7 @@ function imcSubstrateVisuals(substrate) {
         padFill: "#dcc8a0",
         padStroke: "#92400e",
         padLabel: "Cu 패드 (ImmSn)",
-        finishFill: "#cbd5e1",
+        finishFill: "var(--text-soft)",
         finishLabel: "ImmSn 표면층"
       };
     default:
@@ -4294,14 +4294,14 @@ function ImcInterfaceCard({
         padding: 12,
         borderRadius: 10,
         border: "1px solid #334155",
-        background: "linear-gradient(180deg, #0f172a 0%, #020617 100%)"
+        background: "linear-gradient(180deg, var(--bg-table-head) 0%, var(--bg-page) 100%)"
       }}
     >
       <div style={{ fontSize: 13, color: "#e2e8f0", marginBottom: 8, fontWeight: 600 }}>
         IMC 계면 3D 단면(직관형)
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8 }}>
-        <label style={{ fontSize: 13, color: "#cbd5e1" }}>
+        <label style={{ fontSize: 13, color: "var(--text-soft)" }}>
           기판
           <select
             value={substrate}
@@ -4314,14 +4314,14 @@ function ImcInterfaceCard({
             <option>ImmSn</option>
           </select>
         </label>
-        <label style={{ fontSize: 13, color: "#cbd5e1" }}>
+        <label style={{ fontSize: 13, color: "var(--text-soft)" }}>
           TAL 모드
           <select value={talMode} onChange={(e) => onTalModeChange(e.target.value)} style={ctlStyle}>
             <option value="auto">AUTO(profile)</option>
             <option value="manual">사용자입력</option>
           </select>
         </label>
-        <label style={{ fontSize: 13, color: "#cbd5e1" }}>
+        <label style={{ fontSize: 13, color: "var(--text-soft)" }}>
           TAL 기준
           <select value={talRef} onChange={(e) => onTalRefChange(e.target.value)} style={ctlStyle}>
             <option value="liq">Liquidus</option>
@@ -4329,7 +4329,7 @@ function ImcInterfaceCard({
             <option value="delta">Liquidus+Δ</option>
           </select>
         </label>
-        <label style={{ fontSize: 13, color: "#cbd5e1" }}>
+        <label style={{ fontSize: 13, color: "var(--text-soft)" }}>
           ΔC
           <input
             type="number"
@@ -4342,7 +4342,7 @@ function ImcInterfaceCard({
             style={ctlStyle}
           />
         </label>
-        <label style={{ fontSize: 13, color: "#cbd5e1" }}>
+        <label style={{ fontSize: 13, color: "var(--text-soft)" }}>
           TAL(s)
           <input
             type="number"
@@ -4371,7 +4371,7 @@ function ImcInterfaceCard({
             background: "var(--bg-page)"
           }}
         >
-          <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 8, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: "var(--text-soft)", marginBottom: 8, fontWeight: 600 }}>
             솔더 벌크 미세구조(개념도)
           </div>
           <svg viewBox="0 0 360 180" style={{ width: "100%", border: "1px solid #60a5fa", borderRadius: 6, background: "#dbeafe" }}>
@@ -4419,14 +4419,14 @@ function ImcInterfaceCard({
             fontSize: 13
           }}
         >
-          <div style={{ color: "#cbd5e1", marginBottom: 8, fontWeight: 600 }}>범례 / 조성</div>
+          <div style={{ color: "var(--text-soft)", marginBottom: 8, fontWeight: 600 }}>범례 / 조성</div>
           {bulkLegend.map((x, i) => (
             <div key={`${x.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
               <span style={{ width: 10, height: 10, borderRadius: x.type === "grain" ? 2 : 999, background: x.color, flexShrink: 0 }} />
               <span style={{ color: "#e2e8f0", flex: 1 }}>{x.name}</span>
             </div>
           ))}
-          <div style={{ marginTop: 8, borderTop: "1px solid #1f2937", paddingTop: 8, color: "#cbd5e1" }}>
+          <div style={{ marginTop: 8, borderTop: "1px solid var(--border-muted)", paddingTop: 8, color: "var(--text-soft)" }}>
             <div style={{ marginBottom: 4, fontWeight: 600 }}>입력 조성 (wt%)</div>
             <div>Sn {Number(norm.Sn || 0).toFixed(1)} / Ag {visAg.toFixed(1)} / Cu {visCu.toFixed(1)}</div>
             {visBi > 0 ? <div>Bi {visBi.toFixed(1)}</div> : null}
@@ -4438,10 +4438,10 @@ function ImcInterfaceCard({
       </div>
 
       <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--border-default)", borderRadius: 8, background: "#f8fafc" }}>
-        <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 8, fontWeight: 600 }}>
+        <div style={{ fontSize: 13, color: "var(--text-soft)", marginBottom: 8, fontWeight: 600 }}>
           <span style={{ color: "#334155" }}>계면 IMC (Interfacial Intermetallic Compound) 구조</span>
         </div>
-        <div style={{ border: "1px solid #cbd5e1", borderRadius: 6, overflow: "hidden", background: "#ffffff" }}>
+        <div style={{ border: "1px solid var(--text-soft)", borderRadius: 6, overflow: "hidden", background: "#ffffff" }}>
           <svg viewBox="0 0 740 320" style={{ width: "100%", display: "block" }}>
             <rect x="0" y="0" width="740" height="160" fill="#dbeafe" />
             <polygon points="18,145 40,68 80,102 66,148 40,156" fill="#bfdbfe" stroke="#93c5fd" />
@@ -4484,7 +4484,7 @@ function ImcInterfaceCard({
               y={yCu3Top + hCu3Px / 2 + 5}
               textAnchor="middle"
               fontSize="13"
-              fill="#1f2937"
+              fill="var(--border-muted)"
               fontWeight="700"
             >
               Cu₃Sn(ε) ≈ {Math.max(0.08, cu3Um).toFixed(2)} um
@@ -4620,17 +4620,17 @@ function ReflowTuneBar({
         padding: 12,
         borderRadius: 10,
         border: "1px solid #334155",
-        background: "linear-gradient(180deg, #0f172a 0%, #020617 100%)"
+        background: "linear-gradient(180deg, var(--bg-table-head) 0%, var(--bg-page) 100%)"
       }}
     >
       <div style={{ fontSize: 14, color: "#e2e8f0", fontWeight: 600, marginBottom: 6 }}>리플로우 튜닝</div>
       <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 10px 0", lineHeight: 1.45 }}>
-        <strong style={{ color: "#cbd5e1" }}>위 그래프 바로 아래</strong>에서 수치를 바꾸면 곡선·구간색·요약 카드가
+        <strong style={{ color: "var(--text-soft)" }}>위 그래프 바로 아래</strong>에서 수치를 바꾸면 곡선·구간색·요약 카드가
         즉시 갱신됩니다. 조성에 맞춰 AUTO 프리셋이 선택되며, 1차 램프·프리히트(시간)·액상선 이상 유지·냉각·피크
         마진을 조절할 수 있습니다. TAL·S~L·Peak-5·IMC 블록에도 동일 프로파일이 반영됩니다.
       </p>
       <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-        프리셋(AUTO): <strong style={{ color: "#cbd5e1" }}>{presetName || "—"}</strong>
+        프리셋(AUTO): <strong style={{ color: "var(--text-soft)" }}>{presetName || "—"}</strong>
       </div>
       <div
         style={{
@@ -4640,7 +4640,7 @@ function ReflowTuneBar({
           alignItems: "end"
         }}
       >
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           피크 목표 (℃)
           <input
             type="number"
@@ -4652,7 +4652,7 @@ function ReflowTuneBar({
             style={{ ...ctlStyle, marginTop: 4 }}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           1차 램프 (℃/s)
           <input
             type="number"
@@ -4664,7 +4664,7 @@ function ReflowTuneBar({
             style={{ ...ctlStyle, marginTop: 4 }}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           프리히트 (s)
           <input
             type="number"
@@ -4676,7 +4676,7 @@ function ReflowTuneBar({
             style={{ ...ctlStyle, marginTop: 4 }}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           액상선 이상 유지 (s)
           <input
             type="number"
@@ -4688,7 +4688,7 @@ function ReflowTuneBar({
             style={{ ...ctlStyle, marginTop: 4 }}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           냉각 (℃/s)
           <input
             type="number"
@@ -4700,7 +4700,7 @@ function ReflowTuneBar({
             style={{ ...ctlStyle, marginTop: 4 }}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#cbd5e1", display: "block" }}>
+        <label style={{ fontSize: 12, color: "var(--text-soft)", display: "block" }}>
           피크 마진 (℃)
           <input
             type="number"
@@ -4762,7 +4762,7 @@ function ReflowCard({ solidus, liquidus, peak, modelPeak, profileMeta }) {
         style={{
           padding: 10,
           borderRadius: 10,
-          border: "1px solid #1f2937",
+          border: "1px solid var(--border-muted)",
           background: "var(--bg-page)"
         }}
       >
@@ -4801,7 +4801,7 @@ function ReflowCard({ solidus, liquidus, peak, modelPeak, profileMeta }) {
       style={{
         padding: 10,
         borderRadius: 10,
-        border: "1px solid #1f2937",
+        border: "1px solid var(--border-muted)",
         background: "var(--bg-page)"
       }}
     >
@@ -4869,7 +4869,7 @@ function RegulationCard({ norm }) {
       style={{
         padding: 10,
         borderRadius: 10,
-        border: "1px solid #1f2937",
+        border: "1px solid var(--border-muted)",
         background: "var(--bg-page)"
       }}
     >
@@ -4971,7 +4971,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
         padding: Math.round(12 * Math.min(sc, 1.25)),
         borderRadius: 10,
         border: "1px solid #334155",
-        background: "linear-gradient(180deg, #0f172a 0%, #020617 100%)"
+        background: "linear-gradient(180deg, var(--bg-table-head) 0%, var(--bg-page) 100%)"
       }}
     >
       <div
@@ -4995,7 +4995,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
               padding: "8px 14px",
               borderRadius: 8,
               border: "1px solid #475569",
-              background: "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)",
+              background: "linear-gradient(180deg, var(--border-default) 0%, var(--bg-table-head) 100%)",
               color: "#e2e8f0",
               fontSize: 13,
               fontWeight: 600,
@@ -5027,7 +5027,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           width={plotW}
           height={plotH}
           rx={6}
-          fill="#020617"
+          fill="var(--bg-page)"
           stroke="#334155"
           strokeWidth={1}
         />
@@ -5047,7 +5047,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
               y1={yy}
               x2={padX + plotW}
               y2={yy}
-              stroke="#1e293b"
+              stroke="var(--border-default)"
               strokeWidth={1}
             />
           );
@@ -5173,7 +5173,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
               padding: "6px 10px",
               borderRadius: 8,
               border: "1px solid #334155",
-              background: "#0f172a",
+              background: "var(--bg-table-head)",
               fontSize: Math.round(13 * Math.min(sc, 1.2)),
               color: "#e2e8f0"
             }}
