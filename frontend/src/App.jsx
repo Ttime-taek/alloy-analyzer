@@ -1305,8 +1305,8 @@ export default function App() {
                 type="button"
                 onClick={saveFavoriteA}
                 style={{
-                  minHeight: 36,
-                  padding: "6px 10px",
+                  minHeight: 44,
+                  padding: "10px 12px",
                   borderRadius: 6,
                   border: "1px solid var(--accent)",
                   background: "rgba(37, 99, 235, 0.35)",
@@ -1348,7 +1348,8 @@ export default function App() {
                     onClick={deleteFavoriteA}
                     disabled={!selectedFavoriteName}
                     style={{
-                      padding: "4px 8px",
+                      minHeight: 44,
+                      padding: "10px 12px",
                       borderRadius: 6,
                       border: "1px solid #7f1d1d",
                       background: selectedFavoriteName ? "#7f1d1d" : "var(--border-muted)",
@@ -1405,7 +1406,8 @@ export default function App() {
                   type="button"
                   onClick={() => handleElemClick("A", el)}
                   style={{
-                    padding: "6px 0",
+                    minHeight: 44,
+                    padding: "8px 0",
                     borderRadius: 6,
                     border: comp[el]
                       ? "1px solid rgba(96, 165, 250, 0.65)"
@@ -1551,8 +1553,8 @@ export default function App() {
                     type="button"
                     onClick={saveFavoriteB}
                     style={{
-                      minHeight: 36,
-                      padding: "6px 10px",
+                      minHeight: 44,
+                      padding: "10px 12px",
                       borderRadius: 6,
                       border: "1px solid #7c3aed",
                       background: "rgba(124, 58, 237, 0.25)",
@@ -1592,7 +1594,8 @@ export default function App() {
                         onClick={deleteFavoriteB}
                         disabled={!selectedFavoriteNameB}
                         style={{
-                          padding: "4px 8px",
+                          minHeight: 44,
+                          padding: "10px 12px",
                           borderRadius: 6,
                           border: "1px solid #7f1d1d",
                           background: selectedFavoriteNameB ? "#7f1d1d" : "var(--border-muted)",
@@ -1624,7 +1627,8 @@ export default function App() {
                       type="button"
                       onClick={() => handleElemClick("B", el)}
                       style={{
-                        padding: "6px 0",
+                        minHeight: 44,
+                        padding: "8px 0",
                         borderRadius: 6,
                         border: compB[el]
                           ? "1px solid rgba(96, 165, 250, 0.65)"
