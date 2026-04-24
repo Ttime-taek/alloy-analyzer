@@ -2901,8 +2901,8 @@ function ModeButton({ active, onClick, children, ariaSelected }) {
       style={{
         width: "100%",
         minWidth: 0,
-        minHeight: 40,
-        padding: "8px 12px",
+        minHeight: 44,
+        padding: "10px 14px",
         borderRadius: 999,
         border: active ? "1px solid var(--accent)" : "1px solid var(--border-muted)",
         background: active ? "rgba(37,99,235,0.3)" : "var(--bg-page)",
@@ -2924,8 +2924,8 @@ function SmallToggleButton({ active, onClick, label }) {
       type="button"
       onClick={onClick}
       style={{
-        minHeight: 36,
-        padding: "6px 10px",
+        minHeight: 44,
+        padding: "10px 12px",
         borderRadius: 999,
         border: active ? "1px solid var(--accent)" : "1px solid var(--border-muted)",
         background: active ? "rgba(37,99,235,0.3)" : "var(--bg-page)",
