@@ -8,7 +8,11 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
+
+# DummyAI 기반 회귀가 실제 API로 채워진 디스크 캐시에 덮어쓰이지 않도록 기본 비활성화.
+os.environ.setdefault("AI_CACHE_ENABLED", "0")
 from dataclasses import dataclass
 from typing import Any, Dict, List
 

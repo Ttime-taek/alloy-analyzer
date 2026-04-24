@@ -11,14 +11,14 @@ from .interp_pchip import interp_pchip_1d
 
 
 def snap_wetting_temp_to_bd_grid(target_c: float) -> float:
-    """Clamp to BD 범위(250–290℃) 뒤 가장 가까운 BD 입력 온도로 스냅."""
+    """250–290℃ 범위로 클램프한 뒤, 측정 DB와 동일한 입력 온도 목록에 가장 가깝게 스냅."""
     lo, hi = min(WETTING_TEMPS_C), max(WETTING_TEMPS_C)
     t = max(min(float(target_c), hi), lo)
     return float(min(WETTING_TEMPS_C, key=lambda x: abs(x - t)))
 
 
 def default_wetting_temp_c(liquidus: float) -> float:
-    """기본: 액상선 +30℃를 BD 격자에 맞춤(측정 DB와 동일 온도 축)."""
+    """기본: 액상선+30℃를 측정 DB 온도 축(250–290℃)에 맞춤."""
     return snap_wetting_temp_to_bd_grid(float(liquidus or 0.0) + 30.0)
 
 class PropertyModels:
@@ -145,7 +145,7 @@ class PropertyModels:
     @staticmethod
     def _idw_comp_weight(dist: float, comp: dict) -> float:
         """
-        Cu ~0.55–0.72 wt% 구간은 실측 격자가 성길 때 이웃 가중 전환이 급격해질 수 있음.
+        Cu ~0.55–0.72 wt% 구간은 실측 샘플이 성길 때 이웃 가중 전환이 급격해질 수 있음.
         거리 바닥(floor)과 멱을 살짝 올려 IDW 절벽을 완화.
         """
         floor = 1e-6
@@ -265,7 +265,7 @@ class PropertyModels:
         }
 
     def _predict_wetting_by_temperature(self, comp):
-        """BD와 동일한 온도 격자(250–290℃)마다 IDW 예측 행(실측 단위 Fmax/T0)."""
+        """측정 DB와 동일한 온도(250–290℃)마다 IDW 예측 행(실측 단위 Fmax/T0)."""
         rows = []
         for t in WETTING_TEMPS_C:
             try:
@@ -282,8 +282,8 @@ class PropertyModels:
     def _predict_wetting_details(self, comp, solidus, liquidus, peak=None, wetting_temp_c=None):
         """
         대표 젖음 행( fMAX / T0 / 점수 ).
-        - wetting_temp_c 가 있으면: 해당 값을 BD 격자로 스냅해 사용.
-        - 없으면: 액상선 +30℃ → BD 격자 스냅 (기본 공정 온도 프록시).
+        - wetting_temp_c 가 있으면: 해당 값을 측정 DB 온도(250–290℃)에 맞춤.
+        - 없으면: 액상선+30℃ 후 동일 축에 맞춤 (기본 공정 온도 프록시).
         peak 는 하위 호환용으로만 남김(젖음 온도 선택에는 사용하지 않음).
         """
         comp = self._ensure_sn(comp)

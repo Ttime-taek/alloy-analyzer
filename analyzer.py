@@ -11,8 +11,24 @@ from .utils import composition_distance
 from .phase import PhasePredictor
 from .models import PropertyModels
 from .ai_engine import AIEngine
+from .cerebras_melting import CerebrasMeltingDeltaEngine
 from .db_regression import predict_from_db
 from .melting_predictor import hybrid_melting_predict
+import os
+from . import ai_cache
+
+# DB 정확 일치 판정 임계값 — melting_predictor와 동일한 기준.
+_DB_EXACT_EPS = 1e-4
+
+# DB 정확 일치 시 AI를 어떻게 다룰지 결정하는 플래그:
+#   "cache_first" (기본): 캐시에 기존 AI 응답이 있으면 재사용, 없으면 AI 1회 호출 → 영구 저장
+#                        → 첫 호출 이후 품질/서술 완전 동일, API 0회. 가장 안전한 선택.
+#   "skip":              로컬 폴백만 사용 (규칙 기반 서술). API 완전 0회지만 서술 간결.
+#   "always":            DB 정확 일치여도 매번 정상 AI 호출 (= 기존 동작, 캐시만 적용).
+# 환경변수 AI_DB_EXACT_MODE=skip / always 로 전환 가능.
+_AI_DB_EXACT_MODE = os.environ.get("AI_DB_EXACT_MODE", "cache_first").strip().lower()
+if _AI_DB_EXACT_MODE not in ("cache_first", "skip", "always"):
+    _AI_DB_EXACT_MODE = "cache_first"
 
 
 # ------------------------------------------------------------
@@ -69,11 +85,48 @@ class AlloyAnalyzer:
         }
     )
 
+    @staticmethod
+    def canonical_element_symbol(sym: str) -> str:
+        """원소 기호를 Sn, Cu 형태로 통일(대소문자·공백 허용)."""
+        s = str(sym).strip()
+        if not s:
+            raise ValueError("빈 원소 기호입니다.")
+        if len(s) == 1:
+            return s.upper()
+        return s[0].upper() + s[1:].lower()
+
+    @classmethod
+    def validate_input_comp(cls, comp) -> None:
+        """
+        원시 조성 dict 검증. 실패 시 ValueError — API는 422, GUI는 메시지로 처리.
+        """
+        if not isinstance(comp, dict) or not comp:
+            raise ValueError("조성(comp)은 최소 한 원소 이상 필요합니다.")
+        tot = 0.0
+        for k, v in comp.items():
+            if not isinstance(k, str) or not str(k).strip():
+                raise ValueError("원소 기호는 비어 있지 않은 문자열이어야 합니다.")
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{k}: wt% 값은 숫자여야 합니다.")
+            if fv < 0:
+                raise ValueError(f"{k}: wt%는 0 이상이어야 합니다.")
+            tot += fv
+        if tot <= 0.0:
+            raise ValueError("모든 원소 wt%가 0이면 분석할 수 없습니다.")
+        for k in comp:
+            canon = cls.canonical_element_symbol(k)
+            if canon not in cls.KNOWN_PERIODIC_METALS:
+                raise ValueError(f"지원하지 않는 원소 기호: {str(k).strip()}")
+
     def __init__(self, solder_db, ai_engine=None):
         self.db = solder_db
         self.phase_predictor = PhasePredictor()
         self.models = PropertyModels()
         self.ai = ai_engine if ai_engine else AIEngine()
+        # 고상선/액상선 L6 델타 보정 전용(고속 추론). 사용 불가 시 휴리스틱으로 폴백.
+        self.melting_ai = CerebrasMeltingDeltaEngine()
 
         self.db_prepared = [
             {
@@ -515,7 +568,7 @@ class AlloyAnalyzer:
             return 217.0, 221.0, 246.0, 5, {"best_dist": 9999, "forced_db": False}
 
         solidus, liquidus, peak, detail = hybrid_melting_predict(
-            norm, self.db_prepared, ai_engine=self.ai
+            norm, self.db_prepared, ai_engine=self.melting_ai
         )
 
         # stage는 best_dist 기준으로 기존 stage 숫자 유지
@@ -575,7 +628,9 @@ class AlloyAnalyzer:
         )
 
     def wetting_grid_for_comp(self, comp):
-        """BD 250–290℃ 격자별 Fmax/T0 (IDW). 별도 API·지연 로드용."""
+        """250–290℃ 온도별 Fmax/T0 (IDW). 별도 API·지연 로드용."""
+        if comp:
+            self.validate_input_comp(comp)
         norm = self.normalize(comp) if comp else {}
         return self.models._predict_wetting_by_temperature(norm)
 
@@ -598,7 +653,8 @@ class AlloyAnalyzer:
                 except Exception:
                     pass
 
-        _p(8, "입력 조성 정규화 중...")
+        _p(8, "입력 조성 검증·정규화 중...")
+        self.validate_input_comp(comp)
         norm = self.normalize(comp)
         _p(16, "DB 최근접 합금 탐색 중...")
         best, score, conf = self.find_best_match(norm)
@@ -708,27 +764,72 @@ class AlloyAnalyzer:
 
         _p(78, "AI 상분석/요약 생성 중...")
         comp_str = ", ".join([f"{k}:{v:.2f}%" for k, v in comp.items()])
-        full_ai = self.ai.get_full_analysis(
-            norm,
-            comp_str,
-            {
-                "norm": norm,
-                "best": best,
-                "score": score,
-                "confidence": conf,
-                "confidence_overall": overall,
-                "solidus": solidus,
-                "liquidus": liquidus,
-                "peak": peak,
-                "risk": risk,
-                "melting_stage": stage,
-                "melting_detail": melting_detail,
-                "props": props,
-            },
-            knn,
-            mode=mode,
-            literature_mode=literature_mode,
-        )
+
+        # ─── 효율화 3단 게이트 ─────────────────────────────────────────────
+        # (B) DB 정확 일치: AI 호출 전부 스킵, 로컬 폴백으로 충분한 리포트 생성.
+        # (A) 디스크 캐시: 같은 조성+mode+literature_mode를 과거에 분석했으면 재사용.
+        # (C) miss 시에만 Gemini/Cerebras 호출 → 응답을 캐시에 저장.
+        ai_result_payload = {
+            "norm": norm,
+            "best": best,
+            "score": score,
+            "confidence": conf,
+            "confidence_overall": overall,
+            "solidus": solidus,
+            "liquidus": liquidus,
+            "peak": peak,
+            "risk": risk,
+            "melting_stage": stage,
+            "melting_detail": melting_detail,
+            "props": props,
+        }
+
+        ai_source = "api"            # api / cache / db_exact
+        cache_key = ai_cache.make_key(norm, mode=mode, literature_mode=literature_mode)
+        db_exact_hit = (score is not None and float(score) <= _DB_EXACT_EPS)
+
+        def _call_api_and_cache():
+            """실제 Gemini/Cerebras 호출 + 성공 시 캐시 저장. 결과(full_ai) 반환."""
+            out = self.ai.get_full_analysis(
+                norm, comp_str, ai_result_payload, knn,
+                mode=mode, literature_mode=literature_mode,
+            )
+            # AI가 실제 원격 호출되어 유의미한 결과를 줬을 때만 캐시.
+            # (로컬 폴백/오류 메시지는 캐시하지 않음 → 다음 기회에 재시도 가능)
+            if isinstance(out, dict) and bool(out.get("ai_used_this_request")):
+                ai_cache.put(cache_key, out)
+            return out
+
+        # 1) 비정확 조성: 캐시 우선, miss면 API 호출
+        # 2) 정확 조성 (db_exact_hit):
+        #    - cache_first(기본): 캐시 있으면 재사용, 없으면 AI 호출해서 만들고 저장
+        #                        → 첫 호출 이후 영구적으로 API 0회 + 품질 완전 동일
+        #    - skip: 로컬 폴백으로만 생성 (API 완전 0회, 서술 간결)
+        #    - always: 정확 일치 무시하고 항상 API 호출 (기존 동작)
+        cached = ai_cache.get(cache_key)
+
+        if isinstance(cached, dict):
+            full_ai = cached
+            ai_source = "cache"
+        elif db_exact_hit and _AI_DB_EXACT_MODE == "skip":
+            # 로컬 폴백 강제 모드: API 0회, 서술은 규칙 기반.
+            try:
+                full_ai = self.ai._build_local_fallback(
+                    norm, ai_result_payload, knn,
+                    literature_mode=literature_mode, mode=mode,
+                )
+                ai_source = "db_exact"
+            except Exception:
+                full_ai = None
+            if not isinstance(full_ai, dict):
+                # 폴백 실패 시 안전 복귀 — API 호출
+                full_ai = _call_api_and_cache()
+                ai_source = "api"
+        else:
+            # cache_first(기본), always, 또는 비정확 조성 — 모두 정상 AI 호출 경로.
+            # 단, AI 호출 성공 시 캐시 저장하므로 같은 조성은 두 번째부터 무료.
+            full_ai = _call_api_and_cache()
+            ai_source = "api"
         ai_summary_txt = str(full_ai.get("summary", "") or "") if isinstance(full_ai, dict) else ""
         ai_cited_sources = full_ai.get("ai_cited_sources", []) if isinstance(full_ai, dict) else []
         retrieved_candidates = full_ai.get("retrieved_candidates", []) if isinstance(full_ai, dict) else []
@@ -751,7 +852,12 @@ class AlloyAnalyzer:
             "[쉬운 요약 · Gemini 미연결]",  # 구버전 요약 헤더 호환
         )
         ai_used_this_request = False
-        if isinstance(full_ai, dict) and ("ai_used_this_request" in full_ai):
+        # 이번 요청에서 실제로 외부 API(Gemini/Cerebras)를 태운 경우만 True.
+        # - ai_source == "cache": 과거에 API로 받아 저장해둔 결과 재사용 → 이번 요청엔 호출 없음.
+        # - ai_source == "db_exact": DB 정확 일치라서 AI 호출 자체를 스킵 → False.
+        if ai_source in ("cache", "db_exact"):
+            ai_used_this_request = False
+        elif isinstance(full_ai, dict) and ("ai_used_this_request" in full_ai):
             ai_used_this_request = bool(full_ai.get("ai_used_this_request"))
         else:
             ai_used_this_request = bool(getattr(self.ai, "available", False)) and (
@@ -882,10 +988,21 @@ class AlloyAnalyzer:
             dopant_txt = "- 현재 조성 기준으로 공정 조건 최적화가 우선입니다."
 
         ai_sources = list(ai_cited_sources if ai_cited_sources else retrieved_candidates)
+        cache_age = None
+        if ai_source == "cache" and isinstance(full_ai, dict):
+            try:
+                cache_age = int(full_ai.get("_cache_age_sec")) if full_ai.get("_cache_age_sec") is not None else None
+            except (TypeError, ValueError):
+                cache_age = None
         if isinstance(evidence, dict):
             ai_ev = evidence.get("ai") if isinstance(evidence.get("ai"), dict) else {}
             ai_ev = dict(ai_ev)
             ai_ev["used_this_request"] = bool(ai_used_this_request)
+            ai_ev["source"] = ai_source  # "api" | "cache" | "db_exact"
+            ai_ev["db_exact_hit"] = bool(db_exact_hit)
+            ai_ev["db_exact_mode"] = _AI_DB_EXACT_MODE
+            if cache_age is not None:
+                ai_ev["cache_age_sec"] = cache_age
             evidence = dict(evidence)
             evidence["ai"] = ai_ev
         return {
@@ -915,4 +1032,5 @@ class AlloyAnalyzer:
             "ai_cited_sources": ai_cited_sources,
             "retrieved_candidates": retrieved_candidates,
             "ai_used_this_request": bool(ai_used_this_request),
+            "ai_source": ai_source,  # "api" | "cache" | "db_exact"
         }

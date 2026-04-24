@@ -52,7 +52,8 @@ SN_IN_PHASE = [
     (20.0, 185.0, 209.0),
     (30.0, 158.0, 195.0),
     (40.0, 120.0, 175.0),
-    (48.0, 117.0, 143.0),
+    # 48wt%In: 공정(52%In, 118℃) 직전 — liquidus는 과대(143) 대신 상태도에 맞게 ~122℃
+    (48.0, 117.0, 122.0),
     (52.0, 117.0, 117.0),
     (60.0, 118.0, 125.0),
     (70.0, 130.0, 145.0),
@@ -85,7 +86,7 @@ SN_CU_PHASE = [
 SN_SB_PHASE = [
     (0.0,  231.0, 231.0),
     (5.0,  235.0, 240.0),
-    (10.0, 245.0, 251.0),
+    (10.0, 240.0, 246.0),
     (20.0, 261.0, 270.0),
     (30.0, 275.0, 310.0),
 ]
@@ -248,15 +249,27 @@ def _classify(norm):
 
     non_sn_maj = max(bi, inp, pb, zn)   # 주요 저융점 원소
 
-    if pb > 5:
+    # Pb 1% 이상은 SnPb 경로(저-Pb Sn97.8Pb2.2 등 상용 커버리지). 1% 미만은 불순물 취급.
+    if pb >= 1:
         return "SnPb"
+    # Bi > 5%부터 Sn-Bi 계열. (Bi ≤ 5%인 상용 SAC305+Bi / SAC0307+Bi 4원계는
+    # SAC 경로에서 전담 — 하단 SAC 조건 참고)
     if bi > 5 and inp == 0 and pb == 0:
         return "SnBi"
-    if inp > 5 and bi == 0 and pb == 0:
+    # Sn-In: Bi 미량(≤1%)까진 허용. In≥5이면 In 강하가 지배하므로 SnIn 경로.
+    # (단, Ag>0 + In≥5는 Sn-Ag 반응도 병존 → SnAg 경로에서 In/Bi 보정 처리.)
+    if inp > 5 and bi <= 1 and pb == 0 and ag == 0:
         return "SnIn"
-    if zn > 3 and bi == 0:
+    # Sn-Zn-Bi 3원계 (Bi ≤ 5%): Sn8Zn3Bi 등 상용 조성 — Bi 없음을 요구하던 기존 조건이
+    # 54°C 규모 오차 발생시켜 완화.
+    if zn > 3 and bi <= 5:
         return "SnZn"
-    if sn > 80 and ag > 0 and cu > 0 and bi < 3 and inp == 0:
+    # SAC 4원계 커버리지:
+    # - 이전(bi < 3)은 boundary에서 Bi=3.0%를 "other"로 떨궈 L2(상태도)를 죽이고
+    #   L4(CALPHAD)가 지배하게 만듦 → 고상선 +20~30°C 과대평가 원인.
+    # - Sn-Ag-Cu-Bi(Bi ≤ 5%) 상용 조성은 SAC 반응이 주도하고 Bi가 공정 depression을
+    #   제공하는 구조라 SAC 경로에서 처리하는 편이 훨씬 정확.
+    if sn > 80 and ag > 0 and cu > 0 and bi <= 5.0 and inp == 0:
         return "SAC"
     if sn > 80 and ag > 0 and cu == 0:
         return "SnAg"
@@ -288,10 +301,12 @@ def _phase_diagram_predict(norm, family):
         sol, liq = _interp(eff_bi, SN_BI_PHASE)
 
         # Ag 존재 시 삼원계 공정점(139°C) 인력 보정
-        # Sn-Ag-Bi 삼원계: Bi >= 10%, Ag >= 1% → solidus 139°C로 수렴 (문헌)
+        # Sn-Ag-Bi 삼원계: Bi≥10%, Ag≥1%에서 solidus 139°C 공정점으로 빠르게 수렴 (문헌)
+        # 기존 (ag/3·bi/20) 계수는 Sn3Ag15Bi(실측 139°C)에서 pull≈0.75에 그쳐 +10°C
+        # 오차. 실측 정합을 위해 수렴 속도(ag/2.5·bi/15) 및 최대 가중(0.97) 상향.
         if ag >= 1.0 and bi >= 10.0:
-            pull  = min(1.0, (ag / 3.0) * (bi / 20.0))  # Ag·Bi 함량에 비례
-            sol   = sol * (1.0 - pull * 0.9) + 139.0 * (pull * 0.9)
+            pull  = min(1.0, (ag / 2.5) * (bi / 15.0))
+            sol   = sol * (1.0 - pull * 0.97) + 139.0 * (pull * 0.97)
         elif ag > 0:
             # 소량 Ag: liquidus 소폭 상승만
             liq_adj = min(ag * 12.5, 20.0)
@@ -331,9 +346,12 @@ def _phase_diagram_predict(norm, family):
     # ── Sn-Zn 계 ─────────────────────────────────────────────────────────────
     if family == "SnZn":
         sol, liq = _interp(zn, SN_ZN_PHASE)
+        # Sn-Zn-Bi 3원계 Bi depression: 상업 조성 Sn8Zn3Bi(실측 190/197) 정합.
+        # 기존 liquidus만 depression하던 식에 solidus 하강도 추가.
         if bi > 0:
+            sol -= bi * 2.7
             liq -= bi * 2.0
-        return sol, liq, 0.85
+        return sol, liq, 0.82
 
     # ── SAC 삼원계 ────────────────────────────────────────────────────────────
     if family == "SAC":
@@ -348,10 +366,20 @@ def _phase_diagram_predict(norm, family):
         if cu > 0.7:
             liq += (cu - 0.7) * 9.0
 
-        # Bi 소량 첨가 효과
+        # Bi 소량 첨가 효과 (SAC 4원계: Bi ≤ 5%)
+        # - 정상 SAC(Ag≈3%)에서는 Ag3Sn/Cu6Sn5 IMC 그물이 Bi의 solidus 하강을 일부 완화
+        #   (계수 ≈ 1.8 °C/%Bi) → Sn3.0Ag0.5Cu3Bi 실측 209°C와 정합.
+        # - 저-Ag(Ag < 1.5%: SAC0307+Bi, Sn-Cu-Bi 계열) 쪽은 Ag3Sn 기여가 작고
+        #   Sn-Cu-Bi 삼원 공정 반응이 지배 → depression이 조금 더 강함
+        #   (문헌·실측 기준 ≈ 2.6 °C/%Bi)
+        #   예: Sn-0.3Ag-0.5Cu-3Bi 실측 solidus ≈ 208°C.
         if bi > 0:
-            sol -= bi * 1.8
+            bi_sol_coef = 2.6 if ag < 1.5 else 1.8
+            sol -= bi * bi_sol_coef
             liq -= bi * 0.9
+            # 저-Ag + Bi에서 Cu가 액상선을 약간 더 끌어올림 (Cu6Sn5 재용해 지연)
+            if ag < 1.5 and cu > 0:
+                liq -= bi * 0.25 * min(1.0, cu / 0.7)
             sol  = max(sol, 200.0)
 
         # In 소량 첨가 효과
@@ -366,11 +394,23 @@ def _phase_diagram_predict(norm, family):
 
         return sol, liq, 0.90
 
-    # ── Sn-Ag 이원계 ─────────────────────────────────────────────────────────
+    # ── Sn-Ag 이원계 (± In, Bi 소량) ────────────────────────────────────────
     if family == "SnAg":
         sol, liq = _interp(ag, SN_AG_PHASE)
         if sb > 0:
             liq += sb * 2.0
+        # Sn-Ag-In 저·중 In(≤~10%): Sn-rich 영역에서 In은 solidus를 공격적으로 낮춤
+        # (Ag3Sn 형성이 Sn-In 공정점 반응을 완전히 차단하지 못함).
+        # Sn3.5Ag0.5Bi3In(실측 207/214), Sn3.5Ag0.5Bi8In(실측 198/210) 정합 계수.
+        if inp > 0:
+            sol -= inp * 3.0
+            liq -= inp * 1.4
+            sol  = max(sol, 190.0)
+        # Sn-Ag-Bi 소량(Bi ≤ 5%): Ag3Sn IMC와 Bi-solidus-depression의 공존.
+        if bi > 0:
+            sol -= bi * 2.5
+            liq -= bi * 1.2
+            sol  = max(sol, 170.0)
         return sol, liq, 0.85
 
     # ── Sn-Cu 이원계 ─────────────────────────────────────────────────────────
@@ -454,8 +494,43 @@ def _calphad_approx(norm, family):
     return sol_calphad, liq_calphad, 0.55
 
 
-# solder_db 행과의 composition_distance 가 이 값 이하면 **100% BD 일치**로 본다.
-# (부동소수점·정규화 잔차 허용) → L2/L3/L4·plateau·물리 보정 없이 BD 고상/액상 그대로 사용.
+def _anchor_binary_eutectic_mixtures(norm, family, sol, liq):
+    """
+    Sn-Cu / Sn-Zn / Sn-Sb 공정부 근처에서 L1 DB 이웃·KNN 혼합으로 생기는
+    고상·액상 과대 보정을 완화(ASM 공정점에 맞춤).
+    """
+    try:
+        cu = float(norm.get("Cu", 0) or 0.0)
+        zn = float(norm.get("Zn", 0) or 0.0)
+        sb = float(norm.get("Sb", 0) or 0.0)
+    except (TypeError, ValueError):
+        return float(sol), float(liq)
+    s = float(sol)
+    l = float(liq)
+    if family == "SnCu" and 0.63 <= cu <= 0.78:
+        w = _smoothstep01((cu - 0.63) / 0.12) * (1.0 - _smoothstep01((cu - 0.78) / 0.06))
+        tgt = 227.0
+        bs = 0.50 * w
+        bl = min(0.97, 0.70 + 0.30 * w)
+        s = s * (1.0 - bs) + tgt * bs
+        l = l * (1.0 - bl) + tgt * bl
+    elif family == "SnZn" and 8.2 <= zn <= 9.8:
+        w = _smoothstep01((zn - 8.2) / 0.35) * (1.0 - _smoothstep01((zn - 9.8) / 0.25))
+        ts, tl = 198.5, 198.5
+        b = 0.52 * w
+        s = s * (1.0 - b) + ts * b
+        l = l * (1.0 - b) + tl * b
+    elif family == "SnSb" and 8.8 <= sb <= 11.2:
+        w = _smoothstep01((sb - 8.8) / 0.45) * (1.0 - _smoothstep01((sb - 11.2) / 0.35))
+        ts, tl = 240.0, 246.0
+        b = 0.35 + 0.58 * w
+        s = s * (1.0 - b) + ts * b
+        l = l * (1.0 - b) + tl * b
+    return s, l
+
+
+# solder_db 행과의 composition_distance 가 이 값 이하면 **DB 직접 일치**로 본다.
+# (부동소수점·정규화 잔차 허용) → L2/L3/L4·plateau·물리 보정 없이 DB 고상/액상 그대로 사용.
 DB_EXACT_MATCH_EPS = 1e-4
 
 
@@ -499,7 +574,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     db_exact_match = best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
 
     if db_exact_match:
-        # BD 100% 일치: 모델(L2/L3/L4)·plateau·물리 보정·AI를 섞지 않음
+        # DB 직접 일치: 모델(L2/L3/L4)·plateau·물리 보정·AI를 섞지 않음
         final_sol = float(best_item["solidus"])
         final_liq = float(best_item["liquidus"])
         layers = [(final_sol, final_liq, 1.0, "L1:DB_exact")]
@@ -538,7 +613,8 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             l3_sol  = sum(item["solidus"]  * (1.0/(d+1e-6)) for d, item in knn5) / w_total
             l3_liq  = sum(item["liquidus"] * (1.0/(d+1e-6)) for d, item in knn5) / w_total
             l3_conf = math.exp(-knn5[0][0] * 0.6)
-            l3_w    = l3_conf * (0.4 if is_simple and l2_sol is not None else 1.2)
+            # 이원계+L2가 있을 때 KNN(L3) 비중이 크면 공정부 근처에서 액상선이 과대(예: Sn-Cu 227→231)
+            l3_w    = l3_conf * (0.08 if is_simple and l2_sol is not None else 1.2)
         else:
             l3_sol, l3_liq, l3_w = 217.0, 221.0, 0.1
 
@@ -567,6 +643,8 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         else:
             final_sol = sum(s * w for s, _, w, _ in layers) / total_w
             final_liq = sum(l * w for _, l, w, _ in layers) / total_w
+
+        final_sol, final_liq = _anchor_binary_eutectic_mixtures(norm, family, final_sol, final_liq)
 
         # ─── L6: AI 델타 보정 ────────────────────────────────────────────────
         l6_delta_sol, l6_delta_liq = 0.0, 0.0

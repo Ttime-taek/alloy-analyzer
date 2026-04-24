@@ -2122,11 +2122,11 @@ class AlloyGUI:
                         _wt_basis = ""
                         if props.get("wetting_temp_basis") == "auto_liq_plus_30" and props.get("wetting_temp_target_c") is not None:
                             _wt_basis = (
-                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→BD "
+                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→측정 DB "
                                 f"{self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
                         elif props.get("wetting_temp_basis") == "user":
-                            _wt_basis = "   |   기준: 선택 온도(BD 스냅)"
+                            _wt_basis = "   |   기준: 선택 온도(측정 DB 맞춤)"
                         _row(
                             "젖음(예측)",
                             f"fMAX {self._fmt_num(props.get('wetting_fmax_pred_mn'),2)} mN   /   "
@@ -3039,7 +3039,7 @@ class AlloyGUI:
             fig.patch.set_facecolor("#1f2937")
             ax.set_facecolor("#111827")
 
-            # 격자
+            # 극좌표 눈금
             ax.set_thetagrids([t * 180 / math.pi for t in theta], labels)
             for lbl in ax.get_xticklabels():
                 lbl.set_color("#9ca3af")

@@ -91,7 +91,7 @@ def classify_eutectic(comp):
 # ================================================================
 _raw_db = [
     {"name": "Sn3.5Ag0.7Cu", "comp": {"Ag": 3.5, "Cu": 0.7, "Sn": 95.8}, "solidus": 217, "liquidus": 218},
-    {"name": "Sn0.7Cu", "comp": {"Cu": 0.7, "Sn": 99.3}, "solidus": 227, "liquidus": 231},
+    {"name": "Sn0.7Cu", "comp": {"Cu": 0.7, "Sn": 99.3}, "solidus": 227, "liquidus": 227},
     {"name": "Sn8.0Zn3.0Bi", "comp": {"Zn": 8.0, "Bi": 3.0, "Sn": 89.0}, "solidus": 190, "liquidus": 197},
     {"name": "Sn3.5Ag", "comp": {"Ag": 3.5, "Sn": 96.5}, "solidus": 221, "liquidus": 221},
     {"name": "Sn0.3Ag0.2Cu", "comp": {"Ag": 0.3, "Cu": 0.2, "Sn": 99.5}, "solidus": 217, "liquidus": 270},
@@ -108,7 +108,7 @@ _raw_db = [
     {"name": "Sn57.8Bi0.2Ag", "comp": {"Bi": 57.8, "Ag": 0.2, "Sn": 42.0}, "solidus": 136, "liquidus": 143},
     {"name": "Sn3.9Ag0.6Cu", "comp": {"Ag": 3.9, "Cu": 0.6, "Sn": 95.5}, "solidus": 217, "liquidus": 218},
     {"name": "Sn3.5Ag0.5Bi8.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 8.0, "Sn": 88.0}, "solidus": 198, "liquidus": 210},
-    {"name": "Sn10Sb", "comp": {"Sb": 10.0, "Sn": 90.0}, "solidus": 245, "liquidus": 251},
+    {"name": "Sn10Sb", "comp": {"Sb": 10.0, "Sn": 90.0}, "solidus": 240, "liquidus": 246},
     {"name": "Sn100", "comp": {"Sn": 100.0}, "solidus": 231.9, "liquidus": 231.9},
     {"name": "Sn0.3Ag0.7Cu", "comp": {"Ag": 0.3, "Cu": 0.7, "Sn": 99.0}, "solidus": 217, "liquidus": 227},
     {"name": "Sn63Pb37", "comp": {"Sn": 63.0, "Pb": 37.0}, "solidus": 183, "liquidus": 183},

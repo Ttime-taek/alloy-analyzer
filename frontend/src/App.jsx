@@ -122,11 +122,11 @@ export default function App() {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [compareResult, setCompareResult] = useState(null);
-  /** BD 온도별 표는 기본 분석에 포함하지 않음 — 별도 로드 */
+  /** 온도별 젖음 표(250–290℃)는 기본 분석에 포함하지 않음 — 별도 로드 */
   const [wettingGridRows, setWettingGridRows] = useState(null);
   const [wettingGridLoading, setWettingGridLoading] = useState(false);
   const [wettingGridError, setWettingGridError] = useState("");
-  /** 온도별 젖음(격자) 블록 접기/펼치기 — 기본은 접음 */
+  /** 온도별 젖음 블록 접기/펼치기 — 기본은 접음 */
   const [wettingSectionOpen, setWettingSectionOpen] = useState(false);
   /** 리플로우: 피크 온도 + 구간 튜닝 (데스크톱 peak-based 템플릿과 동일) */
   const [reflowPeakUser, setReflowPeakUser] = useState(null);
@@ -1982,7 +1982,7 @@ export default function App() {
                     variant="peak"
                   />
                   <SummaryCard
-                    label="젖음 Fmax (BD IDW)"
+                    label="젖음 Fmax (IDW·측정 DB)"
                     value={formatWettingFmaxPrimary(result.props)}
                     variant="wetting"
                   />
@@ -1994,7 +1994,7 @@ export default function App() {
                 </div>
                 <SummaryWettingTensileFootnotes />
                 <CollapsibleSection
-                  title="온도별 젖음 (BD Fmax·T₀)"
+                  title="온도별 젖음 (Fmax·T₀)"
                   open={wettingSectionOpen}
                   onToggle={() => setWettingSectionOpen((v) => !v)}
                 >
@@ -2068,7 +2068,7 @@ export default function App() {
                     variant="bestMatch"
                   />
                   <SummaryCard
-                    label="젖음 Fmax (BD IDW)"
+                    label="젖음 Fmax (IDW·측정 DB)"
                     value={formatWettingFmaxPrimary(result.props)}
                     variant="wetting"
                   />
@@ -2080,7 +2080,7 @@ export default function App() {
                 </div>
                 <SummaryWettingTensileFootnotes />
                 <CollapsibleSection
-                  title="온도별 젖음 (BD Fmax·T₀)"
+                  title="온도별 젖음 (Fmax·T₀)"
                   open={wettingSectionOpen}
                   onToggle={() => setWettingSectionOpen((v) => !v)}
                 >
@@ -2679,19 +2679,22 @@ function AiSessionUsageRow({ usage }) {
   const aiUsed = Number(snap.full_analysis_ai_used ?? 0) || 0;
   const fallbacks = Number(snap.full_analysis_fallbacks ?? 0) || 0;
   const qerr = Number(snap.ask_quota_errors ?? 0) || 0;
+  const cerebrasOk = Number(snap.ask_cerebras_success ?? 0) || 0;
+  const cerebrasTry = Number(snap.ask_cerebras_fallback ?? 0) || 0;
   const quotaLimited = qerr > 0 || Boolean(snap.quota_limited);
   const quotaTitle =
     quotaLimited && qerr > 0
-      ? `AI 호출이 한도에 도달한 횟수: ${qerr}. 수치·DB 분석은 그대로 반영됩니다.`
+      ? `AI 호출이 한도에 도달한 횟수: ${qerr}. Cerebras 폴백이 활성화되어 있으면 자동 전환됩니다.`
       : quotaLimited
-        ? "쿼터 한도로 AI 문단이 생략될 수 있습니다. 수치·DB 분석은 정상입니다."
+        ? "쿼터 한도로 AI 문단이 생략될 수 있습니다. Cerebras 폴백이 활성화되어 있으면 자동 전환됩니다."
         : undefined;
   const quotaLabel =
     quotaLimited && qerr > 0
       ? `AI 호출 한도 · ${qerr}회`
       : "AI 호출 제한";
-  const showSessionLine = calls > 0 || aiUsed > 0 || fallbacks > 0;
-  if (!showSessionLine && !quotaLimited) return null;
+  const showSessionLine = calls > 0 || aiUsed > 0 || fallbacks > 0 || cerebrasOk > 0;
+  const showCerebras = cerebrasOk > 0 || cerebrasTry > 0;
+  if (!showSessionLine && !quotaLimited && !showCerebras) return null;
   return (
     <>
       {showSessionLine ? (
@@ -2703,7 +2706,8 @@ function AiSessionUsageRow({ usage }) {
           }}
         >
           AI 세션: 요청 {calls} / AI {aiUsed}
-          {fallbacks > 0 ? ` / 폴백 ${fallbacks}` : ""}
+          {fallbacks > 0 ? ` / 로컬 폴백 ${fallbacks}` : ""}
+          {cerebrasOk > 0 ? ` / Cerebras ${cerebrasOk}` : ""}
         </span>
       ) : null}
       {quotaLimited ? (
@@ -2722,6 +2726,22 @@ function AiSessionUsageRow({ usage }) {
           {quotaLabel}
         </span>
       ) : null}
+      {showCerebras ? (
+        <span
+          title={`Gemini가 한도/오류일 때 Cerebras로 자동 전환된 횟수: 시도 ${cerebrasTry} / 성공 ${cerebrasOk}.`}
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            padding: "3px 10px",
+            borderRadius: 6,
+            border: "1px solid #4338ca",
+            background: "#312e81",
+            color: "#e0e7ff"
+          }}
+        >
+          Cerebras 폴백 · {cerebrasOk}회
+        </span>
+      ) : null}
     </>
   );
 }
@@ -2732,32 +2752,38 @@ function AiModeBadge({ result }) {
     summary.startsWith("[로컬 하이브리드 요약]") ||
     summary.startsWith("[쉬운 요약 · 로컬 전용]") ||
     summary.startsWith("[쉬운 요약 · Gemini 미연결]");
+  const rawMode = String(result?.ai_mode || "").toLowerCase();
+  const isCerebras = rawMode === "cerebras";
+  const isCache = rawMode === "cache" || String(result?.ai_source || "").toLowerCase() === "cache";
   const used = typeof result?.ai_used_this_request === "boolean"
     ? result.ai_used_this_request
-    : (result?.ai_mode
-      ? result.ai_mode === "gemini"
+    : (rawMode
+      ? rawMode === "gemini" || rawMode === "cerebras" || rawMode === "cache"
       : !isLocalSummary);
-  const mode = used ? "gemini" : "local";
-  const isGemini = mode === "gemini";
+  const mode = isCerebras ? "cerebras" : (isCache ? "cache" : (used ? "gemini" : "local"));
+  const palette =
+    mode === "cerebras"
+      ? { border: "#4338ca", bg: "#4f46e5", title: "Gemini 한도/오류로 인해 이번 요청은 Cerebras 폴백으로 응답되었습니다.", label: "✓ 이번 요청: Cerebras 폴백 (AI+DB)" }
+      : mode === "cache"
+        ? { border: "#0e7490", bg: "#0891b2", title: "이전에 Gemini로 생성한 AI 응답을 디스크 캐시에서 재사용했습니다. 이번 요청에는 외부 API를 호출하지 않았습니다.", label: "✓ 이번 요청: AI 응답 캐시 재사용" }
+        : mode === "gemini"
+          ? { border: "#14532d", bg: "#16a34a", title: "Gemini 요약·문단이 포함된 하이브리드 결과입니다.", label: "✓ 이번 요청: AI+DB 하이브리드 분석" }
+          : { border: "#9a3412", bg: "#ea580c", title: "융점·상분석·IMC 등은 DB/규칙으로 계산되었습니다. AI 문단은 쿼터·설정에 따라 생략될 수 있습니다.", label: "⚠ 이번 요청: DB/규칙 기반 분석" };
   return (
     <span
-      title={
-        isGemini
-          ? "Gemini 요약·문단이 포함된 하이브리드 결과입니다."
-          : "융점·상분석·IMC 등은 DB/규칙으로 계산되었습니다. AI 문단은 쿼터·설정에 따라 생략될 수 있습니다."
-      }
+      title={palette.title}
       style={{
         fontSize: 13,
         padding: "3px 10px",
         borderRadius: 999,
-        border: isGemini ? "1px solid #14532d" : "1px solid #9a3412",
-        background: isGemini ? "#16a34a" : "#ea580c",
+        border: `1px solid ${palette.border}`,
+        background: palette.bg,
         color: "white",
         fontWeight: 700,
         letterSpacing: 0.2
       }}
     >
-      {isGemini ? "✓ 이번 요청: AI+DB 하이브리드 분석" : "⚠ 이번 요청: DB/규칙 기반 분석"}
+      {palette.label}
     </span>
   );
 }
@@ -2766,6 +2792,12 @@ function friendlyAiStatusMessage(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
   if (/^연결됨$/i.test(s)) return "";
+  if (/Cerebras 폴백/i.test(s)) {
+    if (/쿼터|429/i.test(s)) {
+      return "Gemini 한도(429) 도달 — Cerebras로 자동 전환되어 응답을 생성했습니다.";
+    }
+    return "Gemini 호출 오류 — Cerebras 폴백으로 응답을 생성했습니다.";
+  }
   if (/쿼터.*429|429.*쿼터|AI 쿼터 초과/i.test(s)) {
     return "AI 호출 한도에 도달해 일부 문단은 로컬 요약으로 대체되었습니다.";
   }
@@ -2783,18 +2815,22 @@ function AiStatusDetail({ result }) {
   if (!status || /^연결됨$/i.test(status)) return null;
   const friendly = friendlyAiStatusMessage(status);
   if (!friendly) return null;
+  const isCerebras = /Cerebras/i.test(status);
+  const palette = isCerebras
+    ? { fg: "#e0e7ff", bg: "#312e81", border: "#4338ca", title: "Gemini 대신 Cerebras 폴백으로 응답이 생성되었습니다. 수치·DB 분석은 그대로 반영됩니다." }
+    : { fg: "#fef3c7", bg: "#7c2d12", border: "#b45309", title: "수치·DB 분석 결과는 그대로 사용할 수 있습니다." };
   return (
     <span
       style={{
         fontSize: 13,
-        color: "#fef3c7",
-        background: "#7c2d12",
-        border: "1px solid #b45309",
+        color: palette.fg,
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
         borderRadius: 6,
         padding: "3px 8px",
         fontWeight: 600
       }}
-      title="수치·DB 분석 결과는 그대로 사용할 수 있습니다."
+      title={palette.title}
     >
       {friendly}
     </span>
@@ -2910,7 +2946,7 @@ const SUMMARY_VARIANT_HINT = {
   liquidus: "완전 액상(추정)",
   peak: "DSC/DTA 등 주요 열역학 신호(추정)",
   wetting:
-    "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 BD 온도(또는 자동) 선택 후 분석",
+    "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 예측 온도(자동 또는 250–290℃) 선택 후 분석",
   tensileDb: "물성 DB 최근접 합금의 인장강도(MPa)"
 };
 
@@ -2958,7 +2994,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
     const hint =
       source === "Heuristic"
         ? "젖음: 측정 DB 보간(IDW) 없이 휴리스틱만 사용했습니다. 온도별 표는 IDW 성공 시에만 의미가 있습니다."
-        : "온도별 Fmax·T₀ 전체 격자는 기본 분석에 포함하지 않습니다. 아래에서 불러오세요.";
+        : "온도별 Fmax·T₀ 전체 표는 기본 분석에 포함하지 않습니다. 아래에서 불러오세요.";
     return (
       <div style={{ marginBottom: 16 }}>
         <div
@@ -2991,7 +3027,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
                 cursor: loadPending ? "wait" : "pointer"
               }}
             >
-              {loadPending ? "BD 온도별 표 불러오는 중…" : "BD 온도별 Fmax·T₀ 표 불러오기"}
+              {loadPending ? "온도별 젖음 표 불러오는 중…" : "온도별 Fmax·T₀ 표 불러오기"}
             </button>
             {loadError ? (
               <span style={{ fontSize: 12, color: "#f97316" }}>{loadError}</span>
@@ -3047,7 +3083,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
               cursor: loadPending ? "wait" : "pointer"
             }}
           >
-            {loadPending ? "새로고침 중…" : "격자 다시 불러오기"}
+            {loadPending ? "새로고침 중…" : "온도별 표 다시 불러오기"}
           </button>
         ) : null}
       </div>
@@ -3096,7 +3132,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
         <p style={{ fontSize: 12, color: "#f97316", margin: "8px 0 0 0" }}>{loadError}</p>
       ) : null}
       <p style={{ fontSize: 11, color: "#64748b", margin: "8px 0 0 0", lineHeight: 1.45 }}>
-        높은 Fmax·낮은 T₀가 일반적으로 유리합니다. 상단 카드는 선택한 BD 스냅 온도에서의 대표값입니다.
+        높은 Fmax·낮은 T₀가 일반적으로 유리합니다. 상단 카드는 선택한 예측 온도(측정 DB 250–290℃에 맞춘 값)에서의 대표값입니다.
       </p>
     </div>
   );
@@ -3411,8 +3447,8 @@ function buildCompareHints(a, b) {
   if (Number.isFinite(fmaxA) && Number.isFinite(fmaxB) && Math.abs(fmaxB - fmaxA) > 0.05) {
     hints.push(
       fmaxB > fmaxA
-        ? `동일 BD 온도 기준 예측 Fmax는 B가 약 ${(fmaxB - fmaxA).toFixed(2)} mN 더 큽니다.`
-        : `동일 BD 온도 기준 예측 Fmax는 A가 약 ${(fmaxA - fmaxB).toFixed(2)} mN 더 큽니다.`
+        ? `동일 예측 온도 기준 예측 Fmax는 B가 약 ${(fmaxB - fmaxA).toFixed(2)} mN 더 큽니다.`
+        : `동일 예측 온도 기준 예측 Fmax는 A가 약 ${(fmaxA - fmaxB).toFixed(2)} mN 더 큽니다.`
     );
   }
   return hints.slice(0, 5);

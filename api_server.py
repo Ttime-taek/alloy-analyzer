@@ -55,6 +55,14 @@ except ImportError:
     from test7.ai_engine import AIEngine  # type: ignore
     from test7.app_meta import about_api_payload, API_VERSION_SEMVER, PRODUCT_NAME  # type: ignore
 
+try:
+    from .env_loader import load_env_keys  # type: ignore
+except Exception:
+    try:
+        from test7.env_loader import load_env_keys  # type: ignore
+    except Exception:
+        load_env_keys = None  # type: ignore
+
 
 def _load_gemini_key_from_file() -> None:
     """
@@ -83,6 +91,13 @@ def _load_gemini_key_from_file() -> None:
 
 _load_gemini_key_from_file()
 
+# Cerebras 키도 동일한 규칙으로 .env에서 로드(환경변수가 이미 있으면 덮어쓰지 않음).
+if load_env_keys:
+    try:
+        load_env_keys(["CEREBRAS_API_KEY"], override=False)
+    except Exception:
+        pass
+
 
 def _coerce_response_str(v: Any) -> str:
     """analyzer/Gemini가 가끔 list를 넣어도 API 모델은 str만 받도록 정규화."""
@@ -109,7 +124,16 @@ def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
             raise ValueError(f"{k} 값은 숫자여야 합니다.")
         if f < 0:
             raise ValueError(f"{k} 값은 0 이상이어야 합니다.")
-        clean[k.strip()] = f
+        sk = k.strip()
+        try:
+            canon = AlloyAnalyzer.canonical_element_symbol(sk)
+        except ValueError as e:
+            raise ValueError(f"{label}: {e}") from e
+        if canon not in AlloyAnalyzer.KNOWN_PERIODIC_METALS:
+            raise ValueError(f"{label}: 지원하지 않는 원소 기호: {sk}")
+        clean[canon] = float(clean.get(canon, 0.0)) + f
+    if sum(clean.values()) <= 0.0:
+        raise ValueError(f"{label}: 모든 원소 wt%가 0입니다.")
     return clean
 
 
@@ -129,11 +153,11 @@ class CompositionRequest(BaseModel):
     )
     wetting_temp_c: float | None = Field(
         default=None,
-        description="젖음 대표 온도(℃). 생략 시 액상선+30℃를 BD 입력 온도(250–290℃) 격자로 스냅.",
+        description="젖음 대표 온도(℃). 생략 시 액상선+30℃를 측정 DB 온도(250–290℃)에 맞춤.",
     )
     include_wetting_grid: bool = Field(
         default=False,
-        description="True면 분석 응답에 BD 온도별(250–290℃) 젖음 격자 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
+        description="True면 분석 응답에 250–290℃ 온도별 젖음 표를 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
     )
 
     @field_validator("comp")
@@ -185,6 +209,10 @@ class AnalysisResponse(BaseModel):
     ai_cited_sources: list[str]
     retrieved_candidates: list[str]
     ai_used_this_request: bool
+    ai_source: str = Field(
+        default="",
+        description="api | cache | db_exact — AI 응답 출처(analyzer와 동일)",
+    )
     element_roles: str
     dopant_rec: str
     eng_report: str
@@ -211,7 +239,7 @@ class AnalysisResponse(BaseModel):
 
 
 class WettingGridRequest(BaseModel):
-    """BD 250–290℃ 격자별 젖음(Fmax/T0)만 조회(전체 분석과 분리)."""
+    """250–290℃ 온도별 젖음(Fmax/T0)만 조회(전체 분석과 분리)."""
 
     comp: Dict[str, float] = Field(..., description="wt% 조성")
 
@@ -228,11 +256,11 @@ class CompareRequest(BaseModel):
     comp_b: Dict[str, float]
     wetting_temp_c: float | None = Field(
         default=None,
-        description="젖음 대표 온도(℃). 생략 시 액상선+30℃ 기반 BD 스냅.",
+        description="젖음 대표 온도(℃). 생략 시 액상선+30℃ 기반 측정 DB 온도에 맞춤.",
     )
     include_wetting_grid: bool = Field(
         default=False,
-        description="각 조성 분석에 BD 온도별 젖음 격자 포함(무거움). 기본 False.",
+        description="각 조성 분석에 온도별 젖음 표 포함(무거움). 기본 False.",
     )
     literature_mode: str | None = Field(
         default="fast",
@@ -482,6 +510,8 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
     합금 조성(wt%)을 받아 analyzer.analyze_all 결과를 JSON으로 반환.
     React 등 클라이언트에서는 이 엔드포인트만 호출하면 됩니다.
     """
+    # Cerebras 폴백이 이번 요청에서 실제 응답을 만들었는지 카운터 델타로 판정
+    _cb_before = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
     try:
         result = _analyzer.analyze_all(
             req.comp,
@@ -490,8 +520,12 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
             wetting_temp_c=req.wetting_temp_c,
             include_wetting_grid=bool(req.include_wetting_grid),
         )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"분석 실패: {e}") from e
+    _cb_after = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
+    _cerebras_used_this_request = bool(_cb_after > _cb_before)
 
     best = result.get("best") or {}
     norm = result.get("norm") or {}
@@ -536,12 +570,25 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
         ai_sources=[str(x) for x in (result.get("ai_sources") or [])],
         ai_cited_sources=[str(x) for x in (result.get("ai_cited_sources") or [])],
         retrieved_candidates=[str(x) for x in (result.get("retrieved_candidates") or [])],
-        ai_used_this_request=bool(result.get("ai_used_this_request", False)),
+        ai_used_this_request=bool(result.get("ai_used_this_request", False)) or _cerebras_used_this_request,
+        ai_source=str(result.get("ai_source") or ""),
         element_roles=result.get("element_roles") or "",
         dopant_rec=result.get("dopant_rec") or "",
         eng_report=eng_report,
         lab_report=lab_report,
-        ai_mode="gemini" if bool(result.get("ai_used_this_request", False)) else "local",
+        ai_mode=(
+            "cerebras"
+            if _cerebras_used_this_request
+            else (
+                "cache"
+                if str(result.get("ai_source") or "").strip().lower() == "cache"
+                else (
+                    "gemini"
+                    if bool(result.get("ai_used_this_request", False))
+                    else "local"
+                )
+            )
+        ),
         ai_status_detail=str(getattr(_ai_engine, "status_detail", "") or ""),
         ai_usage_snapshot=dict(
             getattr(_ai_engine, "get_usage_snapshot", lambda: {})() or {}
@@ -552,13 +599,15 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
 @app.post("/api/wetting_grid")
 async def wetting_grid(req: WettingGridRequest) -> Dict[str, Any]:
     """
-    BD 측정 온도 격자(250–290℃)별 IDW 예측 Fmax(mN)·T₀(s).
+    측정 DB 온도(250–290℃)별 IDW 예측 Fmax(mN)·T₀(s).
     전체 분석과 분리해 필요할 때만 호출합니다.
     """
     try:
         rows = _analyzer.wetting_grid_for_comp(req.comp)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"젖음 격자 계산 실패: {e}") from e
+        raise HTTPException(status_code=500, detail=f"온도별 젖음 표 계산 실패: {e}") from e
     return {"wetting_by_temp": rows}
 
 
@@ -584,6 +633,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
             wetting_temp_c=req.wetting_temp_c,
             include_wetting_grid=bool(req.include_wetting_grid),
         )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"비교 분석 실패: {e}") from e
 

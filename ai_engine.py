@@ -127,10 +127,22 @@ class AIEngine:
             "ask_success": 0,
             "ask_errors": 0,
             "ask_quota_errors": 0,
+            "ask_cerebras_fallback": 0,
+            "ask_cerebras_success": 0,
             "full_analysis_calls": 0,
             "full_analysis_ai_used": 0,
             "full_analysis_fallbacks": 0,
         }
+        # Cerebras 폴백(쿼터/오류 시 자동 전환). 키가 없거나 SDK 미설치면 available=False 로 남음.
+        self._cerebras = None
+        try:
+            try:
+                from .cerebras_chat import CerebrasChatEngine  # package import
+            except Exception:
+                from cerebras_chat import CerebrasChatEngine  # type: ignore
+            self._cerebras = CerebrasChatEngine()
+        except Exception:
+            self._cerebras = None
         if not self.api_key:
             self.api_key = self._load_key_from_project_files().strip()
 
@@ -158,6 +170,62 @@ class AIEngine:
     # ---------------------------------------------------------
     # Gemini 요청 통합 함수
     # ---------------------------------------------------------
+    def _parse_list_text(self, txt):
+        """Shared JSON/bracket list recovery used by both Gemini and Cerebras paths."""
+        txt = normalize_subscript(str(txt or ""))
+        try:
+            data = json.loads(txt)
+            if isinstance(data, list):
+                return [str(x) for x in data]
+        except Exception:
+            pass
+        try:
+            start = txt.index("[")
+            end = txt.index("]") + 1
+            chunk = txt[start:end].strip()[1:-1]
+            if not chunk:
+                return []
+            items = []
+            for part in chunk.split(","):
+                item = part.strip().strip('"').strip("'")
+                if item:
+                    items.append(item)
+            return items if items else ["IMC 예측 실패"]
+        except Exception:
+            return ["IMC 예측 실패"]
+
+    def _cerebras_ask(self, prompt, parse_list=False):
+        """
+        Gemini가 쓸 수 없을 때(쿼터/오류/미초기화) 호출되는 폴백.
+        성공하면 status_detail 에 'Cerebras 폴백 사용 중' 표시.
+        실패 시 빈 문자열(또는 리스트)을 돌려주어 상위에서 에러 메시지를 그대로 쓰게 한다.
+        """
+        ceb = getattr(self, "_cerebras", None)
+        if ceb is None or not getattr(ceb, "available", False):
+            return None  # 폴백 불가 → 호출자가 원래 오류 메시지 사용
+
+        try:
+            self.usage_stats["ask_cerebras_fallback"] = int(self.usage_stats.get("ask_cerebras_fallback", 0)) + 1
+        except Exception:
+            pass
+
+        text = ceb.ask(prompt)
+        if not text:
+            return None
+
+        try:
+            self.usage_stats["ask_cerebras_success"] = int(self.usage_stats.get("ask_cerebras_success", 0)) + 1
+        except Exception:
+            pass
+
+        prev = self.status_detail or ""
+        if "Cerebras 폴백" not in prev:
+            self.status_detail = "Cerebras 폴백 사용 중 (Gemini 쿼터/오류)"
+
+        if parse_list:
+            return self._parse_list_text(text)
+        return normalize_subscript(text)
+
     def ask(self, prompt, parse_list=False):
         try:
             self.usage_stats["ask_attempts"] = int(self.usage_stats.get("ask_attempts", 0)) + 1
@@ -168,6 +236,10 @@ class AIEngine:
                 self.usage_stats["ask_errors"] = int(self.usage_stats.get("ask_errors", 0)) + 1
             except Exception:
                 pass
+            # Gemini 초기화 실패여도 Cerebras가 살아있으면 바로 폴백.
+            fb = self._cerebras_ask(prompt, parse_list=parse_list)
+            if fb is not None:
+                return fb
             return "AI 연결 오류: Gemini 초기화 실패"
 
         try:
@@ -191,41 +263,32 @@ class AIEngine:
                 pass
 
             if parse_list:
-                # JSON 우선 파싱, 실패 시 안전한 문자열 토큰 분리로 리스트 복구
-                try:
-                    data = json.loads(txt)
-                    if isinstance(data, list):
-                        return [str(x) for x in data]
-                except Exception:
-                    pass
-
-                try:
-                    start = txt.index("[")
-                    end = txt.index("]") + 1
-                    chunk = txt[start:end].strip()[1:-1]
-                    if not chunk:
-                        return []
-                    items = []
-                    for part in chunk.split(","):
-                        item = part.strip().strip('"').strip("'")
-                        if item:
-                            items.append(item)
-                    return items if items else ["IMC 예측 실패"]
-                except Exception:
-                    return ["IMC 예측 실패"]
+                return self._parse_list_text(txt)
 
             return txt
 
         except Exception as e:
             emsg = str(e)
+            is_quota = self._is_quota_error_message(emsg)
             try:
                 self.usage_stats["ask_errors"] = int(self.usage_stats.get("ask_errors", 0)) + 1
-                if self._is_quota_error_message(emsg):
+                if is_quota:
                     self.usage_stats["ask_quota_errors"] = int(self.usage_stats.get("ask_quota_errors", 0)) + 1
             except Exception:
                 pass
             self.last_error_detail = emsg
-            if self._is_quota_error_message(emsg):
+
+            # 1순위 폴백: Cerebras (키·SDK 살아있을 때만)
+            fb = self._cerebras_ask(prompt, parse_list=parse_list)
+            if fb is not None:
+                if is_quota:
+                    self.status_detail = "Cerebras 폴백 사용 중 (Gemini 쿼터 429)"
+                else:
+                    self.status_detail = "Cerebras 폴백 사용 중 (Gemini 호출 오류)"
+                return fb
+
+            # Cerebras도 못 쓰면 기존 메시지 유지
+            if is_quota:
                 self.status_detail = "AI 쿼터 초과(429) - 현재 로컬 폴백으로 동작 중"
             else:
                 self.status_detail = "AI 호출 오류 - 현재 로컬 폴백으로 동작 중"
@@ -919,7 +982,11 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         except Exception:
             pass
         m = (mode or "eng").strip().lower()
-        if not self.available:
+        # Gemini가 살아있지 않더라도 Cerebras 폴백이 가능하면 ask() 경로를 그대로 진행한다.
+        # (ask()는 Gemini available=False 일 때 자동으로 Cerebras로 라우팅됨.)
+        _ceb = getattr(self, "_cerebras", None)
+        _ceb_ok = bool(_ceb is not None and getattr(_ceb, "available", False))
+        if not self.available and not _ceb_ok:
             try:
                 self.usage_stats["full_analysis_fallbacks"] = int(self.usage_stats.get("full_analysis_fallbacks", 0)) + 1
             except Exception:
@@ -1380,7 +1447,7 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
   · 인장강도: {float(props.get('tensile_strength', 0.0) or 0.0):.2f} MPa
   · 항복강도: {float(props.get('yield_strength', 0.0) or 0.0):.2f} MPa
   · 연신율: {float(props.get('elongation', 0.0) or 0.0):.2f} %
-  · 젖음 Fmax (BD IDW, mN): {float(props.get('wetting_fmax_pred_mn', 0.0) or 0.0):.2f}
+  · 젖음 Fmax (IDW·측정 DB, mN): {float(props.get('wetting_fmax_pred_mn', 0.0) or 0.0):.2f}
   · 물성 DB 인장: {_tdb_lab_s}
   · 수치·혼합 근거(내부 엔진 라벨, 모델 vs properties DB 가중):
 {ev_block}
