@@ -3276,9 +3276,6 @@ function SummaryStrip({ result }) {
           </div>
         </div>
       </div>
-      <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8", lineHeight: 1.45 }}>
-        baseline은 DB 실측 기반입니다. 조성 차이가 클수록 Δ 해석은 참고용입니다.
-      </div>
     </div>
   );
 }
