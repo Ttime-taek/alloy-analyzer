@@ -1035,6 +1035,7 @@ export default function App() {
         )}
         <button
           type="button"
+          className="tactile-hit tactile-hit--link"
           onClick={() => setTrustOpen((o) => !o)}
           aria-expanded={trustOpen}
           style={{
@@ -1042,7 +1043,8 @@ export default function App() {
             fontSize: 13,
             color: "var(--link)",
             background: "transparent",
-            border: "none",
+            border: "1px solid transparent",
+            borderRadius: 8,
             cursor: "pointer",
             textDecoration: "underline",
             padding: "10px 4px",
@@ -1050,9 +1052,11 @@ export default function App() {
             textAlign: "left"
           }}
         >
-          {trustOpen
-            ? "▼ 처리 방식·출처·면책 접기"
-            : "▸ 처리 방식·데이터 출처·면책 보기 (발표·보고용)"}
+          <span className="tactile-hit-label">
+            {trustOpen
+              ? "▼ 처리 방식·출처·면책 접기"
+              : "▸ 처리 방식·데이터 출처·면책 보기 (발표·보고용)"}
+          </span>
         </button>
         {trustOpen ? (
           <div
@@ -1303,6 +1307,7 @@ export default function App() {
             >
               <button
                 type="button"
+                className="tactile-hit"
                 onClick={saveFavoriteA}
                 style={{
                   minHeight: 44,
@@ -1315,7 +1320,7 @@ export default function App() {
                   cursor: "pointer"
                 }}
               >
-                조성 A 즐겨찾기 저장
+                <span className="tactile-hit-label">조성 A 즐겨찾기 저장</span>
               </button>
               {favorites.length > 0 && (
                 <>
@@ -1345,6 +1350,7 @@ export default function App() {
                   </select>
                   <button
                     type="button"
+                    className="tactile-hit"
                     onClick={deleteFavoriteA}
                     disabled={!selectedFavoriteName}
                     style={{
@@ -1358,7 +1364,7 @@ export default function App() {
                       cursor: selectedFavoriteName ? "pointer" : "default"
                     }}
                   >
-                    선택 삭제
+                    <span className="tactile-hit-label">선택 삭제</span>
                   </button>
                 </>
               )}
@@ -1372,6 +1378,7 @@ export default function App() {
               {(favSyncStatus === "offline" || favSyncStatus === "error") && (
                 <button
                   type="button"
+                  className="tactile-hit"
                   onClick={() => syncFavoritesToServer(favorites, { silent: false })}
                   style={{
                     minHeight: 44,
@@ -1384,7 +1391,7 @@ export default function App() {
                     cursor: "pointer"
                   }}
                 >
-                  동기화 재시도
+                  <span className="tactile-hit-label">동기화 재시도</span>
                 </button>
               )}
             </div>
@@ -1421,7 +1428,7 @@ export default function App() {
                     cursor: "pointer"
                   }}
                 >
-                  <span className="periodic-cell-label">
+                  <span className="tactile-hit-label">
                     {el}
                     {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
                   </span>
@@ -1432,6 +1439,7 @@ export default function App() {
 
             <button
               type="button"
+              className="tactile-hit"
               onClick={() => autoFillSn("A")}
               title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
               style={{
@@ -1446,7 +1454,7 @@ export default function App() {
                 cursor: "pointer"
               }}
             >
-              조성 A Sn 자동완성
+              <span className="tactile-hit-label">조성 A Sn 자동완성</span>
             </button>
 
             <div style={{ fontWeight: 600, marginBottom: 4 }}>조성 A</div>
@@ -1512,6 +1520,7 @@ export default function App() {
                   />
                   <button
                     type="button"
+                    className="tactile-hit"
                     onClick={() => removeElemRowA(el)}
                     title="목록에서 제거"
                     style={{
@@ -1526,7 +1535,7 @@ export default function App() {
                       cursor: "pointer"
                     }}
                   >
-                    제거
+                    <span className="tactile-hit-label">제거</span>
                   </button>
                 </div>
               ))
@@ -1557,6 +1566,7 @@ export default function App() {
                 >
                   <button
                     type="button"
+                    className="tactile-hit"
                     onClick={saveFavoriteB}
                     style={{
                       minHeight: 44,
@@ -1569,7 +1579,7 @@ export default function App() {
                       cursor: "pointer"
                     }}
                   >
-                    조성 B 즐겨찾기 저장
+                    <span className="tactile-hit-label">조성 B 즐겨찾기 저장</span>
                   </button>
                   {favorites.length > 0 && (
                     <>
@@ -1597,6 +1607,7 @@ export default function App() {
                       </select>
                       <button
                         type="button"
+                        className="tactile-hit"
                         onClick={deleteFavoriteB}
                         disabled={!selectedFavoriteNameB}
                         style={{
@@ -1610,7 +1621,7 @@ export default function App() {
                           cursor: selectedFavoriteNameB ? "pointer" : "default"
                         }}
                       >
-                        선택 삭제
+                        <span className="tactile-hit-label">선택 삭제</span>
                       </button>
                     </>
                   )}
@@ -1647,7 +1658,7 @@ export default function App() {
                         cursor: "pointer"
                       }}
                     >
-                      <span className="periodic-cell-label">
+                      <span className="tactile-hit-label">
                         {el}
                         {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
                       </span>
@@ -1658,6 +1669,7 @@ export default function App() {
 
                 <button
                   type="button"
+                  className="tactile-hit"
                   onClick={() => autoFillSn("B")}
                   title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
                   style={{
@@ -1672,7 +1684,7 @@ export default function App() {
                     cursor: "pointer"
                   }}
                 >
-                  조성 B Sn 자동완성
+                  <span className="tactile-hit-label">조성 B Sn 자동완성</span>
                 </button>
                 <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
                   주기율표 클릭 또는 아래에서 원소를 추가하면 조성 B 입력란이 생깁니다.
@@ -1738,6 +1750,7 @@ export default function App() {
                       />
                       <button
                         type="button"
+                        className="tactile-hit"
                         onClick={() => removeElemRowB(el)}
                         title="목록에서 제거"
                         style={{
@@ -1752,7 +1765,7 @@ export default function App() {
                           cursor: "pointer"
                         }}
                       >
-                        제거
+                        <span className="tactile-hit-label">제거</span>
                       </button>
                     </div>
                   ))
@@ -1762,6 +1775,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button
                 type="button"
+                className="tactile-hit"
                 onClick={handleAnalyze}
                 disabled={loading}
                 style={{
@@ -1775,10 +1789,20 @@ export default function App() {
                   cursor: loading ? "default" : "pointer"
                 }}
               >
-                {loading ? (<><span className="btn-spinner" />분석 중...</>) : "분석"}
+                <span className="tactile-hit-label">
+                  {loading ? (
+                    <>
+                      <span className="btn-spinner" />
+                      분석 중...
+                    </>
+                  ) : (
+                    "분석"
+                  )}
+                </span>
               </button>
               <button
                 type="button"
+                className="tactile-hit"
                 onClick={handleReset}
                 disabled={loading}
                 style={{
@@ -1792,7 +1816,7 @@ export default function App() {
                   cursor: loading ? "default" : "pointer"
                 }}
               >
-                초기화
+                <span className="tactile-hit-label">초기화</span>
               </button>
             </div>
             {loading && (
@@ -1880,6 +1904,7 @@ export default function App() {
               {((mode === "single" && result) || (mode === "compare" && compareResult)) && (
                 <button
                   type="button"
+                  className="tactile-hit"
                   onClick={() => setResultPanelOpen((v) => !v)}
                   style={{
                     marginLeft: 6,
@@ -1893,7 +1918,9 @@ export default function App() {
                     cursor: "pointer"
                   }}
                 >
-                  {resultPanelOpen ? "분석 결과 접기" : "분석 결과 펼치기"}
+                  <span className="tactile-hit-label">
+                    {resultPanelOpen ? "분석 결과 접기" : "분석 결과 펼치기"}
+                  </span>
                 </button>
               )}
               <div
@@ -2661,14 +2688,12 @@ function CollapsibleSection({ title, open, onToggle, children, rightHint = "" })
     <section style={{ marginTop: 10, minWidth: 0 }}>
       <button
         type="button"
+        className="tactile-hit collapsible-section-trigger"
         onClick={onToggle}
         aria-expanded={open}
         style={{
           width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
+          display: "block",
           textAlign: "left",
           background: "#0b1220",
           border: "1px solid var(--border-muted)",
@@ -2679,10 +2704,21 @@ function CollapsibleSection({ title, open, onToggle, children, rightHint = "" })
           marginBottom: open ? 8 : 0
         }}
       >
-        <span style={{ fontSize: 15, fontWeight: 600 }}>
-          {open ? "▾" : "▸"} {title}
+        <span
+          className="tactile-hit-label"
+          style={{
+            display: "flex",
+            width: "100%",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 600 }}>
+            {open ? "▾" : "▸"} {title}
+          </span>
+          {rightHint ? <span style={{ fontSize: 13, color: "#94a3b8" }}>{rightHint}</span> : null}
         </span>
-        {rightHint ? <span style={{ fontSize: 13, color: "#94a3b8" }}>{rightHint}</span> : null}
       </button>
       {open ? children : null}
     </section>
@@ -2912,6 +2948,7 @@ function ModeButton({ active, onClick, children, ariaSelected }) {
     <button
       type="button"
       role="tab"
+      className="tactile-hit"
       onClick={onClick}
       aria-selected={ariaSelected ?? active}
       style={{
@@ -2929,7 +2966,9 @@ function ModeButton({ active, onClick, children, ariaSelected }) {
         cursor: "pointer"
       }}
     >
-      {children}
+      <span className="tactile-hit-label" style={{ display: "block", width: "100%", textAlign: "center" }}>
+        {children}
+      </span>
     </button>
   );
 }
@@ -2938,6 +2977,7 @@ function SmallToggleButton({ active, onClick, label }) {
   return (
     <button
       type="button"
+      className="tactile-hit"
       onClick={onClick}
       style={{
         minHeight: 44,
@@ -2952,7 +2992,9 @@ function SmallToggleButton({ active, onClick, label }) {
         cursor: "pointer"
       }}
     >
-      {label}
+      <span className="tactile-hit-label" style={{ display: "block", width: "100%", textAlign: "center" }}>
+        {label}
+      </span>
     </button>
   );
 }
@@ -3031,6 +3073,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             <button
               type="button"
+              className="tactile-hit"
               onClick={onLoadGrid}
               disabled={!!loadPending}
               style={{
@@ -3043,7 +3086,9 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
                 cursor: loadPending ? "wait" : "pointer"
               }}
             >
-              {loadPending ? "온도별 젖음 표 불러오는 중…" : "온도별 Fmax·T₀ 표 불러오기"}
+              <span className="tactile-hit-label">
+                {loadPending ? "온도별 젖음 표 불러오는 중…" : "온도별 Fmax·T₀ 표 불러오기"}
+              </span>
             </button>
             {loadError ? (
               <span style={{ fontSize: 12, color: "#f97316" }}>{loadError}</span>
@@ -3087,6 +3132,7 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
         {typeof onLoadGrid === "function" ? (
           <button
             type="button"
+            className="tactile-hit"
             onClick={onLoadGrid}
             disabled={!!loadPending}
             style={{
@@ -3099,7 +3145,9 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
               cursor: loadPending ? "wait" : "pointer"
             }}
           >
-            {loadPending ? "새로고침 중…" : "온도별 표 다시 불러오기"}
+            <span className="tactile-hit-label">
+              {loadPending ? "새로고침 중…" : "온도별 표 다시 불러오기"}
+            </span>
           </button>
         ) : null}
       </div>
@@ -4768,6 +4816,7 @@ function ReflowTuneBar({
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12 }}>
         <button
           type="button"
+          className="tactile-hit"
           onClick={onResetPeak}
           style={{
             padding: "8px 12px",
@@ -4779,10 +4828,11 @@ function ReflowTuneBar({
             cursor: "pointer"
           }}
         >
-          분석 피크로 되돌리기
+          <span className="tactile-hit-label">분석 피크로 되돌리기</span>
         </button>
         <button
           type="button"
+          className="tactile-hit"
           onClick={onResetTune}
           style={{
             padding: "8px 12px",
@@ -4794,7 +4844,7 @@ function ReflowTuneBar({
             cursor: "pointer"
           }}
         >
-          프리셋 기본값으로 구간 초기화
+          <span className="tactile-hit-label">프리셋 기본값으로 구간 초기화</span>
         </button>
         <span style={{ fontSize: 12, color: "#64748b" }}>
           적용 피크: <strong style={{ color: "#e2e8f0" }}>{reflowPeakEffective.toFixed(1)} ℃</strong>
@@ -5042,6 +5092,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
         {expandable ? (
           <button
             type="button"
+            className="tactile-hit"
             onClick={() => openReflowChartInNewWindow(profile, solidus, liquidus)}
             style={{
               padding: "8px 14px",
@@ -5055,7 +5106,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
               whiteSpace: "nowrap"
             }}
           >
-            새 창으로 확대
+            <span className="tactile-hit-label">새 창으로 확대</span>
           </button>
         ) : null}
       </div>
