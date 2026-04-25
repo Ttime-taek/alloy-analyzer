@@ -29,9 +29,34 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 - **`.app-shell`**: root wrapper; base `font-size: 14px` (see `index.css`).
 - **`.app-main-grid`**: two-column main grid; below **720px** width stacks to a single column with tighter gap.
 
-### Touch targets (narrow viewports)
+### Global base (design review)
 
-Below **720px**, primary controls use at least **44×44px** (see `index.css` `@media (max-width: 720px)`). The **periodic element** grid (7 columns) uses **`.periodic-element-grid-wrap`** + **`.periodic-element-grid`**: the grid has a **minimum width** so each cell can stay ≥44px wide; if the viewport is narrower, the wrapper **scrolls horizontally** instead of shrinking cells below 44px.
+- **`body`**: `font-family` system stack, `background: var(--bg-page)`, `color: var(--text-primary)` (`index.css`).
+- **Form controls**: `input` / `select` / `textarea` use **16px** font size to reduce iOS zoom-on-focus; checkboxes/radios **16×16px** with `accent-color: var(--accent)` (`index.css`).
+
+### Touch targets (two layers)
+
+1. **Narrow viewport (≤720px)** — `index.css` `@media (max-width: 720px)`  
+   - **`.app-shell button`**: `min-height: 44px`.  
+   - **`.app-shell select`** and **text inputs** (excluding checkbox/radio): `min-height: 44px`.  
+   - **IMC chips**, **empty-state step numbers**, **result prose heads**: slightly larger for readability/tap.  
+   - **Periodic grid (FINDING-002)**: **`.periodic-element-grid-wrap`** + **`.periodic-element-grid`** — grid **min-width** keeps each cell ≥44px; narrower viewports get **horizontal scroll** instead of shrinking cells. Grid buttons get flex centering and `touch-action: manipulation`.
+
+2. **Composition panel — all breakpoints** — `frontend/src/App.jsx` (design review FINDING-004–006)  
+   Explicit **`minHeight: 44`** (typically with **`padding: 10px 12px`**) on: mode / literature toggles (`ModeButton`, `SmallToggleButton`), favorite save & delete (A and B), periodic element cells (A and B inline styles), **동기화 재시도**, **Sn 자동완성** (A/B), per-row **제거**, **분석 결과 접기/펼치기**.  
+   This matches **WCAG 2.5.5**-style minimum targets on desktop as well as mobile, while the CSS layer above still reinforces controls inside `.app-shell` on small screens.
+
+## Design review log (implemented)
+
+| ID | Scope | Where |
+|----|--------|--------|
+| **FINDING-002** | Periodic 7-column grid: min width + horizontal scroll; cell min 44×44 under 720px | `index.css` (`.periodic-element-grid-wrap` / `.periodic-element-grid`) |
+| **FINDING-003** | Global typography, page colors, checkbox size, iOS-friendly form font size | `index.css` (`body`, inputs, `:root`) |
+| **FINDING-004** | Single/compare mode and fast/precision toggles | `App.jsx` — `ModeButton`, `SmallToggleButton` |
+| **FINDING-005** | Favorite save/delete and periodic grid buttons (조성 A / B symmetry) | `App.jsx` |
+| **FINDING-006** | 동기화 재시도, Sn autofill, row remove, result panel expand/collapse | `App.jsx` |
+
+**Deferred (optional):** favorite / “원소 추가” / 젖음 온도 `<select>` elements still use compact inline padding on wide viewports; narrow viewports pick up **44px** `min-height` from `.app-shell select` in `index.css`. Align desktop select padding with tokens if a later pass targets full parity.
 
 ## UX (audit follow-ups)
 
