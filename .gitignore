@@ -4,6 +4,11 @@ gemini_api_key.txt
 .env
 .env.local
 
+# 로컬 사용자 데이터(저장소에 커밋하지 않음). 초기값은 *.example.json 참고.
+/favorites.json
+/web_favorites.json
+/profile_settings.json
+
 # Python
 __pycache__/
 *.py[cod]

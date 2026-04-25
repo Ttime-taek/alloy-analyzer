@@ -75,3 +75,6 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 Vite dev server proxies `/api`, `/docs`, `/openapi.json` to `http://127.0.0.1:8000`. If the API is down, the dev proxy returns **503** JSON with `offline: true` instead of a raw proxy **500**, so the app can fall back quietly and the console stays cleaner.
 
 - **Smoke:** from `frontend/`, run **`npm run test`** (Vitest) — verifies the `App` module loads (`src/app.smoke.test.jsx`).
+- **Local data (gitignored):** `favorites.json`, `web_favorites.json`, `profile_settings.json` are per-machine. Copy from `*.example.json` in the repo root if you want starter files; the API tolerates missing `web_favorites.json` / `favorites.json` (empty list + migration path).
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs Python `regression_check.py` + compile/import checks, and `frontend` `npm ci` / `test` / `build` / `lint`.
+- **npm audit (dev):** Vite 5’s bundled `esbuild` may still report a moderate dev-server advisory; clearing it typically requires a **major Vite upgrade** (`npm audit fix --force`) — not applied automatically to avoid breaking the build.
