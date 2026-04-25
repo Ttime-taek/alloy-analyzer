@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from "react";
 import { createRoot } from "react-dom/client";
+import { BASELINE_ALLOY, buildSummaryStripModel } from "./summaryStrip";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -1980,60 +1981,15 @@ export default function App() {
                   <AiSessionUsageRow usage={result.ai_usage_snapshot} />
                   <AiStatusDetail result={result} />
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
-                    gap: 8,
-                    marginBottom: 8,
-                    alignItems: "stretch"
-                  }}
-                >
-                  <SummaryCard
-                    label="고상선"
-                    value={`${result.solidus.toFixed(1)} ℃`}
-                    variant="solidus"
-                  />
-                  <SummaryCard
-                    label="액상선"
-                    value={`${result.liquidus.toFixed(1)} ℃`}
-                    variant="liquidus"
-                  />
-                  <SummaryCard
-                    label="피크"
-                    value={`${result.peak.toFixed(1)} ℃`}
-                    variant="peak"
-                  />
-                  <SummaryCard
-                    label="젖음 Fmax (IDW·측정 DB)"
-                    value={formatWettingFmaxPrimary(result.props)}
-                    variant="wetting"
-                  />
-                  <SummaryCard
-                    label="물성 DB 인장"
-                    value={formatTensileDbMpa(result.props)}
-                    variant="tensileDb"
-                  />
-                </div>
-                <SummaryWettingTensileFootnotes />
-                <CollapsibleSection
-                  title="온도별 젖음 (Fmax·T₀)"
-                  open={wettingSectionOpen}
-                  onToggle={() => setWettingSectionOpen((v) => !v)}
-                >
-                  <WettingByTempTable
-                    rows={wettingGridRows ?? result.props?.wetting_by_temp}
-                    proxyTemp={result.props?.wetting_temp_c}
-                    source={result.evidence?.wetting?.source}
-                    liquidus={result.liquidus}
-                    basis={result.props?.wetting_temp_basis}
-                    targetC={result.props?.wetting_temp_target_c}
-                    onLoadGrid={loadWettingGrid}
-                    loadPending={wettingGridLoading}
-                    loadError={wettingGridError}
-                  />
-                </CollapsibleSection>
+                <ResultSummaryBlock
+                  result={result}
+                  wettingSectionOpen={wettingSectionOpen}
+                  setWettingSectionOpen={setWettingSectionOpen}
+                  wettingGridRows={wettingGridRows}
+                  wettingGridLoading={wettingGridLoading}
+                  wettingGridError={wettingGridError}
+                  loadWettingGrid={loadWettingGrid}
+                />
               </>
             )}
             {mode === "single" && result && resultPanelOpen && (
@@ -2051,75 +2007,16 @@ export default function App() {
                   <AiSessionUsageRow usage={result.ai_usage_snapshot} />
                   <AiStatusDetail result={result} />
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
-                    gap: 8,
-                    marginBottom: 8,
-                    alignItems: "stretch"
-                  }}
-                >
-                  <SummaryCard
-                    label="고상선"
-                    value={`${result.solidus.toFixed(1)} ℃`}
-                    variant="solidus"
-                  />
-                  <SummaryCard
-                    label="액상선"
-                    value={`${result.liquidus.toFixed(1)} ℃`}
-                    variant="liquidus"
-                  />
-                  <SummaryCard
-                    label="피크"
-                    value={`${result.peak.toFixed(1)} ℃`}
-                    variant="peak"
-                  />
-                  <SummaryCard
-                    label="DB 신뢰도"
-                    value={`${result.confidence.toFixed(1)} %`}
-                    variant="dbConfidence"
-                  />
-                  <SummaryCard
-                    label="종합 신뢰도"
-                    value={`${result.confidence_overall.toFixed(1)} %`}
-                    variant="overallConfidence"
-                  />
-                  <SummaryCard
-                    label="최적 일치"
-                    value={result.best_name || "N/A"}
-                    variant="bestMatch"
-                  />
-                  <SummaryCard
-                    label="젖음 Fmax (IDW·측정 DB)"
-                    value={formatWettingFmaxPrimary(result.props)}
-                    variant="wetting"
-                  />
-                  <SummaryCard
-                    label="물성 DB 인장"
-                    value={formatTensileDbMpa(result.props)}
-                    variant="tensileDb"
-                  />
-                </div>
-                <SummaryWettingTensileFootnotes />
-                <CollapsibleSection
-                  title="온도별 젖음 (Fmax·T₀)"
-                  open={wettingSectionOpen}
-                  onToggle={() => setWettingSectionOpen((v) => !v)}
-                >
-                  <WettingByTempTable
-                    rows={wettingGridRows ?? result.props?.wetting_by_temp}
-                    proxyTemp={result.props?.wetting_temp_c}
-                    source={result.evidence?.wetting?.source}
-                    liquidus={result.liquidus}
-                    basis={result.props?.wetting_temp_basis}
-                    targetC={result.props?.wetting_temp_target_c}
-                    onLoadGrid={loadWettingGrid}
-                    loadPending={wettingGridLoading}
-                    loadError={wettingGridError}
-                  />
-                </CollapsibleSection>
+                <ResultSummaryBlock
+                  result={result}
+                  showDbMeta
+                  wettingSectionOpen={wettingSectionOpen}
+                  setWettingSectionOpen={setWettingSectionOpen}
+                  wettingGridRows={wettingGridRows}
+                  wettingGridLoading={wettingGridLoading}
+                  wettingGridError={wettingGridError}
+                  loadWettingGrid={loadWettingGrid}
+                />
                 {result.evidence?.wetting?.source === "Heuristic" && (
                   <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px 0" }}>
                     젖음: 측정 DB 보간 대신 조성·온도 휴리스틱 추정입니다. (융점 DB 최근접 거리는 요약·신뢰도 블록 참고)
@@ -3325,6 +3222,129 @@ function SummaryCard({ label, value, variant }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SummaryStrip({ result }) {
+  const model = buildSummaryStripModel(result, BASELINE_ALLOY);
+  if (!model) return null;
+
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid var(--border-default)",
+        background: "var(--bg-table-head)",
+        marginBottom: 8
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+          gap: 8,
+          alignItems: "stretch"
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
+            Solidus
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>
+            {model.solidusC.toFixed(1)}℃{" "}
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8" }}>(+0.1°C)</span>
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
+            Baseline (DB)
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
+            {model.baseline.name}{" "}
+            <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+              (S={model.baseline.solidusC.toFixed(2)}℃)
+            </span>
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
+            ΔSolidus
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>
+            {model.deltaSolidusText}
+          </div>
+        </div>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8", lineHeight: 1.45 }}>
+        baseline은 DB 실측 기반입니다. 조성 차이가 클수록 Δ 해석은 참고용입니다.
+      </div>
+    </div>
+  );
+}
+
+function ResultSummaryBlock({
+  result,
+  showDbMeta = false,
+  wettingSectionOpen,
+  setWettingSectionOpen,
+  wettingGridRows,
+  wettingGridLoading,
+  wettingGridError,
+  loadWettingGrid
+}) {
+  return (
+    <>
+      <SummaryStrip result={result} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
+          gap: 8,
+          marginBottom: 8,
+          alignItems: "stretch"
+        }}
+      >
+        <SummaryCard label="고상선" value={`${result.solidus.toFixed(1)} ℃`} variant="solidus" />
+        <SummaryCard label="액상선" value={`${result.liquidus.toFixed(1)} ℃`} variant="liquidus" />
+        <SummaryCard label="피크" value={`${result.peak.toFixed(1)} ℃`} variant="peak" />
+        {showDbMeta ? (
+          <>
+            <SummaryCard label="DB 신뢰도" value={`${result.confidence.toFixed(1)} %`} variant="dbConfidence" />
+            <SummaryCard
+              label="종합 신뢰도"
+              value={`${result.confidence_overall.toFixed(1)} %`}
+              variant="overallConfidence"
+            />
+            <SummaryCard label="최적 일치" value={result.best_name || "N/A"} variant="bestMatch" />
+          </>
+        ) : null}
+        <SummaryCard
+          label="젖음 Fmax (IDW·측정 DB)"
+          value={formatWettingFmaxPrimary(result.props)}
+          variant="wetting"
+        />
+        <SummaryCard label="물성 DB 인장" value={formatTensileDbMpa(result.props)} variant="tensileDb" />
+      </div>
+      <SummaryWettingTensileFootnotes />
+      <CollapsibleSection
+        title="온도별 젖음 (Fmax·T₀)"
+        open={wettingSectionOpen}
+        onToggle={() => setWettingSectionOpen((v) => !v)}
+      >
+        <WettingByTempTable
+          rows={wettingGridRows ?? result.props?.wetting_by_temp}
+          proxyTemp={result.props?.wetting_temp_c}
+          source={result.evidence?.wetting?.source}
+          liquidus={result.liquidus}
+          basis={result.props?.wetting_temp_basis}
+          targetC={result.props?.wetting_temp_target_c}
+          onLoadGrid={loadWettingGrid}
+          loadPending={wettingGridLoading}
+          loadError={wettingGridError}
+        />
+      </CollapsibleSection>
+    </>
   );
 }
 
