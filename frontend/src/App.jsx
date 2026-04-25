@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from "react";
 import { createRoot } from "react-dom/client";
-import { BASELINE_ALLOY, buildSummaryStripModel } from "./summaryStrip";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -3225,53 +3224,6 @@ function SummaryCard({ label, value, variant }) {
   );
 }
 
-function SummaryStrip({ result }) {
-  const model = buildSummaryStripModel(result, BASELINE_ALLOY);
-  if (!model) return null;
-
-  return (
-    <div
-      style={{
-        padding: "10px 12px",
-        borderRadius: 12,
-        border: "1px solid var(--border-default)",
-        background: "var(--bg-table-head)",
-        marginBottom: 8
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-          gap: 8,
-          alignItems: "stretch"
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
-            Solidus
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>
-            {model.solidusC.toFixed(1)}℃{" "}
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8" }}>(+0.1°C)</span>
-          </div>
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
-            Baseline (DB)
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
-            {model.baseline.name}{" "}
-            <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-              (S={model.baseline.solidusC.toFixed(2)}℃)
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ResultSummaryBlock({
   result,
   showDbMeta = false,
@@ -3284,7 +3236,6 @@ function ResultSummaryBlock({
 }) {
   return (
     <>
-      <SummaryStrip result={result} />
       <div
         style={{
           display: "grid",
