@@ -65,6 +65,33 @@ input[type="radio"] {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* 촉각 호버: 움직임·그라데이션 펄스 끔 (전역 transition 외 명시 보강) */
+  .tactile-hit:not(.periodic-cell-btn):hover,
+  .tactile-hit:not(.periodic-cell-btn):active,
+  .periodic-element-grid > button.periodic-cell-btn:hover,
+  .periodic-element-grid > button.periodic-cell-btn:active {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .tactile-hit:not(.periodic-cell-btn):hover::before,
+  .tactile-hit:not(.periodic-cell-btn):active::before,
+  .periodic-element-grid > button.periodic-cell-btn:hover::before,
+  .periodic-element-grid > button.periodic-cell-btn:active::before {
+    opacity: 0 !important;
+  }
+
+  .app-shell select:not(:disabled):hover,
+  .app-shell select:not(:disabled):active,
+  .app-shell input[type="number"]:not(:disabled):hover,
+  .app-shell input[type="number"]:not(:disabled):active,
+  .result-imc-chip:hover,
+  .result-imc-chip:active {
+    transform: none !important;
+    filter: none !important;
+    box-shadow: none !important;
+  }
 }
 
 /* 키보드 사용자: 본문으로 건너뛰기 */
@@ -543,6 +570,51 @@ summary:focus-visible,
   .app-shell select:not(:disabled):active {
     transform: translateY(0) scale(0.99);
     filter: brightness(0.96);
+    transition-duration: 0.08s;
+  }
+
+  /* 숫자 입력: 조성 % 행과 동일한 손맛 */
+  .app-shell input[type="number"]:not(:disabled) {
+    transition:
+      transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.2s ease,
+      filter 0.2s ease;
+  }
+
+  .app-shell input[type="number"]:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06) saturate(1.04);
+    box-shadow:
+      0 3px 12px rgba(0, 0, 0, 0.28),
+      0 0 0 1px rgba(96, 165, 250, 0.28);
+  }
+
+  .app-shell input[type="number"]:not(:disabled):active {
+    transform: translateY(0) scale(0.99);
+    filter: brightness(0.96);
+    transition-duration: 0.08s;
+  }
+
+  /* IMC 칩: 도움말 칩도 살짝 뜸 */
+  .result-imc-chip {
+    transition:
+      transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.2s ease,
+      filter 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  .result-imc-chip:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08) saturate(1.06);
+    box-shadow:
+      0 4px 14px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(147, 197, 253, 0.35);
+  }
+
+  .result-imc-chip:active {
+    transform: translateY(0) scale(0.98);
+    filter: brightness(0.94);
     transition-duration: 0.08s;
   }
 }

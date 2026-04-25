@@ -36,7 +36,7 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 **Two layers (both apply):**
 
 1. **All viewports — `frontend/src/App.jsx` (inline styles)**  
-   Primary actions use explicit **`minHeight: 44`** and comfortable padding (typically **`10px 12px`**) so desktop mouse and touch stay consistent. Covered groups include:
+   Primary actions use explicit **`minHeight: 44`** and comfortable padding (typically **`10px 12px`**) so desktop mouse and touch stay consistent. Many actions use **`TactileButton`** so hover chrome stays consistent. Covered groups include:
    - Mode / report toggles (`ModeButton`, `SmallToggleButton`)
    - Favorites: save / load / delete (조성 A·B), periodic grid cells (A·B)
    - Sync retry, Sn autofill (A·B), per-row **제거**, result panel **접기/펼치기**
@@ -55,6 +55,14 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 | **FINDING-005** | Favorites + periodic (A·B) | Save / delete / grid buttons aligned to 44px + padding for both compositions (`App.jsx`). |
 | **FINDING-006** | Secondary actions | Sync retry, Sn autofill, row remove, result collapse/expand — same 44px + padding (`App.jsx`). |
 
+### Interaction (tactile hover)
+
+- **`TactileButton`** (`App.jsx`): wraps primary actions with **`tactile-hit`** + inner **`tactile-hit-label`** so `::before` gradients sit under text. **`linkTone`** maps to **`tactile-hit--link`** (e.g. trust / disclosure line).
+- **주기율표** (`periodic-cell-btn`): stronger lift + gradient in `index.css`; not doubled with `tactile-hit`.
+- **`CollapsibleSection`**: accordion header uses **`tactile-hit`**; panel uses **`role="region"`** + **`aria-controls` / `aria-labelledby`** when expanded.
+- **Fine pointer only** (`@media (hover: hover) and (pointer: fine)`): `tactile-hit`, periodic cells, **`.app-shell select`**, **`.app-shell input[type="number"]`**, **`.result-imc-chip`** share hover / active feedback where applicable.
+- **`prefers-reduced-motion: reduce`**: interactive hover transforms, filters, and gradient `::before` overlays are suppressed for **`tactile-hit`** (non-periodic) and **periodic** cells (`index.css`).
+
 ## UX (audit follow-ups)
 
 - API unreachable: amber **API 오프라인** banner (not silent failure).
@@ -65,3 +73,5 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 ## Dev
 
 Vite dev server proxies `/api`, `/docs`, `/openapi.json` to `http://127.0.0.1:8000`. If the API is down, the dev proxy returns **503** JSON with `offline: true` instead of a raw proxy **500**, so the app can fall back quietly and the console stays cleaner.
+
+- **Smoke:** from `frontend/`, run **`npm run test`** (Vitest) — verifies the `App` module loads (`src/app.smoke.test.jsx`).
