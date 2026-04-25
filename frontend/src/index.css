@@ -429,6 +429,31 @@ summary:focus-visible,
   align-items: start;
 }
 
+/* 주기율표 원소 셀: 마우스 호버·클릭 시 촉감(미세 들림·그림자). 터치만 단말은 hover 미적용 */
+@media (hover: hover) and (pointer: fine) {
+  .periodic-element-grid > button {
+    transition:
+      transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.2s ease,
+      filter 0.2s ease;
+  }
+
+  .periodic-element-grid > button:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 8px 20px rgba(0, 0, 0, 0.42),
+      0 0 0 1px rgba(96, 165, 250, 0.45);
+    filter: brightness(1.09);
+  }
+
+  .periodic-element-grid > button:active {
+    transform: translateY(0) scale(0.96);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.38);
+    filter: brightness(0.94);
+    transition-duration: 0.07s;
+  }
+}
+
 @media (max-width: 720px) {
   .app-main-grid {
     grid-template-columns: 1fr;
