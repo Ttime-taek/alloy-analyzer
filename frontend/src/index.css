@@ -429,28 +429,87 @@ summary:focus-visible,
   align-items: start;
 }
 
-/* 주기율표 원소 셀: 마우스 호버·클릭 시 촉감(미세 들림·그림자). 터치만 단말은 hover 미적용 */
+/* 주기율표 라벨: 그라데이션(::before) 위로 글자·퍼센트 유지 */
+.periodic-element-grid > button.periodic-cell-btn .periodic-cell-label {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+  white-space: pre-line;
+}
+
+/* 주기율표 원소 셀: 호버 시 그라데이션·톤 변화 + 들림 (실제 호버 가능한 포인터만) */
 @media (hover: hover) and (pointer: fine) {
-  .periodic-element-grid > button {
+  .periodic-element-grid > button.periodic-cell-btn {
+    position: relative;
+    z-index: 0;
     transition:
-      transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 0.2s ease,
-      filter 0.2s ease;
+      transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.22s ease,
+      filter 0.22s ease,
+      color 0.22s ease;
   }
 
-  .periodic-element-grid > button:hover {
+  /* 인라인 배경 위·라벨 아래: 그라데이션만 */
+  .periodic-element-grid > button.periodic-cell-btn::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(
+      152deg,
+      rgba(186, 230, 253, 0.38) 0%,
+      rgba(96, 165, 250, 0.2) 40%,
+      rgba(37, 99, 235, 0.14) 74%,
+      rgba(15, 23, 42, 0.12) 100%
+    );
+    transition: opacity 0.22s ease, background 0.15s ease;
+  }
+
+  .periodic-element-grid > button.periodic-cell-btn:hover {
     transform: translateY(-2px);
+    color: #f8fafc;
+    filter: brightness(1.07) saturate(1.1);
     box-shadow:
-      0 8px 20px rgba(0, 0, 0, 0.42),
-      0 0 0 1px rgba(96, 165, 250, 0.45);
-    filter: brightness(1.09);
+      0 10px 24px rgba(0, 0, 0, 0.48),
+      0 0 0 1px rgba(147, 197, 253, 0.55),
+      0 0 22px rgba(59, 130, 246, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -18px 28px rgba(30, 64, 175, 0.18);
   }
 
-  .periodic-element-grid > button:active {
+  .periodic-element-grid > button.periodic-cell-btn:hover::before {
+    opacity: 1;
+    background: linear-gradient(
+      158deg,
+      rgba(224, 242, 254, 0.42) 0%,
+      rgba(125, 211, 252, 0.28) 26%,
+      rgba(59, 130, 246, 0.26) 55%,
+      rgba(30, 58, 138, 0.38) 100%
+    );
+  }
+
+  .periodic-element-grid > button.periodic-cell-btn:active {
     transform: translateY(0) scale(0.96);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.38);
-    filter: brightness(0.94);
+    color: #e2e8f0;
+    filter: brightness(0.9) saturate(1.12);
+    box-shadow:
+      0 3px 10px rgba(0, 0, 0, 0.42),
+      0 0 0 1px rgba(96, 165, 250, 0.35),
+      inset 0 2px 8px rgba(15, 23, 42, 0.45);
     transition-duration: 0.07s;
+  }
+
+  .periodic-element-grid > button.periodic-cell-btn:active::before {
+    opacity: 1;
+    background: linear-gradient(
+      168deg,
+      rgba(96, 165, 250, 0.18) 0%,
+      rgba(30, 64, 175, 0.36) 48%,
+      rgba(15, 23, 42, 0.62) 100%
+    );
   }
 }
 

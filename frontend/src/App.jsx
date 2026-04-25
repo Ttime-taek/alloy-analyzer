@@ -1405,6 +1405,7 @@ export default function App() {
                 <button
                   key={el}
                   type="button"
+                  className="periodic-cell-btn"
                   onClick={() => handleElemClick("A", el)}
                   style={{
                     minHeight: 44,
@@ -1420,8 +1421,10 @@ export default function App() {
                     cursor: "pointer"
                   }}
                 >
-                  {el}
-                  {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
+                  <span className="periodic-cell-label">
+                    {el}
+                    {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1628,6 +1631,7 @@ export default function App() {
                     <button
                       key={`B-btn-${el}`}
                       type="button"
+                      className="periodic-cell-btn"
                       onClick={() => handleElemClick("B", el)}
                       style={{
                         minHeight: 44,
@@ -1643,8 +1647,10 @@ export default function App() {
                         cursor: "pointer"
                       }}
                     >
-                      {el}
-                      {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
+                      <span className="periodic-cell-label">
+                        {el}
+                        {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
+                      </span>
                     </button>
                   ))}
                 </div>
