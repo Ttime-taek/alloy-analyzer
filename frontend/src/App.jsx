@@ -3242,7 +3242,7 @@ function SummaryStrip({ result }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
           gap: 8,
           alignItems: "stretch"
         }}
@@ -3265,14 +3265,6 @@ function SummaryStrip({ result }) {
             <span style={{ color: "#94a3b8", fontWeight: 600 }}>
               (S={model.baseline.solidusC.toFixed(2)}℃)
             </span>
-          </div>
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 700, marginBottom: 4 }}>
-            ΔSolidus
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>
-            {model.deltaSolidusText}
           </div>
         </div>
       </div>
