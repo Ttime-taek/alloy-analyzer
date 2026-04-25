@@ -1374,7 +1374,8 @@ export default function App() {
                   type="button"
                   onClick={() => syncFavoritesToServer(favorites, { silent: false })}
                   style={{
-                    padding: "3px 7px",
+                    minHeight: 44,
+                    padding: "10px 12px",
                     borderRadius: 6,
                     border: "1px solid #334155",
                     background: "var(--bg-table-head)",
@@ -1432,7 +1433,8 @@ export default function App() {
               title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
               style={{
                 marginBottom: 8,
-                padding: "4px 8px",
+                minHeight: 44,
+                padding: "10px 12px",
                 borderRadius: 6,
                 border: "1px solid #0f766e",
                 background: "#064e3b",
@@ -1511,7 +1513,8 @@ export default function App() {
                     title="목록에서 제거"
                     style={{
                       flexShrink: 0,
-                      padding: "6px 8px",
+                      minHeight: 44,
+                      padding: "10px 12px",
                       borderRadius: 6,
                       border: "1px solid #475569",
                       background: "var(--border-default)",
@@ -1653,7 +1656,8 @@ export default function App() {
                   title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
                   style={{
                     marginBottom: 8,
-                    padding: "4px 8px",
+                    minHeight: 44,
+                    padding: "10px 12px",
                     borderRadius: 6,
                     border: "1px solid #0f766e",
                     background: "#064e3b",
@@ -1732,7 +1736,8 @@ export default function App() {
                         title="목록에서 제거"
                         style={{
                           flexShrink: 0,
-                          padding: "6px 8px",
+                          minHeight: 44,
+                          padding: "10px 12px",
                           borderRadius: 6,
                           border: "1px solid #475569",
                           background: "var(--border-default)",
@@ -1872,11 +1877,12 @@ export default function App() {
                   onClick={() => setResultPanelOpen((v) => !v)}
                   style={{
                     marginLeft: 6,
+                    minHeight: 44,
+                    padding: "10px 12px",
                     border: "1px solid #334155",
                     background: "#111827",
                     color: "var(--text-soft)",
                     borderRadius: 8,
-                    padding: "4px 10px",
                     fontSize: 13,
                     cursor: "pointer"
                   }}
