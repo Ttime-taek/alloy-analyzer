@@ -29,34 +29,31 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 - **`.app-shell`**: root wrapper; base `font-size: 14px` (see `index.css`).
 - **`.app-main-grid`**: two-column main grid; below **720px** width stacks to a single column with tighter gap.
 
-### Global base (design review)
+### Touch targets
 
-- **`body`**: `font-family` system stack, `background: var(--bg-page)`, `color: var(--text-primary)` (`index.css`).
-- **Form controls**: `input` / `select` / `textarea` use **16px** font size to reduce iOS zoom-on-focus; checkboxes/radios **16×16px** with `accent-color: var(--accent)` (`index.css`).
+**Target size:** interactive controls should meet at least **44×44 CSS px** where users tap (WCAG 2.5.5–aligned practice for dense tool UIs).
 
-### Touch targets (two layers)
+**Two layers (both apply):**
 
-1. **Narrow viewport (≤720px)** — `index.css` `@media (max-width: 720px)`  
-   - **`.app-shell button`**: `min-height: 44px`.  
-   - **`.app-shell select`** and **text inputs** (excluding checkbox/radio): `min-height: 44px`.  
-   - **IMC chips**, **empty-state step numbers**, **result prose heads**: slightly larger for readability/tap.  
-   - **Periodic grid (FINDING-002)**: **`.periodic-element-grid-wrap`** + **`.periodic-element-grid`** — grid **min-width** keeps each cell ≥44px; narrower viewports get **horizontal scroll** instead of shrinking cells. Grid buttons get flex centering and `touch-action: manipulation`.
+1. **All viewports — `frontend/src/App.jsx` (inline styles)**  
+   Primary actions use explicit **`minHeight: 44`** and comfortable padding (typically **`10px 12px`**) so desktop mouse and touch stay consistent. Covered groups include:
+   - Mode / report toggles (`ModeButton`, `SmallToggleButton`)
+   - Favorites: save / load / delete (조성 A·B), periodic grid cells (A·B)
+   - Sync retry, Sn autofill (A·B), per-row **제거**, result panel **접기/펼치기**
 
-2. **Composition panel — all breakpoints** — `frontend/src/App.jsx` (design review FINDING-004–006)  
-   Explicit **`minHeight: 44`** (typically with **`padding: 10px 12px`**) on: mode / literature toggles (`ModeButton`, `SmallToggleButton`), favorite save & delete (A and B), periodic element cells (A and B inline styles), **동기화 재시도**, **Sn 자동완성** (A/B), per-row **제거**, **분석 결과 접기/펼치기**.  
-   This matches **WCAG 2.5.5**-style minimum targets on desktop as well as mobile, while the CSS layer above still reinforces controls inside `.app-shell` on small screens.
+2. **Viewports ≤720px — `frontend/src/index.css`**  
+   `@media (max-width: 720px)` raises **all** `.app-shell button`, **select** and **text inputs** (except checkboxes/radios) to **`min-height: 44px`**, bumps empty-state step numbers, IMC chips, and tightens safe-area padding.  
+   The **periodic element** grid (7 columns) uses **`.periodic-element-grid-wrap`** + **`.periodic-element-grid`**: the grid keeps a **minimum width** so each cell stays ≥44px wide; if the viewport is narrower, the wrapper **scrolls horizontally** instead of shrinking cells below 44px (**FINDING-002**).
 
-## Design review log (implemented)
+### Design review — resolved findings
 
-| ID | Scope | Where |
-|----|--------|--------|
-| **FINDING-002** | Periodic 7-column grid: min width + horizontal scroll; cell min 44×44 under 720px | `index.css` (`.periodic-element-grid-wrap` / `.periodic-element-grid`) |
-| **FINDING-003** | Global typography, page colors, checkbox size, iOS-friendly form font size | `index.css` (`body`, inputs, `:root`) |
-| **FINDING-004** | Single/compare mode and fast/precision toggles | `App.jsx` — `ModeButton`, `SmallToggleButton` |
-| **FINDING-005** | Favorite save/delete and periodic grid buttons (조성 A / B symmetry) | `App.jsx` |
-| **FINDING-006** | 동기화 재시도, Sn autofill, row remove, result panel expand/collapse | `App.jsx` |
-
-**Deferred (optional):** favorite / “원소 추가” / 젖음 온도 `<select>` elements still use compact inline padding on wide viewports; narrow viewports pick up **44px** `min-height` from `.app-shell select` in `index.css`. Align desktop select padding with tokens if a later pass targets full parity.
+| ID | Area | Resolution |
+|----|------|------------|
+| **FINDING-002** | Periodic grid on narrow screens | Horizontal scroll + `min-width` grid + cell `min-width` / `min-height` 44px under `max-width: 720px` (`index.css`). |
+| **FINDING-003** | Global base & small controls | `body` font stack / background / color; `input`/`select`/`textarea` base **16px** (iOS zoom); checkbox **16×16px** + accent (`index.css`). |
+| **FINDING-004** | Mode & literature toggles | `minHeight: 44` and increased padding on tab / fast–precision controls (`App.jsx`). |
+| **FINDING-005** | Favorites + periodic (A·B) | Save / delete / grid buttons aligned to 44px + padding for both compositions (`App.jsx`). |
+| **FINDING-006** | Secondary actions | Sync retry, Sn autofill, row remove, result collapse/expand — same 44px + padding (`App.jsx`). |
 
 ## UX (audit follow-ups)
 
