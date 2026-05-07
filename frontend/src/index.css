@@ -4,6 +4,8 @@ html {
 }
 
 :root {
+  /* 본문·인라인 SVG 텍스트 공통 (SVG <text> UA 기본은 종종 Times 계열) */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --bg-page: #020617;
   --bg-elevated: #0b1220;
   --bg-table-head: #0f172a;
@@ -32,9 +34,13 @@ html {
 body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-page);
   color: var(--text-primary);
+}
+
+.app-shell svg text {
+  font-family: var(--font-sans);
 }
 
 #root {

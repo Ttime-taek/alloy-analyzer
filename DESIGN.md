@@ -2,6 +2,12 @@
 
 Single source of implementation: `frontend/src/index.css` (`:root`). Update both when changing the palette.
 
+## Typography
+
+| Token | Value | Use |
+|--------|--------|-----|
+| `--font-sans` | `system-ui, … "Segoe UI", sans-serif` | `body`, 인라인 **SVG `<text>`** (`svg text { font-family: var(--font-sans); }`) — UA 기본(Times 계열) 혼입 방지 (**FINDING-FONT-MIX**). |
+
 ## Color (dark)
 
 | Token | Value | Use |
@@ -54,6 +60,7 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 | **FINDING-004** | Mode & literature toggles | `minHeight: 44` and increased padding on tab / fast–precision controls (`App.jsx`). |
 | **FINDING-005** | Favorites + periodic (A·B) | Save / delete / grid buttons aligned to 44px + padding for both compositions (`App.jsx`). |
 | **FINDING-006** | Secondary actions | Sync retry, Sn autofill, row remove, result collapse/expand — same 44px + padding (`App.jsx`). |
+| **FINDING-FONT-MIX** | SVG `<text>` 기본 글꼴 | `:root --font-sans` + `.app-shell svg text { font-family: var(--font-sans); }` (`index.css`). |
 
 ### Interaction (tactile hover)
 
