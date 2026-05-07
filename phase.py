@@ -5,6 +5,12 @@
 - 정확한 CALPHAD 수준은 아니지만 보고서용 트렌드 출력을 목표로 함
 """
 
+try:
+    from .melting_predictor import _classify as _melting_classify_family
+except ImportError:
+    from test7.melting_predictor import _classify as _melting_classify_family
+
+
 class PhasePredictor:
     def __init__(self):
         pass
@@ -71,9 +77,10 @@ class PhasePredictor:
                 txt.append("Sb 함량이 낮아 고온 강도 향상 효과는 제한적임.")
 
         # ------------------------------
-        # Sn–Ag–Cu SAC 삼원계
+        # Sn–Ag–Cu SAC 삼원계 (melting_predictor._classify 의 SAC 분기와 동일 조건)
+        #   Sn>80, Ag>0, Cu>0, Bi≤5, In≤8 — 키 존재 여부만으로 SAC 서술 금지.
         # ------------------------------
-        if {"Sn", "Ag", "Cu"} <= set(norm.keys()):
+        if _melting_classify_family(norm) == "SAC":
             txt.append(
                 "Sn–Ag–Cu 삼원계(SAC) 특성 보유: Ag₃Sn과 Cu₆Sn₅가 공존하며, "
                 "냉각 속도에 따라 미세조직 조절 가능. "

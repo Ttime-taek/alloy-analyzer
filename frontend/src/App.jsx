@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  TUNING_GOAL_OPTIONS,
+  REFLOW_TUNING_GOAL_STORAGE_KEY,
+  recommendTuneForGoal,
+  validateProfileTune,
+  deviationHintAgainstRecommended,
+  readReflowTuningGoalInitial as _readReflowTuningGoalInitial
+} from "./reflow_tune_engine.js";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -154,6 +162,56 @@ export default function App() {
   const [imcTalDeltaC, setImcTalDeltaC] = useState(3);
   const [imcTalSec, setImcTalSec] = useState(35);
   const analysisLogScrollRef = useRef(null);
+
+  // Popup(새 창) ↔ 메인 동기화 채널
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const applyPayload = (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      if (payload.type !== "apply_reflow_tune") return;
+      if (!payload.tune || typeof payload.tune !== "object") return;
+
+      const t = payload.tune;
+      setReflowTune((prev) => ({
+        ...prev,
+        rampRate: Number.isFinite(Number(t.rampRate)) ? Number(t.rampRate) : prev.rampRate,
+        preheatTime: Number.isFinite(Number(t.preheatTime)) ? Number(t.preheatTime) : prev.preheatTime,
+        overLiquidusTime: Number.isFinite(Number(t.overLiquidusTime)) ? Number(t.overLiquidusTime) : prev.overLiquidusTime,
+        coolRate: Number.isFinite(Number(t.coolRate)) ? Number(t.coolRate) : prev.coolRate,
+        peakMargin: Number.isFinite(Number(t.peakMargin)) ? Number(t.peakMargin) : prev.peakMargin
+      }));
+
+      if (Number.isFinite(Number(payload.peakUser))) {
+        setReflowPeakUser(Number(payload.peakUser));
+      }
+    };
+
+    const onStorage = (ev) => {
+      if (!ev || ev.key !== "reflowTuneSync") return;
+      try {
+        applyPayload(JSON.parse(String(ev.newValue || "")));
+      } catch {
+        /* noop */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    let bc = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      bc = new BroadcastChannel("reflowTuneSync");
+      bc.onmessage = (ev) => applyPayload(ev?.data);
+    }
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      try {
+        bc?.close?.();
+      } catch {
+        /* noop */
+      }
+    };
+  }, []);
 
   const normalizeFavorites = (data) => {
     if (!Array.isArray(data)) return [];
@@ -2264,7 +2322,17 @@ export default function App() {
                     />
                     <RegulationCard norm={result.norm} />
                   </div>
-                  <ReflowChart profile={reflowProfile} solidus={result.solidus} liquidus={result.liquidus} expandable />
+                  <ReflowChart
+                    profile={reflowProfile}
+                    solidus={result.solidus}
+                    liquidus={result.liquidus}
+                    expandable
+                    expandPayload={{
+                      result,
+                      initialTune: reflowTune,
+                      initialPeakUser: reflowPeakUser
+                    }}
+                  />
                   <ReflowTuneBar
                     liquidus={result.liquidus}
                     modelPeak={result.peak}
@@ -2295,6 +2363,8 @@ export default function App() {
                     talDeltaC={imcTalDeltaC}
                     talSec={imcTalSec}
                     reflowProfile={reflowProfile}
+                    reflowTune={reflowTune}
+                    presetName={reflowProfile?.meta?.presetName || pickPresetName(result)}
                     onSubstrateChange={setImcSubstrate}
                     onTalModeChange={setImcTalMode}
                     onTalRefChange={setImcTalRef}
@@ -3969,6 +4039,18 @@ const REFLOW_PRESETS = {
     peak_min: 175.0,
     peak_max: 190.0
   },
+  "73(Sn-3Ag-15Bi-0.03In)": {
+    ramp_rate: 1.5,
+    preheat_time: 90.0,
+    over_liquidus_time: 65.0,
+    cool_rate: 2.5,
+    peak_margin: 35.0,
+    preheat_start: 100.0,
+    preheat_end: 125.0,
+    reflow_thr: 206.0,
+    peak_min: 236.0,
+    peak_max: 250.0
+  },
   "Sn-Bi(저융점)": { ramp_rate: 1.3, preheat_time: 80.0, over_liquidus_time: 30.0, cool_rate: 2.5, peak_margin: 20.0 },
   "Sn-In(저융점)": { ramp_rate: 1.3, preheat_time: 80.0, over_liquidus_time: 30.0, cool_rate: 2.5, peak_margin: 20.0 },
   "Sn-Pb": { ramp_rate: 1.5, preheat_time: 90.0, over_liquidus_time: 40.0, cool_rate: 3.0, peak_margin: 25.0 },
@@ -3987,6 +4069,10 @@ function pickPresetName(result) {
   const bi = Number(norm.Bi || 0);
   const inp = Number(norm.In || 0);
   if (bi >= 40.0 && family === "SnBi") return "78(Sn-0.4Ag-57.6Bi)";
+  if (bi >= 10.0 && bi < 40.0 && ag >= 1.0 && cu < 0.3) {
+    // 73 타입(Sn-3Ag-15Bi-0.03In 등) — wide-paste 중-Bi
+    return "73(Sn-3Ag-15Bi-0.03In)";
+  }
   if (bi < 1.0 && inp < 1.0 && Math.abs(cu - 0.7) <= 0.25) {
     if (Math.abs(ag - 0.3) <= 0.35) return "86(Sn-0.3Ag-0.7Cu)";
     if (Math.abs(ag - 1.0) <= 0.35) return "90(Sn-1.0Ag-0.7Cu)";
@@ -4262,13 +4348,26 @@ function ImcInterfaceCard({
   talDeltaC,
   talSec,
   reflowProfile,
+  reflowTune,
+  presetName,
   onSubstrateChange,
   onTalModeChange,
   onTalRefChange,
   onTalDeltaChange,
   onTalSecChange
 }) {
+  // Hooks는 early-return 보다 위에서 호출되어야 함(React rules-of-hooks).
+  const guardrailRes = useMemo(
+    () => validateProfileTune(reflowTune, presetName),
+    [reflowTune, presetName]
+  );
   if (!result) return null;
+  const guardrailHeadline = (() => {
+    if (guardrailRes.errors.length > 0) return { tone: "ERR", msg: guardrailRes.errors[0] };
+    if (guardrailRes.warnings.length > 0) return { tone: "WARN", msg: guardrailRes.warnings[0] };
+    if (guardrailRes.oks.length > 0) return { tone: "OK", msg: guardrailRes.oks[0] };
+    return null;
+  })();
   const metrics = computeProfileMetrics(result, talRef, talDeltaC, {
     points: reflowProfile?.points,
     peakForMetrics: reflowProfile?.meta?.peak
@@ -4396,6 +4495,51 @@ function ImcInterfaceCard({
         TAL {talS.toFixed(1)}s ({metrics.talRefLabel}={metrics.talThrC.toFixed(1)}℃) | S~L{" "}
         {metrics.tSlS.toFixed(1)}s | Peak-5 {metrics.tPk5S.toFixed(1)}s
       </div>
+
+      {/* ─── 튜닝 가드레일 미니 요약 (리플로우 튜너와 동일 규칙) ─── */}
+      {guardrailHeadline ? (
+        <details
+          style={{
+            marginTop: 8,
+            padding: "6px 8px",
+            borderRadius: 6,
+            border: "1px solid #334155",
+            background: "var(--bg-page)"
+          }}
+        >
+          <summary
+            style={{
+              fontSize: 12,
+              cursor: "pointer",
+              color:
+                guardrailHeadline.tone === "ERR"
+                  ? "#f87171"
+                  : guardrailHeadline.tone === "WARN"
+                  ? "#fbbf24"
+                  : "#86efac"
+            }}
+          >
+            {guardrailHeadline.tone === "ERR" ? "❌" : guardrailHeadline.tone === "WARN" ? "⚠" : "✓"}{" "}
+            튜닝 가드레일: {guardrailHeadline.msg}
+            {guardrailRes.errors.length + guardrailRes.warnings.length + guardrailRes.oks.length > 1 ? (
+              <span style={{ marginLeft: 6, color: "#64748b" }}>
+                (+{guardrailRes.errors.length + guardrailRes.warnings.length + guardrailRes.oks.length - 1})
+              </span>
+            ) : null}
+          </summary>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+            {guardrailRes.errors.map((m, i) => (
+              <div key={`ie-${i}`} style={{ fontSize: 12, color: "#f87171" }}>❌ {m}</div>
+            ))}
+            {guardrailRes.warnings.map((m, i) => (
+              <div key={`iw-${i}`} style={{ fontSize: 12, color: "#fbbf24" }}>⚠ {m}</div>
+            ))}
+            {guardrailRes.oks.map((m, i) => (
+              <div key={`io-${i}`} style={{ fontSize: 12, color: "#86efac" }}>✓ {m}</div>
+            ))}
+          </div>
+        </details>
+      ) : null}
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(260px,1.2fr) minmax(210px,0.8fr)", gap: 10 }}>
         <div
@@ -4638,8 +4782,10 @@ function ReflowTuneBar({
   onReflowTuneChange,
   onPeakChange,
   onResetPeak,
-  onResetTune
+  onResetTune,
+  storageWindow
 }) {
+  const sw = storageWindow || (typeof window !== "undefined" ? window : null);
   const liq = Number(liquidus);
   const mp = Number(modelPeak);
   const peakMin = Number.isFinite(liq) ? liq + 10 : 200;
@@ -4647,6 +4793,66 @@ function ReflowTuneBar({
   const peakInput = Number.isFinite(reflowPeakUser) ? reflowPeakUser : mp;
   const rt = reflowTune || DEFAULT_REFLOW_TUNE;
   const patch = (key, v) => onReflowTuneChange({ ...rt, [key]: v });
+
+  /** 튜닝 목표 — localStorage에 유지(새로고침·탭 이동 후에도 동일) */
+  const [tuningGoal, setTuningGoal] = useState(() => {
+    try {
+      const v = sw?.localStorage?.getItem?.(REFLOW_TUNING_GOAL_STORAGE_KEY);
+      if (v && TUNING_GOAL_OPTIONS.includes(v)) return v;
+    } catch {
+      /* noop */
+    }
+    return "없음";
+  });
+  useEffect(() => {
+    try {
+      sw?.localStorage?.setItem?.(REFLOW_TUNING_GOAL_STORAGE_KEY, tuningGoal);
+    } catch {
+      /* noop */
+    }
+  }, [tuningGoal, sw]);
+
+  const validation = useMemo(() => validateProfileTune(rt, presetName || "AUTO"), [rt, presetName]);
+
+  /** 목표를 고른 경우에만: 슬라이더 현재값이 권장 대비 얼마나 벗어났는지 한 줄 표시 */
+  const vsRecommendedLine = useMemo(
+    () => deviationHintAgainstRecommended(tuningGoal, rt, presetName),
+    [tuningGoal, rt, presetName]
+  );
+  const [applyToast, setApplyToast] = useState(null);
+  const applyToastTimerRef = useRef(null);
+
+  /** 권장값 적용 시: 변경 전/후 diff를 만들어 토스트로 노출 */
+  const applyRecommended = () => {
+    const rec = recommendTuneForGoal(tuningGoal, presetName);
+    const labels = {
+      rampRate: "1차 램프(℃/s)",
+      preheatTime: "프리히트(s)",
+      overLiquidusTime: "TAL(s)",
+      coolRate: "냉각(℃/s)",
+      peakMargin: "피크 여유(℃)"
+    };
+    const diff = [];
+    for (const k of Object.keys(rec)) {
+      const before = Number(rt?.[k]);
+      const after = Number(rec[k]);
+      if (!Number.isFinite(after)) continue;
+      const delta = Number.isFinite(before) ? after - before : 0;
+      if (!Number.isFinite(before) || Math.abs(delta) > 0.005) {
+        diff.push({ key: k, label: labels[k] || k, before, after, delta });
+      }
+    }
+    onReflowTuneChange({ ...rt, ...rec });
+    setApplyToast({
+      goal: tuningGoal,
+      preset: presetName || "—",
+      ts: Date.now(),
+      diff
+    });
+    if (applyToastTimerRef.current) clearTimeout(applyToastTimerRef.current);
+    applyToastTimerRef.current = setTimeout(() => setApplyToast(null), 6000);
+  };
+
   return (
     <div
       style={{
@@ -4667,6 +4873,53 @@ function ReflowTuneBar({
       <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
         프리셋(AUTO): <strong style={{ color: "var(--text-soft)" }}>{presetName || "—"}</strong>
       </div>
+
+      {/* ─── 튜닝 목표 + 권장값 적용 ─── */}
+      <div
+        style={{
+          display: "flex", flexWrap: "wrap", gap: 8,
+          alignItems: "center", marginBottom: 10
+        }}
+      >
+        <span style={{ fontSize: 12, color: "var(--text-soft)", fontWeight: 600 }}>튜닝 목표</span>
+        <select
+          value={tuningGoal}
+          onChange={(e) => setTuningGoal(e.target.value)}
+          style={{
+            background: "var(--bg-page)", border: "1px solid #334155",
+            color: "#e2e8f0", padding: "6px 8px", borderRadius: 6, fontSize: 13
+          }}
+        >
+          {TUNING_GOAL_OPTIONS.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+        <TactileButton
+          onClick={applyRecommended}
+          style={{
+            padding: "6px 10px", borderRadius: 6,
+            border: "1px solid #166534", background: "#16a34a",
+            color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer"
+          }}
+        >
+          권장값 적용
+        </TactileButton>
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          (현재 합금 프리셋 + 목표 → 공급사 가이드 기반 권장값으로 한 번에 세팅)
+        </span>
+      </div>
+      {tuningGoal !== "없음" && vsRecommendedLine ? (
+        <div
+          style={{
+            marginBottom: 10,
+            fontSize: 11,
+            color: "#94a3b8",
+            lineHeight: 1.45
+          }}
+        >
+          <span style={{ color: "#64748b", fontWeight: 600 }}>목표 대비 Δ(현재 − 권장)</span>: {vsRecommendedLine}
+        </div>
+      ) : null}
       <div
         style={{
           display: "grid",
@@ -4748,6 +5001,100 @@ function ReflowTuneBar({
           />
         </label>
       </div>
+      {/* ─── 권장값 적용 결과 토스트 (변경 전/후 diff) ─── */}
+      {applyToast ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid #166534",
+            background: "rgba(22,163,74,0.10)"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 12, color: "#86efac", fontWeight: 700 }}>
+              권장값 적용됨 — 목표: {applyToast.goal} · 프리셋: {applyToast.preset}
+            </span>
+            <button
+              type="button"
+              onClick={() => setApplyToast(null)}
+              style={{
+                marginLeft: "auto", background: "transparent",
+                border: "1px solid #166534", color: "#86efac",
+                padding: "2px 6px", borderRadius: 4, fontSize: 11, cursor: "pointer"
+              }}
+            >
+              닫기
+            </button>
+          </div>
+          {applyToast.diff.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#86efac" }}>
+              변경된 항목이 없습니다(현재값이 이미 권장값과 같음).
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {applyToast.diff.map((d) => {
+                const sign = d.delta > 0 ? "+" : "";
+                const isInt = d.key === "preheatTime" || d.key === "overLiquidusTime" || d.key === "peakMargin";
+                const fmt = (v) => (Number.isFinite(v) ? (isInt ? v.toFixed(0) : v.toFixed(2)) : "—");
+                return (
+                  <div key={d.key} style={{ fontSize: 12, color: "#e2e8f0" }}>
+                    <span style={{ color: "#94a3b8" }}>{d.label}: </span>
+                    <span>{fmt(d.before)}</span>
+                    <span style={{ color: "#64748b", margin: "0 4px" }}>→</span>
+                    <span style={{ fontWeight: 700 }}>{fmt(d.after)}</span>
+                    {Number.isFinite(d.delta) ? (
+                      <span style={{ marginLeft: 6, color: d.delta > 0 ? "#86efac" : "#fbbf24" }}>
+                        ({sign}{isInt ? d.delta.toFixed(0) : d.delta.toFixed(2)})
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* ─── 가드레일 검증 ─── */}
+      <div
+        style={{
+          marginTop: 12,
+          padding: "8px 10px",
+          borderRadius: 8,
+          border: "1px solid #334155",
+          background: "var(--bg-page)"
+        }}
+      >
+        <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 700, marginBottom: 6 }}>
+          가드레일 검증
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {validation.errors.map((m, i) => (
+            <div key={`e-${i}`} style={{ fontSize: 12, color: "#f87171" }}>❌ {m}</div>
+          ))}
+          {validation.warnings.map((m, i) => (
+            <div key={`w-${i}`} style={{ fontSize: 12, color: "#fbbf24" }}>⚠ {m}</div>
+          ))}
+          {validation.errors.length === 0 && validation.warnings.length === 0 && validation.oks.length > 0 ? (
+            <div style={{ fontSize: 12, color: "#86efac", fontWeight: 600 }}>
+              ✅ 가드레일 통과 — 오류·경고 없음 (아래 ✓ 참고)
+            </div>
+          ) : null}
+          {validation.oks.map((m, i) => (
+            <div key={`o-${i}`} style={{ fontSize: 12, color: "#86efac" }}>✓ {m}</div>
+          ))}
+          {validation.errors.length === 0 &&
+          validation.warnings.length === 0 &&
+          validation.oks.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#64748b" }}>
+              검증 결과 없음 — 분석 후 AUTO가 합금에 맞는 프리셋으로 확정되면 카테고리별 밴드가 채워집니다.
+            </div>
+          ) : null}
+        </div>
+      </div>
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12 }}>
         <TactileButton
           onClick={onResetPeak}
@@ -4938,7 +5285,7 @@ function RegulationCard({ norm }) {
   );
 }
 
-function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable = false }) {
+function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable = false, expandPayload = null }) {
   if (!profile?.points?.length || !profile.meta) return null;
   const peak = Number(profile.meta.peak);
   if (!Number.isFinite(solidus) || !Number.isFinite(liquidus) || !Number.isFinite(peak)) {
@@ -5022,7 +5369,11 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
         </div>
         {expandable ? (
           <TactileButton
-            onClick={() => openReflowChartInNewWindow(profile, solidus, liquidus)}
+            onClick={() =>
+              openReflowChartInNewWindow(
+                expandPayload || { profile, solidus, liquidus }
+              )
+            }
             style={{
               padding: "8px 14px",
               borderRadius: 8,
@@ -5253,27 +5604,198 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
   );
 }
 
-/** 메인 페이지의 「새 창으로 확대」에서 사용 — 팝업에 큰 차트만 렌더 */
-function openReflowChartInNewWindow(profile, solidus, liquidus) {
-  if (!profile?.points?.length) return;
-  const w = window.open(
-    "",
-    "reflowProfileExpand",
-    "noopener,noreferrer,width=1080,height=840,scrollbars=yes,resizable=yes"
+function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow }) {
+  const [peakUser, setPeakUser] = useState(
+    Number.isFinite(initialPeakUser) ? Number(initialPeakUser) : Number(result?.peak || 0)
   );
+  const [tune, setTune] = useState(initialTune || DEFAULT_REFLOW_TUNE);
+
+  const profile = useMemo(() => {
+    try {
+      return buildPeakProfilePoints(result, tune, peakUser);
+    } catch {
+      return null;
+    }
+  }, [result, tune, peakUser]);
+
+  const solidus = Number(result?.solidus || 0);
+  const liquidus = Number(result?.liquidus || 0);
+  const modelPeak = Number(result?.peak || 0);
+  const reflowPeakEffective = Number(profile?.meta?.peak ?? modelPeak ?? 0);
+
+  return (
+    <div style={{ padding: 16, maxWidth: 1160, margin: "0 auto" }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 10
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "baseline" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>리플로우 프로파일 (확대)</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>
+            새 창에서도 피크·튜닝을 바꾸면 곡선이 즉시 갱신됩니다.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <TactileButton
+            onClick={() => {
+              const payload = {
+                type: "apply_reflow_tune",
+                ts: Date.now(),
+                tune,
+                peakUser
+              };
+              try {
+                const BC = hostWindow?.BroadcastChannel || BroadcastChannel;
+                if (typeof BC !== "undefined") {
+                  const bc = new BC("reflowTuneSync");
+                  bc.postMessage(payload);
+                  bc.close?.();
+                } else {
+                  (hostWindow?.localStorage || window.localStorage).setItem("reflowTuneSync", JSON.stringify(payload));
+                }
+              } catch {
+                try {
+                  (hostWindow?.localStorage || window.localStorage).setItem("reflowTuneSync", JSON.stringify(payload));
+                } catch {
+                  /* noop */
+                }
+              }
+            }}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #166534",
+              background: "#16a34a",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: "pointer",
+              whiteSpace: "nowrap"
+            }}
+          >
+            메인에 적용
+          </TactileButton>
+          <TactileButton
+            onClick={() => hostWindow?.close?.()}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #475569",
+              background: "linear-gradient(180deg, var(--border-default) 0%, var(--bg-table-head) 100%)",
+              color: "#e2e8f0",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              whiteSpace: "nowrap"
+            }}
+          >
+            닫기
+          </TactileButton>
+        </div>
+      </div>
+
+      <ReflowChart profile={profile} solidus={solidus} liquidus={liquidus} layoutScale={2} expandable={false} />
+      <ReflowTuneBar
+        liquidus={liquidus}
+        modelPeak={modelPeak}
+        reflowPeakUser={peakUser}
+        reflowPeakEffective={reflowPeakEffective}
+        presetName={profile?.meta?.presetName}
+        reflowTune={tune}
+        onReflowTuneChange={setTune}
+        onPeakChange={setPeakUser}
+        onResetPeak={() => setPeakUser(Number(result?.peak || 0))}
+        onResetTune={() => {
+          const name = pickPresetName(result);
+          const pset = { ...REFLOW_PRESETS.범용, ...(REFLOW_PRESETS[name] || {}) };
+          setTune({
+            rampRate: pset.ramp_rate,
+            preheatTime: pset.preheat_time,
+            overLiquidusTime: pset.over_liquidus_time,
+            coolRate: pset.cool_rate,
+            peakMargin: pset.peak_margin
+          });
+        }}
+        storageWindow={hostWindow}
+      />
+    </div>
+  );
+}
+
+/** 메인 페이지의 「새 창으로 확대」에서 사용 — 팝업에 차트 + 튜닝 UI 렌더 */
+function openReflowChartInNewWindow(payload) {
+  const p = payload || {};
+  const result = p.result;
+  const profile = p.profile;
+  const solidus = p.solidus;
+  const liquidus = p.liquidus;
+  const initialTune = p.initialTune;
+  const initialPeakUser = p.initialPeakUser;
+
+  if (result) {
+    // ok
+  } else if (!profile?.points?.length) {
+    return;
+  }
+  const w = window.open("", "reflowProfileExpand", "width=1080,height=840,scrollbars=yes,resizable=yes");
   if (!w) {
     window.alert("팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요.");
     return;
   }
-  w.document.open();
-  w.document.write(
-    "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><title>리플로우 프로파일 (확대)</title></head><body style=\"margin:0;background:#020617;\"></body></html>"
-  );
-  w.document.close();
-  const root = createRoot(w.document.body);
-  root.render(
-    <ReflowChart profile={profile} solidus={solidus} liquidus={liquidus} layoutScale={2} expandable={false} />
-  );
+  try {
+    // best-effort: noopener
+    w.opener = null;
+  } catch {
+    /* noop */
+  }
+
+  try {
+    // Reuse the same popup tab/window if already opened.
+    if (w.closed) return;
+    if (!w.__reflowRoot) {
+      w.document.open();
+      w.document.write(
+        "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><title>리플로우 프로파일 (확대)</title></head><body style=\"margin:0;background:#020617;\"></body></html>"
+      );
+      w.document.close();
+
+      // 메인과 동일한 CSS/스타일을 팝업에도 주입(동일 origin 가정)
+      try {
+        const srcNodes = document.querySelectorAll("link[rel=\"stylesheet\"], style");
+        srcNodes.forEach((n) => {
+          const clone = n.cloneNode(true);
+          w.document.head.appendChild(clone);
+        });
+      } catch {
+        /* noop */
+      }
+
+      w.__reflowRoot = createRoot(w.document.body);
+    }
+    w.__reflowRoot.render(
+      result ? (
+        <PopupReflowTuner
+          result={result}
+          initialTune={initialTune}
+          initialPeakUser={initialPeakUser}
+          hostWindow={w}
+        />
+      ) : (
+        <ReflowChart profile={profile} solidus={solidus} liquidus={liquidus} layoutScale={2} expandable={false} />
+      )
+    );
+    w.focus?.();
+  } catch (e) {
+    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    window.alert(`새 창 렌더링 실패: ${msg}`);
+  }
 }
 
 

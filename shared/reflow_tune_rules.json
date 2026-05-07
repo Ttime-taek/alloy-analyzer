@@ -1,0 +1,169 @@
+{
+  "$schema_hint": "reflow_tune_rules — bases/validation/goalRecommendOps 는 단일 원천. goalRecommendOps 연산은 py/js 동일 인터프리터로 실행.",
+  "version": 2,
+  "tuningGoalOptions": ["없음", "젖음(B)", "보이드(C)", "B+C", "슬럼프억제", "IMC최소"],
+
+  "bases": {
+    "high_bi": {
+      "ramp_rate": 1.5,
+      "preheat_time": 90,
+      "over_liquidus_time": 75,
+      "cool_rate": 2.5,
+      "peak_margin": 40
+    },
+    "mid_bi": {
+      "ramp_rate": 1.5,
+      "preheat_time": 90,
+      "over_liquidus_time": 65,
+      "cool_rate": 2.5,
+      "peak_margin": 35
+    },
+    "sn_bi": {
+      "ramp_rate": 1.3,
+      "preheat_time": 80,
+      "over_liquidus_time": 30,
+      "cool_rate": 2.5,
+      "peak_margin": 25
+    },
+    "sn_pb": {
+      "ramp_rate": 1.5,
+      "preheat_time": 90,
+      "over_liquidus_time": 40,
+      "cool_rate": 3.0,
+      "peak_margin": 25
+    },
+    "default": {
+      "ramp_rate": 1.5,
+      "preheat_time": 90,
+      "over_liquidus_time": 40,
+      "cool_rate": 3.0,
+      "peak_margin": 25
+    }
+  },
+
+  "validation": {
+    "tal_fatal_lt": 25,
+    "high_bi": {
+      "tal_warn_lt": 50,
+      "tal_warn_gt": 100,
+      "tal_ok_low": 50,
+      "tal_ok_high": 100
+    },
+    "mid_bi": {
+      "tal_warn_lt": 50,
+      "tal_warn_gt": 80,
+      "tal_ok_low": 50,
+      "tal_ok_high": 80
+    },
+    "default": {
+      "tal_max_sac": 90,
+      "tal_max_sn_bi": 180,
+      "tal_max_other": 90
+    },
+    "ramp": {
+      "warn_lt": 0.8,
+      "warn_gt": 2.5,
+      "ok_low": 1.3,
+      "ok_high": 1.7
+    },
+    "preheat": {
+      "bi_fatal_lt": 60,
+      "bi_warn_gt": 120,
+      "bi_ok_low": 80,
+      "bi_ok_high": 110,
+      "std_fatal_lt": 60,
+      "std_warn_gt": 140,
+      "std_ok_low": 80,
+      "std_ok_high": 110
+    },
+    "peak_margin": {
+      "high_bi_fatal_lt": 30,
+      "high_bi_warn_gt": 55,
+      "high_bi_ok_low": 35,
+      "high_bi_ok_high": 50,
+      "mid_bi_fatal_lt": 25,
+      "mid_bi_warn_gt": 50,
+      "mid_bi_ok_low": 30,
+      "mid_bi_ok_high": 44,
+      "default_fatal_lt": 10,
+      "default_warn_gt": 40
+    },
+    "cool": {
+      "warn_gt": 4.0,
+      "warn_lt": 1.0
+    }
+  },
+
+  "goalRecommendOps": {
+    "젖음(B)": {
+      "high_bi": [
+        ["max", "over_liquidus_time", 90],
+        ["add_then_min", "peak_margin", 5, 50]
+      ],
+      "mid_bi": [
+        ["max", "over_liquidus_time", 75],
+        ["add_then_min", "peak_margin", 5, 44]
+      ],
+      "default": [
+        ["max", "over_liquidus_time", 50],
+        ["floor_after_add", "peak_margin", 3, 28]
+      ]
+    },
+    "보이드(C)": {
+      "high_bi": [
+        ["merge", {"preheat_time": 90, "ramp_rate": 1.4, "over_liquidus_time": 70}]
+      ],
+      "mid_bi": [
+        ["merge", {"preheat_time": 90, "ramp_rate": 1.4, "over_liquidus_time": 55}]
+      ],
+      "default": [
+        ["when_cat_equals", "SAC", [["set", "preheat_time", 90]]],
+        ["max_minus", "ramp_rate", 0.1, 1.3],
+        ["min", "over_liquidus_time", 45]
+      ]
+    },
+    "B+C": {
+      "high_bi": [
+        ["merge", {"ramp_rate": 1.5, "preheat_time": 90, "over_liquidus_time": 75, "peak_margin": 40, "cool_rate": 2.5}]
+      ],
+      "mid_bi": [
+        ["merge", {"ramp_rate": 1.5, "preheat_time": 90, "over_liquidus_time": 65, "peak_margin": 35, "cool_rate": 2.5}]
+      ],
+      "default": [
+        ["merge", {"ramp_rate": 1.5, "preheat_time": 90, "over_liquidus_time": 42, "peak_margin": 25, "cool_rate": 3.0}]
+      ]
+    },
+    "슬럼프억제": {
+      "high_bi": [
+        ["max_minus", "ramp_rate", 0.2, 1.2],
+        ["max_minus", "preheat_time", 10, 80]
+      ],
+      "mid_bi": [
+        ["max_minus", "ramp_rate", 0.2, 1.2],
+        ["max_minus", "preheat_time", 10, 80],
+        ["max_minus", "ramp_rate", 0.1, 1.1]
+      ],
+      "default": [
+        ["max_minus", "ramp_rate", 0.2, 1.2],
+        ["max_minus", "preheat_time", 10, 80]
+      ]
+    },
+    "IMC최소": {
+      "high_bi": [
+        ["clamp", "over_liquidus_time", 50, 60],
+        ["floor_after_subtract", "peak_margin", 5, 35],
+        ["min_add", "cool_rate", 0.3, 3.5]
+      ],
+      "mid_bi": [
+        ["clamp", "over_liquidus_time", 50, 55],
+        ["floor_after_subtract", "peak_margin", 5, 30],
+        ["min_add", "cool_rate", 0.3, 3.5]
+      ],
+      "default": [
+        ["min", "over_liquidus_time", 30],
+        ["floor_after_subtract", "peak_margin", 5, 15],
+        ["min_add", "cool_rate", 0.5, 4.0]
+      ]
+    }
+  }
+}

@@ -184,6 +184,9 @@ class AlloyGUI:
             "cool_rate": 2.0,          # C/s
             "peak_margin": 20.0,       # C above liquidus
         }
+        # 튜닝 목표(공급사 가이드 기반 자동 권장값 산출용)
+        # 없음 / 젖음(B) / 보이드(C) / B+C / 슬럼프억제 / IMC최소
+        self.profile_goal = tk.StringVar(value="없음")
         self.imc_substrate = tk.StringVar(value="Cu-OSP")
         self.imc_tal_mode = tk.StringVar(value="AUTO(profile)")
         self.imc_tal_ref = tk.StringVar(value="Liquidus")
@@ -218,6 +221,10 @@ class AlloyGUI:
             preset = data.get("profile_preset")
             if isinstance(preset, str) and preset.strip():
                 self.profile_preset.set(preset.strip())
+            goal = data.get("profile_goal")
+            valid_goal = {"없음", "젖음(B)", "보이드(C)", "B+C", "슬럼프억제", "IMC최소"}
+            if isinstance(goal, str) and goal.strip() in valid_goal:
+                self.profile_goal.set(goal.strip())
             tune = data.get("profile_tune")
             if isinstance(tune, dict):
                 for k in list(self.profile_tune.keys()):
@@ -283,6 +290,7 @@ class AlloyGUI:
             self.imc_tal_delta_c.set(f"{dlt:.1f}".rstrip("0").rstrip("."))
             data = {
                 "profile_preset": (self.profile_preset.get() or "AUTO").strip(),
+                "profile_goal": (self.profile_goal.get() or "없음").strip(),
                 "profile_tune": dict(self.profile_tune),
                 "literature_mode": (
                     self.literature_mode.get()
@@ -302,6 +310,46 @@ class AlloyGUI:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             return
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 프로파일 튜닝 강화: 합금 카테고리 / 목표 기반 권장값 / 가드레일 검증
+    # ─────────────────────────────────────────────────────────────────────────
+    def _alloy_category_from_preset(self, preset_name: str) -> str:
+        """프리셋 이름을 합금 카테고리로 매핑 — shared/reflow_tune_rules.json 로직(reflow_tune_engine)."""
+        try:
+            from reflow_tune_engine import classify_preset
+
+            return str(classify_preset(preset_name).get("cat") or "범용")
+        except Exception:
+            return "범용"
+
+    def _is_high_bi_preset(self, preset_name: str) -> bool:
+        try:
+            from reflow_tune_engine import classify_preset
+
+            return bool(classify_preset(preset_name).get("is_high_bi"))
+        except Exception:
+            return False
+
+    def _is_mid_bi_preset(self, preset_name: str) -> bool:
+        try:
+            from reflow_tune_engine import classify_preset
+
+            return bool(classify_preset(preset_name).get("is_mid_bi"))
+        except Exception:
+            return False
+
+    def _recommend_tune_for_goal(self, goal: str, preset_name: str) -> dict:
+        """합금 + 목표 → 권장 profile_tune(shared/reflow_tune_rules.json 기반)."""
+        from reflow_tune_engine import recommend_tune_for_goal as _rec
+
+        return _rec(goal, preset_name)
+
+    def _validate_profile_tune(self, tune: dict, preset_name: str) -> dict:
+        """가드레일 검증 — reflow_tune_engine.validate_profile_tune."""
+        from reflow_tune_engine import validate_profile_tune as _val
+
+        return _val(tune, preset_name)
 
     def _get_tal_threshold_c(self, liquidus_c: float):
         ref = (self.imc_tal_ref.get() or "Liquidus").strip()
@@ -456,6 +504,7 @@ class AlloyGUI:
             "51(Sn-3Ag-0.5Cu-3Bi)": {"ramp_rate": 1.5, "preheat_time": 90.0, "over_liquidus_time": 25.0, "cool_rate": 3.0, "peak_margin": 30.0, "peak_min": 230.0, "peak_max": 255.0},
             "92(Sn-0.3Ag-0.5Cu-3Bi)": {"ramp_rate": 1.5, "preheat_time": 90.0, "over_liquidus_time": 25.0, "cool_rate": 3.0, "peak_margin": 30.0, "peak_min": 235.0, "peak_max": 255.0},
             "78(Sn-0.4Ag-57.6Bi)": {"ramp_rate": 1.5, "preheat_time": 90.0, "over_liquidus_time": 75.0, "cool_rate": 2.5, "peak_margin": 35.0, "preheat_start": 100.0, "preheat_end": 125.0, "reflow_thr": 140.0, "peak_min": 175.0, "peak_max": 190.0},
+            "73(Sn-3Ag-15Bi-0.03In)": {"ramp_rate": 1.5, "preheat_time": 90.0, "over_liquidus_time": 65.0, "cool_rate": 2.5, "peak_margin": 35.0, "preheat_start": 100.0, "preheat_end": 125.0, "reflow_thr": 206.0, "peak_min": 236.0, "peak_max": 250.0},
             "Sn-Bi(저융점)":     {"ramp_rate": 1.3, "preheat_time": 80.0, "over_liquidus_time": 30.0, "cool_rate": 2.5, "peak_margin": 20.0},
             "Sn-In(저융점)":     {"ramp_rate": 1.3, "preheat_time": 80.0, "over_liquidus_time": 30.0, "cool_rate": 2.5, "peak_margin": 20.0},
             "Sn-Pb":            {"ramp_rate": 1.5, "preheat_time": 90.0, "over_liquidus_time": 40.0, "cool_rate": 3.0, "peak_margin": 25.0},
@@ -473,6 +522,9 @@ class AlloyGUI:
             inp = float(norm.get("In", 0.0) or 0.0)
             if bi >= 40.0 and family == "SnBi":
                 preset_name = "78(Sn-0.4Ag-57.6Bi)"
+            elif 10.0 <= bi < 40.0 and ag >= 1.0 and cu < 0.3:
+                # 73 타입(Sn-3Ag-15Bi-0.03In 등) — wide-paste 중-Bi
+                preset_name = "73(Sn-3Ag-15Bi-0.03In)"
             elif bi < 1.0 and inp < 1.0 and abs(cu - 0.7) <= 0.25:
                 if abs(ag - 0.3) <= 0.35:
                     preset_name = "86(Sn-0.3Ag-0.7Cu)"
@@ -1716,7 +1768,7 @@ class AlloyGUI:
             return
         win.title("자동 프로파일 튜닝")
         win.configure(bg=UI_BG)
-        win.geometry("560x380")
+        win.geometry("640x740")
 
         tk.Label(
             win,
@@ -1725,12 +1777,88 @@ class AlloyGUI:
             font=("Segoe UI", 13, "bold"), pady=8
         ).pack(fill="x")
 
-        body = tk.Frame(win, bg=UI_BG, padx=12, pady=12)
+        # ─── 상단: 튜닝 목표 + 권장값 적용 ───
+        goal_bar = tk.Frame(win, bg=UI_BG, padx=12, pady=8)
+        goal_bar.pack(fill="x")
+
+        tk.Label(goal_bar, text="튜닝 목표:", bg=UI_BG, fg="#e5e7eb",
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+
+        try:
+            from reflow_tune_engine import tuning_goal_options
+
+            goal_options = tuning_goal_options()
+        except Exception:
+            goal_options = ["없음", "젖음(B)", "보이드(C)", "B+C", "슬럼프억제", "IMC최소"]
+        try:
+            from tkinter import ttk as _ttk
+            goal_combo = _ttk.Combobox(
+                goal_bar, textvariable=self.profile_goal,
+                values=goal_options, state="readonly", width=14,
+            )
+            goal_combo.pack(side="left", padx=8)
+        except Exception:
+            tk.OptionMenu(goal_bar, self.profile_goal, *goal_options).pack(side="left", padx=8)
+
+        body = tk.Frame(win, bg=UI_BG, padx=12, pady=4)
         body.pack(fill="both", expand=True)
+
+        # 슬라이더 변수/엔트리 참조 모음 — 권장값 적용/검증 갱신용
+        sliders: dict = {}
+
+        def _resolved_preset_for_tune():
+            """AUTO일 때 분석 결과로 실제 프리셋을 해석(가드레일·권장값 정확도)."""
+            preset_name = (self.profile_preset.get() or "AUTO").strip()
+            lr = getattr(self, "last_result", None)
+            if isinstance(lr, dict):
+                try:
+                    prof = self._build_peak_profile_curve(lr)
+                    return (prof.get("preset_name") or preset_name).strip()
+                except Exception:
+                    pass
+            return preset_name
+
+        def _refresh_validation(*_):
+            try:
+                tune = {k: float(sliders[k]["var"].get()) for k in sliders}
+            except Exception:
+                return
+            preset_name = _resolved_preset_for_tune()
+            res = self._validate_profile_tune(tune, preset_name)
+            try:
+                vbox.configure(state="normal")
+                vbox.delete("1.0", tk.END)
+                errs = res.get("errors") or []
+                warns = res.get("warnings") or []
+                oks = res.get("oks") or []
+                if errs or warns:
+                    pass
+                elif oks:
+                    vbox.insert(
+                        tk.END,
+                        "✅ 가드레일 통과 — 오류·경고 없음 (아래 ✓ 참고).\n\n",
+                        "OK",
+                    )
+                else:
+                    vbox.insert(
+                        tk.END,
+                        "검증 결과 없음 — AUTO는 분석 1회 후 확정되는 프리셋 기준으로 검증되거나,"
+                        " 수동 프로필을 선택하세요.\n\n",
+                        "WARN",
+                    )
+                for m in errs:
+                    vbox.insert(tk.END, f"❌ {m}\n", "ERR")
+                for m in warns:
+                    vbox.insert(tk.END, f"⚠ {m}\n", "WARN")
+                for m in oks:
+                    vbox.insert(tk.END, f"✓ {m}\n", "OK")
+                vbox.configure(state="disabled")
+            except Exception:
+                pass
 
         def add_row(label, key, frm, to, step=0.1):
             row = tk.Frame(body, bg=UI_BG)
-            row.pack(fill="x", pady=6)
+            row.pack(fill="x", pady=4)
             tk.Label(row, text=label, bg=UI_BG, fg="#e5e7eb",
                      font=("Segoe UI", 10, "bold"), width=22, anchor="w").pack(side="left")
             v = tk.DoubleVar(value=float(self.profile_tune.get(key, frm)))
@@ -1740,6 +1868,7 @@ class AlloyGUI:
                     self.profile_tune[key] = float(v.get())
                 except Exception:
                     return
+                _refresh_validation()
 
             s = tk.Scale(
                 row, from_=frm, to=to, resolution=step,
@@ -1767,17 +1896,134 @@ class AlloyGUI:
             ent.bind("<Return>", sync_from_entry)
             ent.bind("<FocusOut>", sync_from_entry)
 
+            def update_entry(*_):
+                try:
+                    ent.delete(0, tk.END)
+                    ent.insert(0, f"{float(v.get()):.2f}")
+                except Exception:
+                    pass
+
+            v.trace_add("write", update_entry)
+            sliders[key] = {"var": v, "ent": ent, "min": frm, "max": to}
+
         add_row("램프업 속도 (℃/s)", "ramp_rate", 1.0, 2.0, step=0.05)
         add_row("예열 시간 (sec)", "preheat_time", 60, 140, step=1)
         add_row("액상선 이상 유지 (sec)", "over_liquidus_time", 25, 120, step=1)
         add_row("냉각 속도 (℃/s)", "cool_rate", 1.5, 4.0, step=0.05)
-        add_row("피크 여유 (Liquidus+℃)", "peak_margin", 10, 40, step=1)
+        add_row("피크 여유 (Liquidus+℃)", "peak_margin", 10, 55, step=1)
+
+        # ─── 검증 결과 영역 ───
+        v_wrap = tk.LabelFrame(win, text=" 가드레일 검증 ", bg=UI_BG, fg="#93c5fd",
+                               font=("Segoe UI", 10, "bold"), padx=8, pady=4)
+        v_wrap.pack(fill="both", expand=False, padx=12, pady=(8, 4))
+        vbox = tk.Text(v_wrap, height=6, bg="#0b1220", fg="#e5e7eb",
+                       insertbackground="#e5e7eb", relief="flat", wrap="word")
+        vbox.pack(fill="both", expand=True)
+        vbox.tag_config("ERR", foreground="#f87171")
+        vbox.tag_config("WARN", foreground="#fbbf24")
+        vbox.tag_config("OK", foreground="#86efac")
+        vbox.configure(state="disabled")
+
+        # ─── 권장값 적용 결과 (변경 전/후 diff) ───
+        d_wrap = tk.LabelFrame(win, text=" 권장값 적용 변경 내역 ", bg=UI_BG, fg="#86efac",
+                               font=("Segoe UI", 10, "bold"), padx=8, pady=4)
+        d_wrap.pack(fill="both", expand=False, padx=12, pady=(0, 4))
+        diff_box = tk.Text(d_wrap, height=5, bg="#0b1220", fg="#e5e7eb",
+                           insertbackground="#e5e7eb", relief="flat", wrap="word")
+        diff_box.pack(fill="both", expand=True)
+        diff_box.tag_config("HEAD", foreground="#86efac",
+                            font=("Segoe UI", 10, "bold"))
+        diff_box.configure(state="disabled")
+
+        def apply_recommended():
+            preset_name = _resolved_preset_for_tune()
+            goal = (self.profile_goal.get() or "없음").strip()
+            rec = self._recommend_tune_for_goal(goal, preset_name)
+            labels = {
+                "ramp_rate": "1차 램프(℃/s)",
+                "preheat_time": "프리히트(s)",
+                "over_liquidus_time": "TAL(s)",
+                "cool_rate": "냉각(℃/s)",
+                "peak_margin": "피크 여유(℃)",
+            }
+            int_keys = {"preheat_time", "over_liquidus_time", "peak_margin"}
+            diff_lines = []
+            for k, v in rec.items():
+                if k not in sliders:
+                    continue
+                try:
+                    lo = sliders[k]["min"]
+                    hi = sliders[k]["max"]
+                    after = max(float(lo), min(float(hi), float(v)))
+                    before = float(self.profile_tune.get(k, after))
+                    sliders[k]["var"].set(after)
+                    self.profile_tune[k] = after
+                    if abs(after - before) > 0.005:
+                        if k in int_keys:
+                            diff_lines.append(
+                                f"  · {labels.get(k,k)}: {before:.0f} → {after:.0f} "
+                                f"({after-before:+.0f})"
+                            )
+                        else:
+                            diff_lines.append(
+                                f"  · {labels.get(k,k)}: {before:.2f} → {after:.2f} "
+                                f"({after-before:+.2f})"
+                            )
+                except Exception:
+                    pass
+            _refresh_validation()
+            try:
+                diff_box.configure(state="normal")
+                diff_box.delete("1.0", tk.END)
+                head = f"권장값 적용됨 — 목표: {goal} · 프리셋: {preset_name}\n"
+                diff_box.insert(tk.END, head, "HEAD")
+                if diff_lines:
+                    diff_box.insert(tk.END, "\n".join(diff_lines) + "\n")
+                else:
+                    diff_box.insert(tk.END, "  (변경된 항목 없음 — 현재값이 이미 권장값과 같음)\n")
+                diff_box.configure(state="disabled")
+            except Exception:
+                pass
+
+        tk.Button(goal_bar, text="권장값 적용",
+                  command=apply_recommended,
+                  bg="#16a34a", fg="white",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=10, pady=2).pack(side="left", padx=6)
+
+        tk.Label(goal_bar,
+                 text="(현재 합금 프리셋 + 목표 → 공급사 가이드 기반 권장값으로 한 번에 세팅)",
+                 bg=UI_BG, fg="#9ca3af", font=("Segoe UI", 8)).pack(side="left", padx=4)
 
         btns = tk.Frame(win, bg=UI_BG)
         btns.pack(pady=10)
 
         def apply_and_close():
-            # force re-render compare (if any) and keep settings
+            try:
+                tune = {k: float(sliders[k]["var"].get()) for k in sliders}
+                res = self._validate_profile_tune(tune, _resolved_preset_for_tune())
+                errs = list(res.get("errors") or [])
+                warns = list(res.get("warnings") or [])
+                if errs or warns:
+                    chunks = []
+                    if errs:
+                        chunks.append("❌ 오류:\n· " + "\n· ".join(errs))
+                    if warns:
+                        chunks.append("⚠ 경고:\n· " + "\n· ".join(warns))
+                    msg = (
+                        "현재 세팅에 가드레일 알림이 있습니다.\n\n"
+                        + "\n\n".join(chunks)
+                        + "\n\n그래도 저장하고 적용하시겠습니까?"
+                    )
+                    if not messagebox.askyesno(
+                        "가드레일 확인",
+                        msg,
+                        icon="warning",
+                        parent=win,
+                    ):
+                        return
+            except Exception:
+                pass
             self._save_profile_settings()
             self._rerender_compare_or_last()
             win.destroy()
@@ -1788,6 +2034,8 @@ class AlloyGUI:
         tk.Button(btns, text="닫기", command=win.destroy,
                   bg=BTN_BG, fg="white", width=10, height=2,
                   font=("Segoe UI", 10, "bold")).pack(side="left", padx=8)
+
+        _refresh_validation()
 
     def copy_result_to_clipboard(self):
         try:
@@ -1813,12 +2061,34 @@ class AlloyGUI:
         if not q:
             return
 
+        box = self.result_box
+        self._clear_search_highlight()
+
+        try:
+            start = box.index(tk.INSERT)
+        except Exception:
+            start = "1.0"
+
+        idx = box.search(q, start, stopindex=tk.END, nocase=True)
+        if not idx:
+            idx = box.search(q, "1.0", stopindex=tk.END, nocase=True)
+            if not idx:
+                self.set_progress(self.progress_var.get(), "검색 결과 없음")
+                return
+
+        end = f"{idx}+{len(q)}c"
+        box.tag_add("SEARCH", idx, end)
+        box.mark_set(tk.INSERT, end)
+        box.see(idx)
+        self.set_progress(self.progress_var.get(), f"찾음: {q}")
+
     def copy_sources_to_clipboard(self):
         """
         Copy DOI/URL sources (internet literature) to clipboard.
         """
         try:
             srcs = []
+
             def _collect_sources(obj):
                 if not isinstance(obj, dict):
                     return
@@ -1835,7 +2105,6 @@ class AlloyGUI:
                 _collect_sources(self.last_result)
             if isinstance(self.compare_result, dict):
                 _collect_sources(self.compare_result)
-            # unique preserve order
             seen = set()
             out = []
             for x in srcs:
@@ -1856,27 +2125,6 @@ class AlloyGUI:
                 messagebox.showerror("오류", "출처 복사 실패")
             except Exception:
                 pass
-        box = self.result_box
-        self._clear_search_highlight()
-
-        # start from selection end if present, else from insert cursor
-        try:
-            start = box.index(tk.INSERT)
-        except Exception:
-            start = "1.0"
-
-        idx = box.search(q, start, stopindex=tk.END, nocase=True)
-        if not idx:
-            idx = box.search(q, "1.0", stopindex=tk.END, nocase=True)
-            if not idx:
-                self.set_progress(self.progress_var.get(), "검색 결과 없음")
-                return
-
-        end = f"{idx}+{len(q)}c"
-        box.tag_add("SEARCH", idx, end)
-        box.mark_set(tk.INSERT, end)
-        box.see(idx)
-        self.set_progress(self.progress_var.get(), f"찾음: {q}")
 
     @staticmethod
     def _fmt_num(v, nd=1, default="N/A"):
@@ -3214,6 +3462,35 @@ class AlloyGUI:
             f"      냉각 속도 : 최대 {pf['cool_rate']} ℃/s 이하 권장",
             "      급냉 주의 : 열충격으로 인한 솔더 크랙 방지",
             "",
+        ]
+
+        # ─── [5] 사용자 튜닝 가드레일 (현재 profile_tune + 목표 기준) ───
+        try:
+            preset_name = (self.profile_preset.get() or "AUTO").strip()
+            try:
+                prof = self._build_peak_profile_curve(r)
+                preset_name = (prof.get("preset_name") or preset_name).strip()
+            except Exception:
+                pass
+            goal_name = (self.profile_goal.get() or "없음").strip()
+            v = self._validate_profile_tune(dict(self.profile_tune), preset_name)
+            lines += [
+                "  [5] 사용자 튜닝 가드레일",
+                f"      목표 : {goal_name}   |   프리셋 : {preset_name}",
+            ]
+            for m in v.get("errors", []):
+                lines.append(f"      ❌ {m}")
+            for m in v.get("warnings", []):
+                lines.append(f"      ⚠ {m}")
+            for m in v.get("oks", []):
+                lines.append(f"      ✓ {m}")
+            if not (v.get("errors") or v.get("warnings") or v.get("oks")):
+                lines.append("      (검증 결과 없음)")
+            lines.append("")
+        except Exception:
+            pass
+
+        lines += [
             "=" * 54,
             "  주의사항",
             "-" * 54,
@@ -3847,6 +4124,41 @@ class AlloyGUI:
                     messagebox.showerror("오류", f"저장 실패: {e}")
 
             save_btn.on_clicked(_on_save)
+
+            # ─── 튜닝 가드레일 한 줄 요약 (footer 텍스트) ───
+            try:
+                preset_name = (self.profile_preset.get() or "AUTO").strip()
+                try:
+                    preset_name = (prof.get("preset_name") or preset_name).strip()
+                except Exception:
+                    pass
+                goal_name = (self.profile_goal.get() or "없음").strip()
+                v_res = self._validate_profile_tune(dict(self.profile_tune), preset_name)
+                if v_res.get("errors"):
+                    head_msg = "❌ " + v_res["errors"][0]
+                    head_color = "#f87171"
+                elif v_res.get("warnings"):
+                    head_msg = "⚠ " + v_res["warnings"][0]
+                    head_color = "#fbbf24"
+                elif v_res.get("oks"):
+                    head_msg = "✓ " + v_res["oks"][0]
+                    head_color = "#86efac"
+                else:
+                    head_msg = ""
+                    head_color = "#9ca3af"
+                if head_msg:
+                    extra = (
+                        f"   목표: {goal_name} · 프리셋: {preset_name}"
+                    )
+                    fig.text(
+                        0.5, 0.005,
+                        f"튜닝 가드레일: {head_msg}{extra}",
+                        ha="center", va="bottom",
+                        color=head_color, fontsize=9,
+                        **kfp(9, bold=False),
+                    )
+            except Exception:
+                pass
 
             # Use explicit margins so panels fill the canvas consistently.
             fig.subplots_adjust(left=0.03, right=0.985, top=0.94, bottom=0.10, wspace=0.08, hspace=0.16)
