@@ -13,7 +13,7 @@ Key routing rules:
 - Update docs after shipping → invoke document-release
 - Weekly retro → invoke retro
 - Design system, brand → invoke design-consultation
-- Visual audit, design polish → invoke design-review
+- Visual audit, design polish → invoke design-review (local UI: run `frontend` `npm run dev`, URL `http://127.0.0.1:5173/`; Windows prep: `scripts/prep_design_review.ps1`)
 - Architecture review → invoke plan-eng-review
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health

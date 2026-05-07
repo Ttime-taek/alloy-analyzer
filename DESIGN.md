@@ -78,3 +78,9 @@ Vite dev server proxies `/api`, `/docs`, `/openapi.json` to `http://127.0.0.1:80
 - **Local data (gitignored):** `favorites.json`, `web_favorites.json`, `profile_settings.json` are per-machine. Copy from `*.example.json` in the repo root if you want starter files; the API tolerates missing `web_favorites.json` / `favorites.json` (empty list + migration path).
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs Python `regression_check.py` + compile/import checks, and `frontend` `npm ci` / `test` / `build` / `lint`.
 - **npm audit (dev):** Vite 5’s bundled `esbuild` may still report a moderate dev-server advisory; clearing it typically requires a **major Vite upgrade** (`npm audit fix --force`) — not applied automatically to avoid breaking the build.
+
+### Design review (gstack browse, Windows)
+
+- **Dev URL for agents:** `http://127.0.0.1:5173/` (see `vite.config.mjs`; port **5173**, strict).
+- **Browse CLI:** gstack ships headless automation as `browse.exe` under `%USERPROFILE%\.cursor\skills\gstack\browse\dist\` after `bun build --compile browse/src/cli.ts --outfile browse/dist/browse`. Repo helper: **`scripts/prep_design_review.ps1`** (compiles if missing, prints steps).
+- Full API is optional for layout/contrast passes; start **`python api_server.py`** when flows need live data.
