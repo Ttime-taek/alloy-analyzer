@@ -21,6 +21,9 @@ except ImportError:
     from test7.sn_pb_library import SN_PB_PHASE
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
+# AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
+MELTING_ENGINE_VERSION = "3"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
 # 출처: ASM Handbook Vol.3, NIST, IPC J-STD-006, JIS(납·플럭스·페이스트 시험 계열), 학술 문헌
@@ -286,6 +289,63 @@ def _classify(norm):
     if sb > 3:
         return "SnSb"
     return "other"
+
+
+def _prediction_uncertainty(
+    norm,
+    family,
+    best_dist,
+    unk_pct_global,
+    layers_for_weights,
+    db_exact_match,
+    measured_anchor_detail,
+):
+    """
+    수치 신뢰도 힌트(오차 ℃ 아님).
+    UI/API에서 '참고용' 구간을 표시할 때 사용.
+    """
+    out = {
+        "classification_boundary_sn_sac_bi": False,
+        "extrapolation_heuristic": False,
+        "dominant_calphad_layer": False,
+        "reason_codes": [],
+    }
+    if db_exact_match:
+        out["reason_codes"].append("db_exact_match")
+        return out
+    if measured_anchor_detail:
+        out["reason_codes"].append("measured_anchor")
+        return out
+
+    bi = float(norm.get("Bi") or 0)
+    sn = float(norm.get("Sn") or 0)
+    ag = float(norm.get("Ag") or 0)
+    cu = float(norm.get("Cu") or 0)
+    inp = float(norm.get("In") or 0)
+    pb = float(norm.get("Pb") or 0)
+
+    if pb == 0 and sn > 80 and ag > 0 and cu > 0 and inp <= 8 and 4.2 <= bi <= 6.2:
+        out["classification_boundary_sn_sac_bi"] = True
+        out["reason_codes"].append("near_sn_sac_bi_classification")
+
+    tw = sum(w for _, _, w, _ in layers_for_weights)
+    l4w = sum(w for _, _, w, lbl in layers_for_weights if str(lbl).startswith("L4:"))
+    if tw > 1e-9 and (l4w / tw) >= 0.38:
+        out["dominant_calphad_layer"] = True
+        out["reason_codes"].append("calphad_weight_high")
+
+    bd = float(best_dist)
+    unk = float(unk_pct_global or 0)
+    if family == "other" or bd >= 12.0 or unk >= 0.05 or out["dominant_calphad_layer"]:
+        out["extrapolation_heuristic"] = True
+        if family == "other":
+            out["reason_codes"].append("family_other")
+        if bd >= 12.0:
+            out["reason_codes"].append("db_far")
+        if unk >= 0.05:
+            out["reason_codes"].append("unknown_noncore")
+
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -777,6 +837,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             "best_dist": round(best_dist, 6),
             "eps": DB_EXACT_MATCH_EPS,
         }
+
     else:
         # L1: 최근접 DB 행 — _db_neighbor_gate 로 거리에 따라 0~1 부드럽게 섞어 L2/L3와 앙상블
         l1_sol, l1_liq, l1_w = None, None, 0.0
@@ -865,6 +926,8 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
 
     # db_exact_match 이면 위 블록에서 이미 최종값 확정 (물리/ plateau 미적용)
 
+    layers_snapshot = list(layers)
+
     measured_anchor_detail = None
     ma = _measured_anchor_sn88_ag35_cu05_in8(norm)
     if ma:
@@ -905,8 +968,20 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     peak_offset = 20.0 if delta_t < 5 else 25.0
     final_peak  = final_liq + peak_offset
 
+    prediction_uncertainty = _prediction_uncertainty(
+        norm,
+        family,
+        best_dist,
+        unk_pct_global,
+        layers_snapshot,
+        db_exact_match,
+        measured_anchor_detail,
+    )
+
     detail = {
         "family":    family,
+        "engine_version": MELTING_ENGINE_VERSION,
+        "prediction_uncertainty": prediction_uncertainty,
         "layers":    [(name, round(s,2), round(l,2), round(w,3))
                       for s, l, w, name in layers],
         "best_dist": round(best_dist, 3),

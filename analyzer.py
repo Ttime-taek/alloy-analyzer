@@ -785,7 +785,17 @@ class AlloyAnalyzer:
         }
 
         ai_source = "api"            # api / cache / db_exact
-        cache_key = ai_cache.make_key(norm, mode=mode, literature_mode=literature_mode)
+        _mv = (
+            str((melting_detail or {}).get("engine_version") or "0").strip()
+            if isinstance(melting_detail, dict)
+            else "0"
+        )
+        cache_key = ai_cache.make_key(
+            norm,
+            mode=mode,
+            literature_mode=literature_mode,
+            extra=f"mv={_mv}",
+        )
         db_exact_hit = (score is not None and float(score) <= _DB_EXACT_EPS)
 
         def _call_api_and_cache():
@@ -1003,6 +1013,9 @@ class AlloyAnalyzer:
             ai_ev["db_exact_mode"] = _AI_DB_EXACT_MODE
             if cache_age is not None:
                 ai_ev["cache_age_sec"] = cache_age
+            if ai_source == "cache":
+                ai_ev["melting_numbers_from_current_request"] = True
+                ai_ev["cached_summary_may_differ_from_numbers"] = True
             evidence = dict(evidence)
             evidence["ai"] = ai_ev
         return {
