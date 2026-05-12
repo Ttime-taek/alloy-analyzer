@@ -7,7 +7,8 @@ AI 응답 디스크 캐시
 
 저장 위치: <repo_root>/.cache/ai/<prefix>/<hash>.json
 키: sha256(정규화조성 소트 + mode + literature_mode + schema_version + extra)
-  extra: analyzer에서 melting_engine_version(mv=…) 등을 넣어 용융 엔진 변경 시 캐시 무효화.
+  extra: analyzer에서 melting_engine_version(mv=…) + solder DB 지문(dbfp=…) 등을 넣어
+  용융 엔진·실측 DB 변경 시 캐시 무효화.
 """
 
 from __future__ import annotations

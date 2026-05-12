@@ -1,3 +1,4 @@
+# 프로덕션 API 런타임. 단위 테스트는 requirements-dev.txt (pytest).
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.7.0

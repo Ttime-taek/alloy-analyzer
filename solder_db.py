@@ -4,7 +4,11 @@
 - 실측 기반 + 정규화 검증 + 메타데이터 확장
 - 기능은 동일하지만 KNN/Phase/IMC 예측 정확도 2배 향상
 - Sn-Pb 추가 조성은 sn_pb_library.py 의 SN_PB_SOLDER_ENTRIES 만 편집
+- 내용이 바뀌면 fingerprint_solder_db() 값이 달라져 AI 디스크 캐시·분석기 동기화에 사용됩니다.
 """
+
+import hashlib
+import json
 
 from .utils import safe_float
 
@@ -33,6 +37,36 @@ def validate_alloy(entry):
         s = entry["solidus"]
         entry["solidus"] = entry["liquidus"]
         entry["liquidus"] = s
+
+
+def fingerprint_solder_db(db) -> str:
+    """
+    SOLDER_DB(또는 동일 스키마 리스트) 내용 지문 — 행 추가·융점 수정 시 값이 바뀜.
+
+    AI 분석 디스크 캐시 키·AlloyAnalyzer.db_prepared 재구성 여부 판단에 사용.
+    """
+    if not isinstance(db, list):
+        return "0"
+    rows = []
+    for e in db:
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("name", "") or "")
+        comp = e.get("comp") or {}
+        if not isinstance(comp, dict):
+            continue
+        comp_items = sorted(
+            (str(k), round(float(v), 6)) for k, v in comp.items()
+        )
+        try:
+            s = round(float(e.get("solidus", 0.0)), 4)
+            l = round(float(e.get("liquidus", 0.0)), 4)
+        except (TypeError, ValueError):
+            continue
+        rows.append({"name": name, "comp": comp_items, "solidus": s, "liquidus": l})
+    rows.sort(key=lambda r: r["name"])
+    raw = json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 # ================================================================
@@ -100,6 +134,7 @@ _raw_db = [
     {"name": "Sn3.0Ag0.5Cu3Bi", "comp": {"Ag": 3.0, "Cu": 0.5, "Bi": 3.0, "Sn": 93.5}, "solidus": 209, "liquidus": 217},
     {"name": "Sn3.5Ag0.5CuNiGe", "comp": {"Ag": 3.5, "Cu": 0.5, "Ni": 0.0, "Ge": 0.0, "Sn": 96.0}, "solidus": 217, "liquidus": 217},
     {"name": "Sn3.5Ag0.5Bi3.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 3.0, "Sn": 93.0}, "solidus": 207, "liquidus": 214},
+    {"name": "Sn3.5Ag0.5Bi6.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 6.0, "Sn": 90.0}, "solidus": 202, "liquidus": 212},
     {"name": "Sn5.0Sb", "comp": {"Sb": 5.0, "Sn": 95.0}, "solidus": 235, "liquidus": 240},
     {"name": "Sn0.5Cu", "comp": {"Cu": 0.5, "Sn": 99.5}, "solidus": 227, "liquidus": 312},
     {"name": "Sn3.0Cu0.5Ni", "comp": {"Cu": 3.0, "Ni": 0.5, "Sn": 96.5}, "solidus": 228, "liquidus": 394},
@@ -120,6 +155,8 @@ _raw_db = [
     {"name": "Sn1Ag25Bi0.5Cu", "comp": {"Ag": 1.0, "Bi": 25.0, "Cu": 0.5, "Sn": 73.5}, "solidus": 137.5, "liquidus": 194.9},
     {"name": "Sn1Ag25Bi0.7Cu", "comp": {"Ag": 1.0, "Bi": 25.0, "Cu": 0.7, "Sn": 73.3}, "solidus": 137.53, "liquidus": 197.68},
     {"name": "Sn3Ag25Bi", "comp": {"Ag": 3.0, "Bi": 25.0, "Sn": 72.0}, "solidus": 138.3, "liquidus": 193.4},
+    {"name": "Sn1Ag0.8Cu6In10Bi", "comp": {"Ag": 1.0, "Bi": 10.0, "Cu": 0.8, "In": 6.0, "Sn": 82.2}, "solidus": 157.0, "liquidus": 203.0},
+    {"name": "Sn1Ag0.8Cu8In10Bi", "comp": {"Ag": 1.0, "Bi": 10.0, "Cu": 0.8, "In": 8.0, "Sn": 80.2}, "solidus": 159.0, "liquidus": 200.0},
 ]
 
 
@@ -136,3 +173,5 @@ for entry in _raw_db:
     entry["eutectic_type"] = classify_eutectic(entry["comp"])
 
     SOLDER_DB.append(entry)
+
+SOLDER_DB_FINGERPRINT = fingerprint_solder_db(SOLDER_DB)

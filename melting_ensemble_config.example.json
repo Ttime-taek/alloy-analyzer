@@ -1,0 +1,20 @@
+{
+  "default": {
+    "l2_simple_mult": 3.0,
+    "l2_other_mult": 1.8,
+    "l3_knn_with_l2_simple": 0.08,
+    "l3_knn_default": 1.2,
+    "l4_if_l2_weak_mult": 0.3,
+    "l4_if_no_l2_mult": 0.9,
+    "l4_external_weight": 0.5
+  },
+  "families": {
+    "SnBi": {
+      "l3_knn_default": 0.95,
+      "l3_knn_with_l2_simple": 0.07
+    },
+    "SAC": {
+      "l2_simple_mult": 3.2
+    }
+  }
+}

@@ -102,6 +102,54 @@ const ruleTd = {
   lineHeight: 1.45
 };
 
+/** 목표 융점 표 등: wt% 객체 → Sn88Ag3.5Bi8In0.5 형태(읽기 쉬운 나열) */
+const DISPLAY_ELEMENT_ORDER = [
+  "Sn",
+  "Pb",
+  "Ag",
+  "Cu",
+  "Bi",
+  "In",
+  "Sb",
+  "Ni",
+  "Zn",
+  "Au",
+  "Ga",
+  "Ge",
+  "P",
+  "Fe",
+  "Cr",
+  "Co",
+  "Mn",
+  "Al",
+  "Mg",
+  "Ti",
+  "Si"
+];
+
+function formatWtPercentCompositionReadable(comp) {
+  if (!comp || typeof comp !== "object") return "—";
+  const fmt = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const r = Math.round(n * 1000) / 1000;
+    let s = r.toFixed(3);
+    s = s.replace(/\.?0+$/, "");
+    return s;
+  };
+  const keys = Object.keys(comp);
+  const ordered = [
+    ...DISPLAY_ELEMENT_ORDER.filter((el) => keys.includes(el)),
+    ...keys.filter((k) => !DISPLAY_ELEMENT_ORDER.includes(k)).sort()
+  ];
+  const chunks = [];
+  for (const el of ordered) {
+    const s = fmt(comp[el]);
+    if (s != null) chunks.push(`${el}${s}`);
+  }
+  return chunks.length ? chunks.join("") : "—";
+}
+
 /** 공통 클릭·실행 버튼: tactile-hit + 라벨 (주기율표 periodic-cell-btn과 중복 사용하지 않음) */
 function TactileButton({ children, linkTone = false, className = "", labelStyle, type = "button", ...rest }) {
   const cls = ["tactile-hit", linkTone && "tactile-hit--link", className].filter(Boolean).join(" ");
@@ -156,12 +204,65 @@ export default function App() {
   const [uiPrefsLoaded, setUiPrefsLoaded] = useState(false);
   const [aboutInfo, setAboutInfo] = useState(null);
   const [trustOpen, setTrustOpen] = useState(false);
+  /** 목표 고상/액상 → POST /api/recommend_melt (격자 조건은 UI 밖 기본값) */
+  const [meltRecSolidus, setMeltRecSolidus] = useState("138");
+  const [meltRecLiquidus, setMeltRecLiquidus] = useState("");
+  const [meltRecLoading, setMeltRecLoading] = useState(false);
+  const [meltRecError, setMeltRecError] = useState("");
+  const [meltRecResult, setMeltRecResult] = useState(null);
+  /** idle | checking | yes | no — about+OpenAPI로 POST /api/recommend_melt 지원 여부 */
+  const [meltSupport, setMeltSupport] = useState("idle");
   const [imcSubstrate, setImcSubstrate] = useState("Cu-OSP");
   const [imcTalMode, setImcTalMode] = useState("auto");
   const [imcTalRef, setImcTalRef] = useState("liq");
   const [imcTalDeltaC, setImcTalDeltaC] = useState(3);
   const [imcTalSec, setImcTalSec] = useState(35);
   const analysisLogScrollRef = useRef(null);
+
+  const showMeltRecommendPanel =
+    Boolean(meltRecError) ||
+    Boolean(meltRecResult?.meta?.disclaimer) ||
+    (Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length > 0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMeltSupport("checking");
+
+    const check = async () => {
+      try {
+        const [aboutRes, openApiRes] = await Promise.all([
+          fetch(`/api/about?_=${Date.now()}`),
+          fetch(`/openapi.json?_=${Date.now()}`)
+        ]);
+        if (cancelled) return;
+        let aboutOk = false;
+        if (aboutRes.ok) {
+          const j = await aboutRes.json();
+          if (j && typeof j === "object" && j.product) {
+            setAboutInfo(j);
+            aboutOk = j.api_features?.recommend_melt === true;
+          }
+        }
+        if (aboutOk) {
+          setMeltSupport("yes");
+          return;
+        }
+        if (!openApiRes.ok) {
+          setMeltSupport("no");
+          return;
+        }
+        const spec = await openApiRes.json();
+        const has = !!(spec?.paths?.["/api/recommend_melt"]?.post);
+        setMeltSupport(has ? "yes" : "no");
+      } catch {
+        if (!cancelled) setMeltSupport("no");
+      }
+    };
+    check();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Popup(새 창) ↔ 메인 동기화 채널
   useEffect(() => {
@@ -572,14 +673,26 @@ export default function App() {
       const a = clean(comp);
       const b = clean(compB);
 
-      // 조성 합계 검증 헬퍼 — 100%와 너무 다르면 경고
+      // 조성 합계: 100% 근처가 아니면 서버가 Sn 보정/스케일 — 차단 vs 로그만 안내
       const checkTotal = (obj, label) => {
         const total = Object.values(obj).reduce((s, v) => s + (Number(v) || 0), 0);
         if (total > 100.5) {
-          return `${label} 총합(${total.toFixed(2)}%)이 100%를 초과합니다. 서버가 자동 정규화하지만 의도와 다를 수 있습니다. 확인 후 다시 분석하세요.`;
+          return {
+            block: true,
+            msg: `${label} 총합(${total.toFixed(2)}%)이 100%를 초과합니다. 서버가 비율로 맞추므로 의도와 다를 수 있습니다. 수정 후 다시 분석하세요.`
+          };
         }
         if (total > 0 && total < 50) {
-          return `${label} 총합(${total.toFixed(2)}%)이 너무 낮습니다. wt% 값을 확인하세요.`;
+          return {
+            block: true,
+            msg: `${label} 총합(${total.toFixed(2)}%)이 너무 낮습니다. wt% 값을 확인하세요.`
+          };
+        }
+        if (total >= 50 && total < 99.5) {
+          return {
+            block: false,
+            msg: `${label} 총합(${total.toFixed(2)}%)입니다. 100% 미만이면 서버가 주로 Sn으로 잔량을 채웁니다. 가능하면 100%에 맞춰 주세요.`
+          };
         }
         return null;
       };
@@ -591,12 +704,15 @@ export default function App() {
           setLoading(false);
           return;
         }
-        const totalWarn = checkTotal(a, "조성 A");
-        if (totalWarn) {
-          setError(totalWarn);
-          appendLog(`입력 검증 경고: ${totalWarn}`);
+        const totalCheck = checkTotal(a, "조성 A");
+        if (totalCheck?.block) {
+          setError(totalCheck.msg);
+          appendLog(`입력 검증: ${totalCheck.msg}`);
           setLoading(false);
           return;
+        }
+        if (totalCheck?.msg) {
+          appendLog(`입력 안내: ${totalCheck.msg}`);
         }
       } else {
         if (!Object.keys(a).length || !Object.keys(b).length) {
@@ -605,14 +721,18 @@ export default function App() {
           setLoading(false);
           return;
         }
-        const warnA = checkTotal(a, "조성 A");
-        const warnB = checkTotal(b, "조성 B");
-        if (warnA || warnB) {
-          setError(warnA || warnB);
-          appendLog(`입력 검증 경고: ${warnA || warnB}`);
+        const checkA = checkTotal(a, "조성 A");
+        const checkB = checkTotal(b, "조성 B");
+        const blockMsg =
+          (checkA && checkA.block && checkA.msg) || (checkB && checkB.block && checkB.msg) || null;
+        if (blockMsg) {
+          setError(blockMsg);
+          appendLog(`입력 검증: ${blockMsg}`);
           setLoading(false);
           return;
         }
+        if (checkA?.msg) appendLog(`입력 안내: ${checkA.msg}`);
+        if (checkB?.msg) appendLog(`입력 안내: ${checkB.msg}`);
       }
 
       let res;
@@ -729,6 +849,95 @@ export default function App() {
       setWettingGridRows(null);
     } finally {
       setWettingGridLoading(false);
+    }
+  };
+
+  const runMeltRecommend = async () => {
+    setMeltRecError("");
+    setMeltRecResult(null);
+    // Sn1Ag0.8Cu8In10Bi 근처 SAC-In-Bi: Ag·Cu·In·Bi 스윕, 나머지 Sn.
+    // 세밀한 0.1% 격자(1225점)는 융점 계산만 수분 걸려 UI가 멈춘 것처럼 보이므로,
+    // 응답 시간을 위해 완만한 step(81점 전후)으로 스윕한다.
+    const fixed_comp = {};
+    const free_axes = [
+      { element: "Ag", min: 0.8, max: 1.2, step: 0.2 },
+      { element: "Cu", min: 0.6, max: 1.0, step: 0.2 },
+      { element: "In", min: 5, max: 11, step: 3 },
+      { element: "Bi", min: 8, max: 14, step: 3 }
+    ];
+    const balance_element = "Sn";
+    const max_grid_points = 15_000;
+    const solidus_tolerance_c = 50;
+    const liquidus_tolerance_c = 50;
+    const solidus_c =
+      String(meltRecSolidus || "").trim() === "" ? null : Number(meltRecSolidus);
+    const liquidus_c =
+      String(meltRecLiquidus || "").trim() === "" ? null : Number(meltRecLiquidus);
+    if (solidus_c === null && liquidus_c === null) {
+      setMeltRecError("목표 고상(℃) 또는 액상(℃) 중 하나 이상을 입력하세요.");
+      return;
+    }
+    if (solidus_c !== null && !Number.isFinite(solidus_c)) {
+      setMeltRecError("목표 고상 온도가 숫자가 아닙니다.");
+      return;
+    }
+    if (liquidus_c !== null && !Number.isFinite(liquidus_c)) {
+      setMeltRecError("목표 액상 온도가 숫자가 아닙니다.");
+      return;
+    }
+    setMeltRecLoading(true);
+    try {
+      const res = await fetch("/api/recommend_melt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fixed_comp,
+          free_axes,
+          balance_element,
+          target: {
+            solidus_c,
+            solidus_tolerance_c,
+            liquidus_c,
+            liquidus_tolerance_c
+          },
+          max_results: 10,
+          max_db_similar_alloys: 12,
+          max_db_registered_in_candidates: 4,
+          rank_match_any_axis: true,
+          max_grid_points
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        let detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? JSON.stringify(data.detail)
+              : `HTTP ${res.status}`;
+        if (res.status === 405) {
+          detail =
+            "HTTP 405 — 백엔드에 POST /api/recommend_melt 없음. 127.0.0.1:8000에서 최신 python api_server.py 실행 확인.";
+        }
+        throw new Error(detail);
+      }
+      setMeltRecResult(data);
+      const cand = Array.isArray(data?.candidates) ? data.candidates : [];
+      if (cand.length === 0 && !data?.meta?.disclaimer) {
+        setMeltRecError("탐색은 끝났지만 후보 행이 없습니다. 목표 온도·허용 범위를 넓히거나 백엔드 로그를 확인하세요.");
+      }
+    } catch (e) {
+      let msg = String(e.message || e);
+      if (
+        /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
+        msg === "Failed to fetch"
+      ) {
+        msg +=
+          "\n\n백엔드를 실행한 뒤 다시 시도하세요. (예: python api_server.py)";
+      }
+      setMeltRecError(msg);
+    } finally {
+      setMeltRecLoading(false);
     }
   };
 
@@ -1103,6 +1312,27 @@ export default function App() {
             새로고침하세요.
           </div>
         )}
+        {aboutInfo?.runtime && aboutInfo.runtime.cloud_llm_any === false ? (
+          <div
+            role="status"
+            style={{
+              marginBottom: 14,
+              padding: "12px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(56, 189, 248, 0.4)",
+              background: "rgba(12, 74, 110, 0.35)",
+              color: "#bae6fd",
+              fontSize: 13,
+              lineHeight: 1.5,
+              maxWidth: 820
+            }}
+          >
+            <strong style={{ color: "#e0f2fe" }}>로컬·제한 모드</strong>
+            {" — "}
+            {(aboutInfo.runtime.user_visible_notes && aboutInfo.runtime.user_visible_notes[0]) ||
+              "클라우드 AI 키가 없어 요약·보고 품질이 제한될 수 있습니다. 아래 「처리 방식」에서 자세히 보세요."}
+          </div>
+        ) : null}
         <TactileButton
           linkTone
           onClick={() => setTrustOpen((o) => !o)}
@@ -1138,6 +1368,39 @@ export default function App() {
               color: "var(--text-soft)"
             }}
           >
+            {aboutInfo?.composition_input?.wt_percent_sum_guidance ? (
+              <>
+                <div style={{ fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>조성 입력(wt%)</div>
+                <p style={{ margin: "0 0 14px 0", color: "#94a3b8", fontSize: 13, lineHeight: 1.55 }}>
+                  {aboutInfo.composition_input.wt_percent_sum_guidance}
+                </p>
+                {aboutInfo.composition_input.strict_mode_env ? (
+                  <p style={{ margin: "0 0 14px 0", color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>
+                    {aboutInfo.composition_input.strict_mode_env}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+            {aboutInfo?.runtime ? (
+              <>
+                <div style={{ fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>연동·폴백 상태(이 서버)</div>
+                <ul style={{ margin: "0 0 14px 1.1em", padding: 0 }}>
+                  <li style={{ marginBottom: 6 }}>
+                    Gemini 키: {aboutInfo.runtime.gemini_configured ? "감지됨" : "없음"}
+                    {" · "}
+                    Cerebras 키: {aboutInfo.runtime.cerebras_configured ? "감지됨" : "없음"}
+                  </li>
+                  {(aboutInfo.runtime.user_visible_notes || []).map((line, i) => (
+                    <li key={`rt-${i}`} style={{ marginBottom: 6 }}>
+                      {line}
+                    </li>
+                  ))}
+                  {aboutInfo.runtime.literature_hint ? (
+                    <li style={{ marginBottom: 6 }}>{aboutInfo.runtime.literature_hint}</li>
+                  ) : null}
+                </ul>
+              </>
+            ) : null}
             <div style={{ fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>처리 개요</div>
             <ul style={{ margin: "0 0 14px 1.1em", padding: 0 }}>
               {(aboutInfo?.methodology?.length
@@ -1213,6 +1476,109 @@ export default function App() {
               minWidth: 0
             }}
           >
+            <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 10 }}>목표 고상·액상 (℃)</h2>
+            <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+              격자는 기본으로 <strong style={{ color: "#94a3b8" }}>Sn–Ag–Cu–In–Bi</strong> 계열(예: Sn1Ag0.8Cu8In10Bi
+              근처)에 맞춰 <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi wt%</strong>를 바꿔 스윕하고, 나머지는 Sn으로
+              맞춥니다. 아래 표에는 그 탐색 결과와{" "}
+              <strong style={{ color: "#94a3b8" }}>solder_db</strong>에서 목표 밴드에 걸리는 등록 합금이 함께
+              나옵니다(표는 대략 <strong style={{ color: "#94a3b8" }}>10행 전후</strong>, 고상·액상을 둘 다 넣으면
+              <strong style={{ color: "#94a3b8" }}>더 가까운 한 축</strong> 기준으로 정렬). 결과는 오른쪽{" "}
+              <strong style={{ color: "#94a3b8" }}>분석 결과</strong> 상단에 표시됩니다.
+            </p>
+            {meltSupport === "checking" ? (
+              <p role="status" style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
+                API 확인 중…
+              </p>
+            ) : null}
+            <p style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
+              탐색 실행 시 Ag·Cu·In·Bi 격자(약 81점)마다 융점을 계산하므로{" "}
+              <strong style={{ color: "#94a3b8" }}>약 10~20초</strong> 정도 걸릴 수 있습니다. 완료될 때까지
+              창을 닫지 마세요.
+            </p>
+            {meltSupport === "no" ? (
+              <div
+                role="alert"
+                style={{
+                  margin: "0 0 10px",
+                  padding: 8,
+                  borderRadius: 8,
+                  background: "rgba(180, 83, 9, 0.22)",
+                  border: "1px solid rgba(251, 191, 36, 0.35)",
+                  color: "#fde68a",
+                  fontSize: 11,
+                  lineHeight: 1.45
+                }}
+              >
+                <code style={{ color: "#e7e5e4" }}>/api/recommend_melt</code> 없음 — 8000 포트·최신{" "}
+                <code style={{ color: "#e7e5e4" }}>api_server.py</code> 재실행 확인
+              </div>
+            ) : null}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+                alignItems: "flex-end",
+                marginBottom: 14,
+                paddingBottom: 14,
+                borderBottom: "1px solid var(--border-muted)"
+              }}
+            >
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 고상 ℃</span>
+                <input
+                  value={meltRecSolidus}
+                  onChange={(e) => setMeltRecSolidus(e.target.value)}
+                  placeholder="비우면 무시"
+                  style={{
+                    width: 88,
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border-muted)",
+                    background: "var(--bg-page)",
+                    color: "#e5e7eb",
+                    fontSize: 13
+                  }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 액상 ℃</span>
+                <input
+                  value={meltRecLiquidus}
+                  onChange={(e) => setMeltRecLiquidus(e.target.value)}
+                  placeholder="선택"
+                  style={{
+                    width: 88,
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border-muted)",
+                    background: "var(--bg-page)",
+                    color: "#e5e7eb",
+                    fontSize: 13
+                  }}
+                />
+              </label>
+              <TactileButton
+                type="button"
+                onClick={runMeltRecommend}
+                disabled={meltRecLoading}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  border: "1px solid var(--accent)",
+                  background: meltRecLoading
+                    ? "rgba(55, 65, 81, 0.5)"
+                    : "rgba(37, 99, 235, 0.35)",
+                  color: "var(--text-primary)",
+                  cursor: meltRecLoading ? "wait" : "pointer",
+                  fontSize: 13
+                }}
+              >
+                {meltRecLoading ? "탐색 중…" : "탐색 실행"}
+              </TactileButton>
+            </div>
+
             <h2 style={{ fontSize: 18, marginBottom: 12 }}>조성 입력 (wt%)</h2>
 
             <div
@@ -1821,6 +2187,7 @@ export default function App() {
                 )}
               </>
             )}
+
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <TactileButton
                 onClick={handleAnalyze}
@@ -1862,6 +2229,19 @@ export default function App() {
                 초기화
               </TactileButton>
             </div>
+            {!loading && (
+              <p
+                style={{
+                  margin: "10px 0 0",
+                  fontSize: 12,
+                  color: "#64748b",
+                  lineHeight: 1.45
+                }}
+              >
+                융점·상분석·문헌 요약은 오른쪽 <span style={{ color: "#94a3b8", fontWeight: 600 }}>분석 결과</span>{" "}
+                카드에서 확인합니다.
+              </p>
+            )}
             {loading && (
               <>
                 <div
@@ -1989,7 +2369,189 @@ export default function App() {
                 />
               </div>
             </div>
-            {!result && !compareResult && !error && (
+            {showMeltRecommendPanel ? (
+              <div
+                style={{
+                  marginBottom: 16,
+                  paddingBottom: 16,
+                  borderBottom: "1px solid var(--border-muted)"
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#94a3b8",
+                    marginBottom: 8
+                  }}
+                >
+                  목표 융점 탐색 결과
+                </div>
+                {meltRecError ? (
+                  <pre
+                    style={{
+                      margin: "0 0 10px",
+                      padding: 10,
+                      borderRadius: 6,
+                      background: "rgba(127, 29, 29, 0.25)",
+                      color: "#fecaca",
+                      fontSize: 12,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word"
+                    }}
+                  >
+                    {meltRecError}
+                  </pre>
+                ) : null}
+                {meltRecResult?.meta?.disclaimer ? (
+                  <p style={{ margin: "0 0 10px", color: "#fbbf24", fontSize: 12 }}>
+                    {meltRecResult.meta.disclaimer}
+                  </p>
+                ) : null}
+                {Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length ? (
+                  <div style={{ overflowX: "auto" }}>
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        fontSize: 12,
+                        color: "#e5e7eb"
+                      }}
+                    >
+                      <caption
+                        style={{
+                          captionSide: "top",
+                          textAlign: "left",
+                          padding: "0 0 10px",
+                          fontSize: 11,
+                          color: "#64748b",
+                          lineHeight: 1.45
+                        }}
+                      >
+                        <strong style={{ color: "#94a3b8" }}>격자·DB 통합</strong>
+                        — solder_db는 목표 융점 밴드에 들어가는 <strong>기준(등록) 조성</strong>을,
+                        모델 행은 고정·가변 wt%를 스윕한 <strong>미지 후보</strong>입니다. 같은 조성이
+                        아니라 빼고·늘리고 맞추는 탐색 결과이며, 목표에 더 가까운 행이 위로 옵니다.
+                        {typeof meltRecResult.meta?.melt_candidates_db_registered_cap === "number" ? (
+                          <span style={{ color: "#94a3b8" }}>
+                            {" "}
+                            (표 안 DB 등록 행 최대 {meltRecResult.meta.melt_candidates_db_registered_cap}건)
+                          </span>
+                        ) : null}
+                        {meltRecResult.candidates.length > 0 ? (
+                          <>
+                            {" "}
+                            현재 {meltRecResult.candidates.length}행 표시
+                            {typeof meltRecResult.meta?.melt_unified_max_rows === "number" ? (
+                              <span style={{ color: "#94a3b8" }}>
+                                {" "}
+                                (밴드 일치 DB{" "}
+                                {typeof meltRecResult.meta?.db_temperature_match_count === "number"
+                                  ? meltRecResult.meta.db_temperature_match_count
+                                  : "—"}
+                                건 · 상한 {meltRecResult.meta.melt_unified_max_rows}행)
+                              </span>
+                            ) : typeof meltRecResult.meta?.db_temperature_match_count === "number" ? (
+                              <span style={{ color: "#94a3b8" }}>
+                                {" "}
+                                · 밴드 일치 DB {meltRecResult.meta.db_temperature_match_count}건
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </caption>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--border-muted)" }}>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>#</th>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>출처</th>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>조성 (wt%)</th>
+                          <th style={{ textAlign: "right", padding: "6px 8px" }}>고상</th>
+                          <th style={{ textAlign: "right", padding: "6px 8px" }}>액상</th>
+                          <th
+                            style={{ textAlign: "right", padding: "6px 8px" }}
+                            title="액상 − 고상(℃). 값이 작을수록 응고(과냉각) 구간이 짧아 동시에 고형·액체가 공존하는 온도 범위가 좁습니다."
+                          >
+                            구간(ΔT)
+                          </th>
+                          <th style={{ textAlign: "left", padding: "6px 8px" }}>DB근접</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {meltRecResult.candidates.map((row, i) => (
+                          <tr
+                            key={i}
+                            style={{ borderBottom: "1px solid var(--bg-table-head)" }}
+                          >
+                            <td style={{ padding: "6px 8px" }}>{i + 1}</td>
+                            <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                              {row.melt_row_source === "solder_db_registered" ? (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    padding: "2px 6px",
+                                    borderRadius: 4,
+                                    background: "rgba(22, 163, 74, 0.35)",
+                                    color: "#bbf7d0"
+                                  }}
+                                  title={
+                                    row.registered_name
+                                      ? `solder_db 등록: ${row.registered_name}`
+                                      : "solder_db 등록 고상·액상 — 목표 밴드에 맞는 기준(닻) 조성"
+                                  }
+                                >
+                                  기준(DB)
+                                </span>
+                              ) : (
+                                <span
+                                  style={{ fontSize: 10, color: "#94a3b8" }}
+                                  title="고정·가변 wt% 격자 스윕 — 등록과 다른 미지 후보(모델 예측)"
+                                >
+                                  탐색
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              style={{
+                                padding: "6px 8px",
+                                fontFamily:
+                                  "ui-sans-serif, 'Segoe UI', system-ui, -apple-system, sans-serif",
+                                fontSize: 12,
+                                letterSpacing: "0.01em",
+                                maxWidth: 280,
+                                wordBreak: "break-word",
+                                color: "#e5e7eb"
+                              }}
+                              title={JSON.stringify(row.comp)}
+                            >
+                              {formatWtPercentCompositionReadable(row.comp)}
+                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                              {Number(row.solidus).toFixed(1)}
+                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                              {Number(row.liquidus).toFixed(1)}
+                            </td>
+                            <td
+                              style={{ padding: "6px 8px", textAlign: "right", color: "#cbd5e1" }}
+                              title="액상 − 고상(℃)"
+                            >
+                              {(row.plastic_range_c != null && Number.isFinite(Number(row.plastic_range_c))
+                                ? Number(row.plastic_range_c)
+                                : Number(row.liquidus) - Number(row.solidus)
+                              ).toFixed(1)}
+                            </td>
+                            <td style={{ padding: "6px 8px", maxWidth: 320, verticalAlign: "top", lineHeight: 1.35 }}>
+                              {row.db_close_names || row.best_name || "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {!result && !compareResult && !error && !showMeltRecommendPanel && (
               <div className="empty-state-guide">
                 <div style={{ fontSize: 32, opacity: 0.35 }}>⚗️</div>
                 <p style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
@@ -3304,8 +3866,37 @@ function ResultSummaryBlock({
   wettingGridError,
   loadWettingGrid
 }) {
+  const compNotes = Array.isArray(result.composition_notes) ? result.composition_notes : [];
+  const compSum =
+    typeof result.comp_input_wt_sum === "number" && Number.isFinite(result.comp_input_wt_sum)
+      ? result.comp_input_wt_sum
+      : null;
   return (
     <>
+      {compNotes.length > 0 || compSum != null ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(245, 158, 11, 0.4)",
+            background: "rgba(120, 53, 15, 0.25)",
+            color: "#fde68a",
+            fontSize: 12,
+            lineHeight: 1.5
+          }}
+        >
+          {compSum != null ? (
+            <div style={{ marginBottom: compNotes.length ? 8 : 0, fontWeight: 600 }}>
+              입력 wt% 합계(정규화 전): {compSum.toFixed(2)}%
+            </div>
+          ) : null}
+          {compNotes.map((line, i) => (
+            <div key={`cn-${i}`}>{line}</div>
+          ))}
+        </div>
+      ) : null}
       <div
         style={{
           display: "grid",

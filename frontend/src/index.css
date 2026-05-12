@@ -4,8 +4,18 @@ html {
 }
 
 :root {
-  /* 본문·인라인 SVG 텍스트 공통 (SVG <text> UA 기본은 종종 Times 계열) */
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* 본문·인라인 SVG 텍스트 공통 — 한글 가독·리눅스 헤드리스에서도 시스템 글꼴 우선 */
+  --font-sans:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Malgun Gothic",
+    "Apple SD Gothic Neo",
+    "Noto Sans CJK KR",
+    "Noto Sans KR",
+    "Nanum Gothic",
+    sans-serif;
   --bg-page: #020617;
   --bg-elevated: #0b1220;
   --bg-table-head: #0f172a;
@@ -131,6 +141,22 @@ input[type="radio"] {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
 }
 
+/* 마우스로 링크를 눌렀을 때 화면에 박스가 남지 않게(:focus-visible 지원 브라우저만) */
+@supports selector(:focus-visible) {
+  .skip-to-content:focus:not(:focus-visible) {
+    position: absolute;
+    left: -10000px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    border: none;
+    box-shadow: none;
+    outline: none;
+  }
+}
+
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -141,6 +167,15 @@ summary:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* 긴 한글 제목 줄바꿈 균형(첫 화면 히어로) */
+#app-title {
+  text-wrap: balance;
+}
+
+.app-shell h2 {
+  text-wrap: balance;
 }
 
 /* 분석 결과 본문: 가독성·계층 (App.jsx AnalysisProse) */
@@ -701,7 +736,38 @@ summary:focus-visible,
   }
 }
 
-@media (max-width: 720px) {
+/* 좁은 2열(태블릿 가로~작은 노트북): 입력 칸만 좁아져도 주기율표 셀 44px 유지 */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .periodic-element-grid-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    margin-left: -2px;
+    margin-right: -2px;
+    padding-bottom: 4px;
+  }
+
+  .periodic-element-grid {
+    min-width: calc(7 * 44px + 6 * 6px);
+  }
+
+  .periodic-element-grid > button {
+    min-width: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 4px !important;
+    touch-action: manipulation;
+    white-space: pre-line;
+    line-height: 1.2;
+  }
+}
+
+@media (max-width: 768px) {
   .app-main-grid {
     grid-template-columns: 1fr;
     gap: 16px;

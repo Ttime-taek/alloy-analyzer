@@ -1,5 +1,5 @@
-# db_regression.py (Fixed v2.2)
-# 수정: parse_alloy 하이픈/연속 포맷 모두 완벽 지원
+# db_regression.py (Fixed v2.3)
+# parse_alloy: 하이픈 표기 + solder_db 연속 BD명(Sn3.0Ag0.5Cu, Sn63Pb37, Sn0.7Cu 등)
 
 from .SOLDER_PROPERTIES_DB import SOLDER_PROPERTIES_DB
 from .utils import composition_distance
@@ -10,37 +10,35 @@ import statistics
 # ------------------------------------------------
 # ① 합금 문자열 → 조성 dict 변환 (완전 수정)
 # ------------------------------------------------
+_ELEM_ALT = r"(?:Pb|Sn|Ag|Cu|Bi|In|Sb|Zn|Ni|Ge)"
+
+
 def parse_alloy(alloy_str):
     """
     지원 형식:
-      - 'Sn-3.0Ag-0.5Cu'       (하이픈 표기: SOLDER_PROPERTIES_DB 기본 포맷)
-      - 'Sn3.0Ag0.5Cu'          (연속 표기: solder_db.py 이름 포맷)
-      - 'Sn-4.0Ag-0.5Cu-2.5Bi+α' (특수문자 포함)
+      - 'Sn-3.0Ag-0.5Cu' (하이픈 표기, wt% 합 ~100)
+      - 'Sn3.0Ag0.5Cu', 'Sn0.7Cu', 'Sn63Pb37', 'Sn57.6Bi0.4Ag' (solder_db.py 연속 BD명)
+      - 'Sn-4.0Ag-0.5Cu-2.5Bi+α' (+ 접미 제거 후 하이픈 파싱)
     """
-    # +α 등 특수 접미사 제거
-    alloy_str = re.sub(r'\+.*$', '', alloy_str).strip()
+    alloy_str = re.sub(r"\+.*$", "", alloy_str).strip()
 
-    comp = {}
+    comp: dict = {}
     total = 0.0
 
-    if '-' in alloy_str:
-        # ── 하이픈 포맷 처리 ──────────────────────────────────────
-        # 'Sn-3.0Ag-0.5Cu' → 토큰 ['Sn', '3.0Ag', '0.5Cu']
-        tokens = alloy_str.split('-')
+    if "-" in alloy_str:
+        tokens = alloy_str.split("-")
         for token in tokens:
             token = token.strip()
             if not token:
                 continue
-            # '3.0Ag' 형식 (숫자 먼저)
-            m = re.match(r'^([0-9]+(?:\.[0-9]+)?)([A-Z][a-z]?)$', token)
+            m = re.match(r"^([0-9]+(?:\.[0-9]+)?)([A-Z][a-z]?)$", token)
             if m:
                 v = float(m.group(1))
                 elem = m.group(2)
                 comp[elem] = v
                 total += v
                 continue
-            # 'Sn96.5' 또는 'Sn' 형식 (원소 먼저)
-            m2 = re.match(r'^([A-Z][a-z]?)([0-9]*(?:\.[0-9]+)?)$', token)
+            m2 = re.match(r"^([A-Z][a-z]?)([0-9]*(?:\.[0-9]+)?)$", token)
             if m2:
                 elem = m2.group(1)
                 val_str = m2.group(2)
@@ -48,21 +46,48 @@ def parse_alloy(alloy_str):
                     v = float(val_str)
                     comp[elem] = v
                     total += v
-                # 숫자 없으면 잔량 원소 (Sn 단독) → 나중에 처리
-    else:
-        # ── 연속 표기 처리 ────────────────────────────────────────
-        # 'Sn3.0Ag0.5Cu' → [('Sn','3.0'), ('Ag','0.5'), ('Cu','')]
-        pattern = r'([A-Z][a-z]?)([0-9]+(?:\.[0-9]+)?)'
-        for elem, val_str in re.findall(pattern, alloy_str):
-            v = float(val_str)
-            comp[elem] = v
-            total += v
+        if "Sn" not in comp:
+            sn_val = max(0.0, 100.0 - total)
+            if sn_val > 0:
+                comp["Sn"] = round(sn_val, 4)
+        return comp
 
-    # Sn이 없으면 잔량으로 추정
-    if 'Sn' not in comp:
-        sn_val = max(0.0, 100.0 - total)
-        if sn_val > 0:
-            comp['Sn'] = round(sn_val, 4)
+    # ── 연속 BD명 (하이픈 없음) ─────────────────────────────────────────
+    if not alloy_str.startswith("Sn"):
+        return comp
+
+    rest = alloy_str[2:]
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", rest):
+        return {"Sn": float(rest)}
+
+    # Sn63Pb37 → rest 63Pb37 (Sn wt%, Pb wt%)
+    mb = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)Pb([0-9]+(?:\.[0-9]+)?)", rest)
+    if mb:
+        return {"Sn": float(mb.group(1)), "Pb": float(mb.group(2))}
+
+    # (원소)(wt%) … 합이 ~100이면 그대로 (Sn63Pb37 전체 문자열 등)
+    comp_en: dict = {}
+    for m in re.finditer(rf"({_ELEM_ALT})([0-9]+(?:\.[0-9]+)?)", alloy_str):
+        comp_en[m.group(1)] = float(m.group(2))
+    if comp_en and abs(sum(comp_en.values()) - 100.0) < 0.55:
+        return comp_en
+
+    # Sn 접두 + (wt%)(원소) … , Sn 잔량 (Sn3.5Ag0.7Cu, Sn0.7Cu, Sn57.6Bi0.4Ag …)
+    comp_ne: dict = {}
+    tot = 0.0
+    r = rest
+    pat = re.compile(rf"^([0-9]+(?:\.[0-9]+)?)({_ELEM_ALT})")
+    while r:
+        m = pat.match(r)
+        if not m:
+            break
+        v, el = float(m.group(1)), m.group(2)
+        comp_ne[el] = v
+        tot += v
+        r = r[m.end() :]
+    if comp_ne and tot < 99.99 and "Sn" not in comp_ne:
+        comp_ne["Sn"] = round(100.0 - tot, 4)
+        return comp_ne
 
     return comp
 

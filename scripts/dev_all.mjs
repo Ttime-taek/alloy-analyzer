@@ -65,6 +65,46 @@ function isApiUp() {
   });
 }
 
+/** OpenAPI에 POST /api/recommend_melt 가 있으면 true (구버전/other app 감지) */
+function openapiHasRecommendMelt() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        hostname: "127.0.0.1",
+        port: 8000,
+        family: 4,
+        path: "/openapi.json",
+        timeout: 4000,
+      },
+      (res) => {
+        if (res.statusCode && res.statusCode !== 200) {
+          res.resume();
+          resolve(false);
+          return;
+        }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => {
+          body += c;
+        });
+        res.on("end", () => {
+          try {
+            const j = JSON.parse(body);
+            resolve(!!j?.paths?.["/api/recommend_melt"]?.post);
+          } catch {
+            resolve(false);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
 function killOthers(exited) {
   if (api && api !== exited) {
     try {
@@ -107,6 +147,13 @@ for (let attempt = 0; attempt < 40; attempt++) {
 if (!ready) {
   console.error("[dev_all] API가 20초 내에 준비되지 않았습니다. (localhost:8000/openapi.json 연결 실패)");
   finish(1);
+}
+
+const hasMelt = await openapiHasRecommendMelt();
+if (!hasMelt) {
+  console.error(
+    "[dev_all] OpenAPI에 POST /api/recommend_melt 가 없습니다. 포트 8000을 다른(구버전) 앱이 잡았거나, test7 밖에서 api_server 를 실행 중일 수 있습니다. 작업 관리자에서 8000 점유 프로세스를 끄고, test7 루트에서 다시 실행하세요."
+  );
 }
 
 // Windows에서 npm.cmd 직접 spawn이 환경에 따라 EINVAL이 날 수 있어

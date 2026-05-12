@@ -18,3 +18,8 @@ Key routing rules:
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
 
+## 개발 환경
+
+- Python API/엔진 테스트: `py -3 -m pip install -r requirements-dev.txt` 후 `py -3 -m pytest tests -q`
+- API 런타임 의존성: `requirements-fastapi.txt`
+

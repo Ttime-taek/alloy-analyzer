@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+
 DISPLAY_VERSION = "6.4"
 API_VERSION_SEMVER = "1.0.0"
 
@@ -86,6 +88,57 @@ DISCLAIMER = (
     "최종 판단은 공인 시험, 제조사 공식 TDS, 귀사 내부 표준에 따릅니다."
 )
 
+# API·웹 헬프: 조성 입력과 정규화 동작(프론트 신뢰 패널·OpenAPI 설명과 동기화)
+COMPOSITION_INPUT_HELP = {
+    "wt_percent_sum_guidance": (
+        "가능하면 각 조성의 wt% 합이 100%가 되도록 입력하세요. "
+        "합계가 100% 미만이면 엔진이 100%에 맞추며, 미달분은 주로 Sn 잔량으로 보정합니다. "
+        "그 경우 결과 조성이 입력 의도와 달라질 수 있습니다. "
+        "합계가 100%를 초과하면 비율 스케일로 맞춥니다."
+    ),
+    "strict_mode_env": (
+        "서버 관리용: 환경변수 ALLOY_STRICT_COMP_SUM=1 이면 API가 wt% 합 99.5~100.5% 범위만 허용합니다."
+    ),
+}
+
+
+def runtime_ai_capabilities() -> dict:
+    """
+    서버 환경변수만으로 연동 가능 여부를 노출(/api/about).
+    키 파일 로딩은 api_server 기동 시점에 이미 반영된 값을 사용합니다.
+    """
+    gemini = bool((os.getenv("GEMINI_API_KEY") or "").strip())
+    cerebras = bool((os.getenv("CEREBRAS_API_KEY") or "").strip())
+    cloud_any = gemini or cerebras
+    notes: list[str] = []
+    if not gemini and not cerebras:
+        notes.append(
+            "Gemini·Cerebras API 키가 환경에 없습니다. 자연어 요약·연구소 보고서·클라우드 보강은 "
+            "제한되거나 로컬 규칙/디스크 캐시만 사용됩니다. 문헌 DOI 후보도 네트워크·방화벽에 따라 비어 있을 수 있습니다."
+        )
+    elif not gemini:
+        notes.append(
+            "Gemini 키가 없습니다. Gemini 기반 서술·코칭 문구는 약하거나 로컬 템플릿 수준일 수 있습니다."
+        )
+    elif not cerebras:
+        notes.append(
+            "Cerebras 키가 없습니다. Cerebras 경로 수치 보정은 호출되지 않습니다(엔진 다른 경로는 계속 동작)."
+        )
+    else:
+        notes.append(
+            "Gemini·Cerebras 키가 모두 설정된 것으로 보입니다. 네트워크·쿼터·API 장애 시에는 자동 폴백될 수 있습니다."
+        )
+    return {
+        "gemini_configured": gemini,
+        "cerebras_configured": cerebras,
+        "cloud_llm_any": cloud_any,
+        "user_visible_notes": notes,
+        "literature_hint": (
+            "문헌 후보(Crossref·Semantic Scholar 등)는 인터넷 연결·API 가용성에 따릅니다. "
+            "사내망은 결과가 비어 있을 수 있습니다."
+        ),
+    }
+
 
 def window_title() -> str:
     return f"{PRODUCT_NAME} — v{DISPLAY_VERSION}"
@@ -131,4 +184,10 @@ def about_api_payload() -> dict:
         "data_sources": DATA_SOURCES,
         "alloy_rules": ALLOY_RULES,
         "disclaimer": DISCLAIMER,
+        "composition_input": COMPOSITION_INPUT_HELP,
+        "runtime": runtime_ai_capabilities(),
+        # 웹 UI가 구버전 백엔드(목표 융점 POST 없음)와 붙었는지 판별
+        "api_features": {
+            "recommend_melt": True,
+        },
     }

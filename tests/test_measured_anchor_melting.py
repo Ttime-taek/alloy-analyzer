@@ -32,6 +32,18 @@ class MeasuredAnchorMeltingTest(unittest.TestCase):
         self.assertAlmostEqual(liq, 210.0, places=1)
         self.assertIsNotNone(detail.get("measured_anchor"))
 
+    def test_db_exact_row_overrides_measured_anchor(self):
+        """solder_db와 조성이 정확히 같으면 DB 실측이 기준(문서 앵커보다 우선)."""
+        norm = {"Sn": 88.0, "Ag": 3.5, "Cu": 0.5, "In": 8.0}
+        db_prepared = [{"name": "Lab_In8_row", "comp": dict(norm), "solidus": 200.0, "liquidus": 212.0}]
+        sol, liq, _, detail = hybrid_melting_predict(norm, db_prepared, ai_engine=None)
+        self.assertAlmostEqual(sol, 200.0, places=1)
+        self.assertAlmostEqual(liq, 212.0, places=1)
+        self.assertTrue(detail.get("db_exact_match"))
+        self.assertIsNone(detail.get("measured_anchor"))
+        layers = detail.get("layers") or []
+        self.assertTrue(any("DB_exact" in str(x) for x in layers))
+
 
 if __name__ == "__main__":
     unittest.main()

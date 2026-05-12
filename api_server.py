@@ -28,12 +28,14 @@ so that GUI와 서버가 항상 동일한 엔진을 사용합니다.
 
 import json
 import os
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # 패키지/직접 실행 모두 지원:
 # - python -m test7.api_server
@@ -54,6 +56,27 @@ except ImportError:
     from test7.solder_db import SOLDER_DB  # type: ignore
     from test7.ai_engine import AIEngine  # type: ignore
     from test7.app_meta import about_api_payload, API_VERSION_SEMVER, PRODUCT_NAME  # type: ignore
+
+try:
+    from .composition_recommend import (  # type: ignore
+        MeltTarget,
+        list_db_compositions_matching_melt_target,
+        merge_db_registered_into_recommend_candidates,
+        recommend_compositions,
+    )
+except ImportError:
+    try:
+        from test7.composition_recommend import (  # type: ignore
+            MeltTarget,
+            list_db_compositions_matching_melt_target,
+            merge_db_registered_into_recommend_candidates,
+            recommend_compositions,
+        )
+    except Exception:
+        MeltTarget = None  # type: ignore
+        recommend_compositions = None  # type: ignore
+        list_db_compositions_matching_melt_target = None  # type: ignore
+        merge_db_registered_into_recommend_candidates = None  # type: ignore
 
 try:
     from .env_loader import load_env_keys  # type: ignore
@@ -132,9 +155,40 @@ def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
         if canon not in AlloyAnalyzer.KNOWN_PERIODIC_METALS:
             raise ValueError(f"{label}: 지원하지 않는 원소 기호: {sk}")
         clean[canon] = float(clean.get(canon, 0.0)) + f
-    if sum(clean.values()) <= 0.0:
+    total_wt = float(sum(clean.values()))
+    if total_wt <= 0.0:
         raise ValueError(f"{label}: 모든 원소 wt%가 0입니다.")
+    strict = (os.getenv("ALLOY_STRICT_COMP_SUM") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if strict and not (99.5 <= total_wt <= 100.5):
+        raise ValueError(
+            f"{label}: wt% 합이 {total_wt:.2f}% 입니다. "
+            "ALLOY_STRICT_COMP_SUM 사용 시 99.5~100.5%만 허용합니다."
+        )
     return clean
+
+
+def _composition_notes_for_raw_comp(comp: Dict[str, float]) -> tuple[float, list[str]]:
+    """정규화 전 요청 comp 합계에 대한 사용자 안내(분석 응답에 실어 표시)."""
+    total = float(sum(comp.values()))
+    notes: list[str] = []
+    if total <= 0:
+        return total, notes
+    if total < 99.5:
+        notes.append(
+            f"입력 wt% 합은 {total:.2f}% 입니다. 엔진이 100%에 맞추며, "
+            "미달분은 주로 Sn으로 보정합니다. 의도한 조성과 다를 수 있으니 가능하면 합이 100%가 되도록 맞춰 주세요."
+        )
+    elif total > 100.5:
+        notes.append(
+            f"입력 wt% 합은 {total:.2f}% 입니다. 엔진이 비율로 스케일합니다. "
+            "의도한 조성과 다를 수 있으니 확인하세요."
+        )
+    return total, notes
 
 
 class CompositionRequest(BaseModel):
@@ -222,6 +276,15 @@ class AnalysisResponse(BaseModel):
     ai_usage_snapshot: Dict[str, Any] = Field(
         default_factory=dict,
         description="AI 엔진 세션 누적 사용량(GUI 상단과 동일)",
+    )
+    comp_input_wt_sum: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="요청 body의 comp에서 계산한 wt% 합(엔진 정규화 전)",
+    )
+    composition_notes: list[str] = Field(
+        default_factory=list,
+        description="입력 합이 100% 근처가 아닐 때 정규화 안내 문구",
     )
 
     @field_validator(
@@ -312,6 +375,193 @@ class CompareResponse(BaseModel):
     )
 
 
+class FreeAxisSpec(BaseModel):
+    """목표 융점 탐색에서 변화시킬 wt% 축."""
+
+    element: str = Field(..., description="원소 기호 (예: Bi)")
+    min: float = Field(..., description="최소 wt%")
+    max: float = Field(..., description="최대 wt%")
+    step: float = Field(..., gt=0, description="증분 wt%")
+
+
+class MeltTargetPayload(BaseModel):
+    """고상/액상(℃) 목표 — 둘 중 하나 이상 필요."""
+
+    solidus_c: float | None = Field(default=None, description="목표 고상선(℃)")
+    solidus_tolerance_c: float = Field(
+        default=50.0,
+        ge=0,
+        description="고상 허용 ±℃(요청값). solder_db 밴드는 축별 max(이 값, 50℃)로 적용.",
+    )
+    liquidus_c: float | None = Field(default=None, description="목표 액상선(℃)")
+    liquidus_tolerance_c: float = Field(
+        default=50.0,
+        ge=0,
+        description="액상 허용 ±℃(요청값). solder_db 밴드는 축별 max(이 값, 50℃)로 적용.",
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one_target(self) -> "MeltTargetPayload":
+        if self.solidus_c is None and self.liquidus_c is None:
+            raise ValueError("solidus_c 또는 liquidus_c 중 하나 이상을 지정하세요.")
+        return self
+
+
+class RecommendMeltRequest(BaseModel):
+    """
+    고정 조성·가변 축·밸런스 원소로 목표 고상/액상에 가까운 조성 후보를 격자 탐색합니다.
+    결과는 모델 기반 후보이며 정답 조성이 아닙니다(meta.disclaimer 참고).
+    """
+
+    fixed_comp: Dict[str, float] = Field(
+        default_factory=dict,
+        description="고정 wt% (비어 있어도 됨). balance_element·free 축과 합이 100%가 되도록 맞춤.",
+    )
+    free_axes: List[FreeAxisSpec] = Field(
+        ..., min_length=1, description="스윕할 원소별 min/max/step"
+    )
+    balance_element: str = Field(default="Sn", description="나머지 wt%를 채울 원소")
+    target: MeltTargetPayload
+    max_results: int = Field(
+        default=10,
+        ge=1,
+        le=500,
+        description="탐색 결과 표에 반환할 최대 행 수(격자+DB 병합 시 max_db_similar_alloys와 함께 상한에 사용).",
+    )
+    max_grid_points: int = Field(default=15_000, ge=50, le=200_000)
+    balance_min: float = Field(default=0.02, ge=0, le=100)
+    balance_max: float = Field(default=98.0, ge=0, le=100)
+    max_db_similar_alloys: int = Field(
+        default=12,
+        ge=1,
+        le=500,
+        description=(
+            "solder_db 밴드 일치 행을 가져올 때의 상한. "
+            "탐색 결과 표에는 max(max_results, 이 값)건까지 격자+DB를 한 목록으로 합쳐 반환합니다."
+        ),
+    )
+    max_db_registered_in_candidates: int = Field(
+        default=4,
+        ge=0,
+        le=500,
+        description=(
+            "병합 표(`candidates`)에 넣을 solder_db 등록 행 최대 개수(목표 penalty가 낮은 순). "
+            "밴드 일치 DB가 많을 때 표가 DB만으로 채워지지 않게 한다. **0**이면 개수 제한 없음."
+        ),
+    )
+    rank_match_any_axis: bool = Field(
+        default=True,
+        description=(
+            "고상·액상 목표를 **둘 다** 줄 때: True면 정렬 점수·penalty가 더 잘 맞는 축(min) 기준 "
+            "(한 축만 목표에 가까워도 상위). False면 기존 L1 합(|Δ고상|+|Δ액상|)."
+        ),
+    )
+
+    @field_validator("fixed_comp")
+    @classmethod
+    def _validate_fixed_comp(cls, v: Dict[str, float]) -> Dict[str, float]:
+        if not v:
+            return {}
+        return _validate_alloy_comp_dict(v, "fixed_comp")
+
+    @field_validator("balance_element")
+    @classmethod
+    def _strip_balance_el(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("balance_element가 비어 있습니다.")
+        return s
+
+    @model_validator(mode="after")
+    def _balance_bounds(self) -> "RecommendMeltRequest":
+        if self.balance_min > self.balance_max:
+            raise ValueError("balance_min은 balance_max 이하여야 합니다.")
+        return self
+
+
+class RecommendMeltRow(BaseModel):
+    comp: Dict[str, float]
+    norm: Dict[str, float]
+    solidus: float
+    liquidus: float
+    peak: float
+    melting_stage: int
+    match_score: float
+    match_confidence: float
+    best_name: str | None = None
+    db_close_names: str | None = Field(
+        default=None,
+        description="조성 최근접 + 예측 고상·액상에 가까운 solder_db 참고명(중점 구분)",
+    )
+    penalty: float = Field(
+        ...,
+        description=(
+            "목표 대비 정렬용 점수(낮을수록 우선). 기본 L1 합; rank_match_any_axis 시 고상·액상 "
+            "둘 다 지정된 경우 min(|ΔTs|,|ΔTl|)과 동일 계열."
+        ),
+    )
+    plastic_range_c: float = Field(
+        ...,
+        description="과냉각 구간(액상−고상) ℃. Score 동점 시 좁은 순 우선.",
+    )
+    melting_detail_summary: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="응답 크기 절약용 melting_detail 요약(family, layers_preview 등)",
+    )
+    melt_row_source: str = Field(
+        default="predicted_grid",
+        description="predicted_grid(모델 예측 융점) | solder_db_registered(DB 등록 고상·액상 우선)",
+    )
+    registered_name: str | None = Field(
+        default=None,
+        description="solder_db 등록명(melt_row_source가 solder_db_registered일 때)",
+    )
+
+
+class RecommendMeltDbSimilarRow(BaseModel):
+    """solder_db 등록 합금 — 목표 고상 또는 목표 액상 중 하나라도 ±허용 안이면 포함(OR)."""
+
+    name: str
+    comp: Dict[str, float]
+    solidus: float
+    liquidus: float
+    penalty: float = Field(
+        default=0.0,
+        description="목표 고상·액상 대비 L1 오차 합(|ΔTs|+|ΔTl|), 지정된 목표 축만 합산",
+    )
+    plastic_range_c: float = Field(
+        default=0.0,
+        description="과냉각 구간(액상−고상) ℃. 목록 정렬 시 Score 동점용",
+    )
+    source: str = Field(default="solder_db")
+
+
+class RecommendMeltResponse(BaseModel):
+    candidates: List[RecommendMeltRow]
+    meta: Dict[str, Any]
+    db_similar_alloys: List[RecommendMeltDbSimilarRow] = Field(
+        default_factory=list,
+        description=(
+            "목표 밴드에 맞는 solder_db 행(OR 규칙). "
+            "표시용 통합 목록은 candidates와 동일 소스에서 병합되며, 이 필드는 동일 DB 목록을 "
+            "간단 형태로 중복 제공(다른 클라이언트·디버그용)합니다."
+        ),
+    )
+
+
+def _shrink_melting_detail_for_api(md: Any) -> Dict[str, Any]:
+    if not isinstance(md, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for k in ("family", "best_dist", "measured_anchor", "melt_temperatures_source", "registered_db_name"):
+        if k in md:
+            out[k] = md[k]
+    layers = md.get("layers")
+    if isinstance(layers, list):
+        out["layers_preview"] = [str(x) for x in layers[:5]]
+    return out
+
+
 class WebFavoriteItem(BaseModel):
     """웹 즐겨찾기 한 항목 (React localStorage와 동일 형태)."""
 
@@ -329,20 +579,7 @@ class WebFavoriteItem(BaseModel):
     @field_validator("comp")
     @classmethod
     def _validate_comp(cls, v: Dict[str, float]) -> Dict[str, float]:
-        if not isinstance(v, dict) or not v:
-            raise ValueError("comp는 최소 1개 원소가 필요합니다.")
-        clean: Dict[str, float] = {}
-        for k, val in v.items():
-            if not isinstance(k, str) or not k.strip():
-                raise ValueError("원소 기호는 문자열이어야 합니다.")
-            try:
-                f = float(val)
-            except Exception:
-                raise ValueError(f"{k} 값은 숫자여야 합니다.")
-            if f < 0:
-                raise ValueError(f"{k} 값은 0 이상이어야 합니다.")
-            clean[k.strip()] = f
-        return clean
+        return _validate_alloy_comp_dict(v, "comp")
 
 
 class WebFavoritesPayload(BaseModel):
@@ -427,10 +664,27 @@ def _write_web_favorites_file(items: List[Dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """기동 시 어떤 api_server.py·포트인지 터미널에 남겨, 8000에 구버전이 떠 있을 때 원인 추적이 쉽게 함."""
+    melt_ok = any(
+        getattr(route, "path", None) == "/api/recommend_melt" for route in app.routes
+    )
+    _here = Path(__file__).resolve()
+    print(f"[api_server] 로드된 파일: {_here}", flush=True)
+    print(f"[api_server] 작업 디렉터리: {os.getcwd()}", flush=True)
+    print(
+        f"[api_server] POST /api/recommend_melt: {'등록됨' if melt_ok else '없음 — 이 저장소의 api_server.py 로 다시 실행했는지 확인'}",
+        flush=True,
+    )
+    yield
+
+
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
     description="GUI와 동일한 합금 분석 엔진(test7)을 제공하는 HTTP API. `/api/about`에서 제품·면책 정보를 확인할 수 있습니다.",
     version=API_VERSION_SEMVER,
+    lifespan=_lifespan,
 )
 
 
@@ -464,8 +718,21 @@ if (os.getenv("ALLOY_API_CORS") or "").strip().lower() not in ("0", "false", "no
         allow_headers=["*"],
     )
 
-_ai_engine = AIEngine()  # GEMINI_API_KEY가 없으면 자동으로 로컬 폴백
-_analyzer = AlloyAnalyzer(SOLDER_DB, ai_engine=_ai_engine)
+_ai_engine: AIEngine | None = None
+_analyzer: AlloyAnalyzer | None = None
+_analyzer_lock = threading.Lock()
+
+
+def _get_engine_bundle() -> tuple[AIEngine, AlloyAnalyzer]:
+    """무거운 AI/Gemini 초기화를 첫 요청까지 지연해 `/openapi.json` 등 가벼운 엔드포인트 응답을 빠르게 합니다."""
+    global _ai_engine, _analyzer
+    if _analyzer is not None and _ai_engine is not None:
+        return _ai_engine, _analyzer
+    with _analyzer_lock:
+        if _analyzer is None or _ai_engine is None:
+            _ai_engine = AIEngine()  # GEMINI_API_KEY가 없으면 자동으로 로컬 폴백
+            _analyzer = AlloyAnalyzer(SOLDER_DB, ai_engine=_ai_engine)
+    return _ai_engine, _analyzer
 
 
 @app.get("/api/about")
@@ -510,6 +777,8 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
     합금 조성(wt%)을 받아 analyzer.analyze_all 결과를 JSON으로 반환.
     React 등 클라이언트에서는 이 엔드포인트만 호출하면 됩니다.
     """
+    _ai_engine, _analyzer = _get_engine_bundle()
+    sum_in, comp_notes = _composition_notes_for_raw_comp(dict(req.comp))
     # Cerebras 폴백이 이번 요청에서 실제 응답을 만들었는지 카운터 델타로 판정
     _cb_before = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
     try:
@@ -593,6 +862,8 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
         ai_usage_snapshot=dict(
             getattr(_ai_engine, "get_usage_snapshot", lambda: {})() or {}
         ),
+        comp_input_wt_sum=float(sum_in),
+        composition_notes=list(comp_notes),
     )
 
 
@@ -602,6 +873,7 @@ async def wetting_grid(req: WettingGridRequest) -> Dict[str, Any]:
     측정 DB 온도(250–290℃)별 IDW 예측 Fmax(mN)·T₀(s).
     전체 분석과 분리해 필요할 때만 호출합니다.
     """
+    _, _analyzer = _get_engine_bundle()
     try:
         rows = _analyzer.wetting_grid_for_comp(req.comp)
     except ValueError as e:
@@ -611,12 +883,151 @@ async def wetting_grid(req: WettingGridRequest) -> Dict[str, Any]:
     return {"wetting_by_temp": rows}
 
 
+@app.post("/api/recommend_melt", response_model=RecommendMeltResponse)
+async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
+    """
+    목표 고상/액상에 근접하는 조성을 격자로 탐색하고, 동일 목표·동일 밴드의 solder_db 등록 합금을
+    한 목록(`candidates`)으로 합쳐 반환합니다. 등록 DB 행은 고상·액상에 실측/문헌값을 쓰며,
+    표에는 `max_db_registered_in_candidates`로 DB 행 수를 제한해 격자(미지 조성) 후보가 밀리지 않게 합니다.
+
+    `db_similar_alloys`에는 동일 밴드의 DB 행을 간단 형태로 함께 담습니다(웹 UI는 `candidates` 한 표로만 표시).
+
+    GUI 엔진과 동일하게 validate → normalize → find_best_match → calc_melting_with_detail 경로를 사용합니다.
+
+    배포 시 `frontend/dist`를 같은 앱에서 서빙하면, 이 라우트가 없는 옛 프로세스로 POST가
+    넘어가 StaticFiles가 405를 반환할 수 있으니 코드 갱신 후 api_server를 재시작하세요.
+    """
+    if recommend_compositions is None or MeltTarget is None:
+        raise HTTPException(
+            status_code=501,
+            detail="composition_recommend 모듈을 불러오지 못했습니다.",
+        )
+    _, _analyzer = _get_engine_bundle()
+    tgt = MeltTarget(
+        solidus_c=req.target.solidus_c,
+        solidus_tolerance_c=float(req.target.solidus_tolerance_c),
+        liquidus_c=req.target.liquidus_c,
+        liquidus_tolerance_c=float(req.target.liquidus_tolerance_c),
+        rank_match_any_axis=bool(req.rank_match_any_axis),
+    )
+    axes = [ax.model_dump() for ax in req.free_axes]
+    try:
+        rows, meta = recommend_compositions(
+            _analyzer,
+            fixed_comp=dict(req.fixed_comp),
+            free_axes=axes,
+            balance_element=req.balance_element,
+            target=tgt,
+            max_results=req.max_results,
+            max_grid_points=req.max_grid_points,
+            balance_min=req.balance_min,
+            balance_max=req.balance_max,
+            unbounded_sorted_return=True,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"목표 융점 탐색 실패: {e}") from e
+
+    db_meta: Dict[str, Any] = {}
+    db_raw: List[Dict[str, Any]] = []
+    if list_db_compositions_matching_melt_target:
+        try:
+            db_raw, db_meta = list_db_compositions_matching_melt_target(
+                _analyzer,
+                tgt,
+                match_any_specified_axis=True,
+                max_rows=int(req.max_db_similar_alloys),
+            )
+        except Exception as e:
+            db_meta = {"db_similar_match_error": str(e)}
+            db_raw = []
+
+    unified_max = min(500, max(int(req.max_results), int(req.max_db_similar_alloys)))
+    merge_fn = merge_db_registered_into_recommend_candidates
+    if merge_fn is not None:
+        merged, merge_meta = merge_fn(
+            _analyzer,
+            rows,
+            db_raw,
+            tgt,
+            max_results=unified_max,
+            max_db_registered_in_merged=int(req.max_db_registered_in_candidates),
+        )
+        rows = merged
+        meta = {**meta, **merge_meta}
+    else:
+        rows = rows[: max(1, int(req.max_results))]
+
+    meta = {
+        **meta,
+        **db_meta,
+        "melt_unified_max_rows": unified_max,
+        "melt_unified_list": True,
+        "melt_rank_match_any_axis": bool(req.rank_match_any_axis),
+        "db_similar_match_rule": "solidus_or_liquidus_in_band_merged_candidates_sorted_by_melt_penalty",
+    }
+
+    candidates: List[RecommendMeltRow] = []
+    for r in rows:
+        md = r.get("melting_detail") if isinstance(r, dict) else {}
+        src = str(r.get("melt_row_source") or "predicted_grid")
+        reg = r.get("registered_name")
+        candidates.append(
+            RecommendMeltRow(
+                comp=dict(r["comp"]),
+                norm=dict(r["norm"]),
+                solidus=float(r["solidus"]),
+                liquidus=float(r["liquidus"]),
+                peak=float(r["peak"]),
+                melting_stage=int(r["melting_stage"]),
+                match_score=float(r["match_score"]),
+                match_confidence=float(r["match_confidence"]),
+                best_name=r.get("best_name"),
+                db_close_names=r.get("db_close_names"),
+                penalty=float(r["penalty"]),
+                plastic_range_c=float(r.get("plastic_range_c", r["liquidus"] - r["solidus"])),
+                melting_detail_summary=_shrink_melting_detail_for_api(md),
+                melt_row_source=src,
+                registered_name=str(reg).strip() if reg else None,
+            )
+        )
+
+    db_similar: List[RecommendMeltDbSimilarRow] = []
+    for dr in db_raw:
+        if not isinstance(dr, dict):
+            continue
+        try:
+            db_similar.append(
+                RecommendMeltDbSimilarRow(
+                    name=str(dr.get("name", "")),
+                    comp={str(k): float(v) for k, v in (dr.get("comp") or {}).items()},
+                    solidus=float(dr["solidus"]),
+                    liquidus=float(dr["liquidus"]),
+                    penalty=float(dr.get("penalty", 0.0)),
+                    plastic_range_c=float(
+                        dr.get("plastic_range_c", float(dr["liquidus"]) - float(dr["solidus"]))
+                    ),
+                    source=str(dr.get("source", "solder_db")),
+                )
+            )
+        except Exception:
+            continue
+
+    return RecommendMeltResponse(
+        candidates=candidates,
+        meta=meta,
+        db_similar_alloys=db_similar,
+    )
+
+
 @app.post("/api/compare", response_model=CompareResponse)
 async def compare(req: CompareRequest) -> CompareResponse:
     """
     합금 A/B 두 조성을 받아 각각 analyze_all을 수행하고
     비교 분석용 핵심 요약만 반환.
     """
+    _ai_engine, _analyzer = _get_engine_bundle()
     try:
         lm = req.literature_mode or "fast"
         ra = _analyzer.analyze_all(

@@ -31,18 +31,8 @@ class UnknownMetalsMeltingTest(unittest.TestCase):
     def test_unknown_blend_prefers_db_neighbor_core_scaled(self):
         """미지 금속이 있어도 BD 실측 이웃(핵심 조성 재규격화)을 블렌드 기준으로 사용."""
         db = [
-            {
-                "name": "FarSnAg",
-                "comp": {"Sn": 96.5, "Ag": 3.5},
-                "solidus": 221.0,
-                "liquidus": 221.0,
-            },
-            {
-                "name": "NearSACIn",
-                "comp": {"Sn": 88.0, "Ag": 3.5, "Cu": 0.5, "In": 8.0},
-                "solidus": 198.0,
-                "liquidus": 210.0,
-            },
+            {"name": "FarSnAg", "comp": {"Sn": 96.5, "Ag": 3.5}, "solidus": 221.0, "liquidus": 221.0},
+            {"name": "NearSACIn", "comp": {"Sn": 88.0, "Ag": 3.5, "Cu": 0.5, "In": 8.0}, "solidus": 198.0, "liquidus": 210.0},
         ]
         norm = {"Sn": 82.0, "Ag": 3.5, "Cu": 0.5, "In": 8.0, "Au": 6.0}
         sol, liq, _, detail = hybrid_melting_predict(norm, db, ai_engine=None)

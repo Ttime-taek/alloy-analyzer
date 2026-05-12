@@ -1,18 +1,31 @@
 # melting_predictor.py  (v2.0 — Hybrid Melting Point Prediction Engine)
 #
 # 예측 레이어 (우선순위 순):
-#   L1. DB 직접 일치      — dist < 0.3 → 실측값 최우선
+#   L1. DB 직접 일치      — composition_distance ≤ DB_EXACT_MATCH_EPS → DB 고상·액상 그대로(기준)
 #   L2. 이진/삼원 상태도  — 문헌 기반 공정점·liquidus 곡선 정밀 보간
-#   L3. KNN 가중 보간     — 인근 DB 합금들의 가중평균 (liquidus 보조)
+#   L3. KNN 가중 보간     — 조성 이웃 + L2(또는 이웃) 기준 융점대에서 고상·액상 OR 근접 DB를
+#                          풀에 합쳐 가중(온도 정렬 보너스)으로 유사 온도대 다른 계열 반영
 #   L4. CALPHAD 근사      — L2 없을 때만 활성화
+#   L4e. 외부 CALPHAD(선택) — MELTING_CALPHAD_URL POST 시 추가 레이어
 #   L6. AI 델타 보정      — 미지 조성에만 소량 반영
 #
+#   계열·레이어 가중: melting_ensemble.py + 선택 JSON (melting_ensemble_config.example.json 참고)
+#
 # 핵심 규칙:
+#   · **DB 직접 일치(L1)** — solder_db 실측 행과 조성 거리 ≤ DB_EXACT_MATCH_EPS 이면
+#     그 행의 고상·액상만 사용. 실측 앵커·미지원소 블렌드·L2/L3/L4/L6·물리 보정으로 덮지 않음(기준값).
 #   · SAC 삼원계 → solidus 반드시 217°C (공정점 고정)
 #   · 이원계 지배 → L2만 사용, CALPHAD 비활성
 #   · L2 신뢰도 높을수록 L4 비중 0에 수렴
 
 import math
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from .melting_ensemble import get_ensemble_profile
+except ImportError:
+    from test7.melting_ensemble import get_ensemble_profile
 
 try:
     from .sn_pb_library import SN_PB_PHASE
@@ -22,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "3"
+MELTING_ENGINE_VERSION = "7"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -733,6 +746,106 @@ def _min_db_distance_core(norm, db_prepared):
     return min(cdist(q, item["comp"]) for item in db_prepared)
 
 
+def _knn_reference_temperatures(
+    l2_sol: Optional[float],
+    l2_liq: Optional[float],
+    knn_raw: List[Tuple[float, Any]],
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    KNN 온도 OR-밴드 기준: L2 상태도가 있으면 우선, 없는 축은 조성 최근접 상위 이웃들의
+    고상·액상 평균으로 보완해 200℃대 등 목표 융점대에 가까운 다른 DB 계열을 끌어올 수 있게 함.
+    """
+    rs = float(l2_sol) if l2_sol is not None else None
+    rl = float(l2_liq) if l2_liq is not None else None
+    if not knn_raw:
+        return rs, rl
+    n = min(6, len(knn_raw))
+    avg_s = sum(float(x[1]["solidus"]) for x in knn_raw[:n]) / float(n)
+    avg_l = sum(float(x[1]["liquidus"]) for x in knn_raw[:n]) / float(n)
+    if rs is None:
+        rs = avg_s
+    if rl is None:
+        rl = avg_l
+    return rs, rl
+
+
+def _knn_pool_with_temp_or_band(
+    norm: Dict[str, Any],
+    db_prepared: List[Any],
+    knn_raw: List[Tuple[float, Any]],
+    ref_sol: Optional[float],
+    ref_liq: Optional[float],
+) -> Tuple[List[Tuple[float, Any]], Dict[str, Any]]:
+    """
+    L3용 이웃: 조성 거리 상위 + ref 고상/액상 ±밴드에서 **한 축만** 맞아도(OR) 추가.
+    정렬은 조성 거리에서 온도 정렬 보너스를 빼 스코어가 낮을수록 우선.
+    """
+    from .utils import composition_distance as cdist
+
+    meta: Dict[str, Any] = {"knn_temp_band_c": None, "knn_temp_pool_extra": 0, "knn_pool_names": []}
+    if not knn_raw:
+        return [], meta
+    try:
+        temp_band = float(os.getenv("MELTING_KNN_TEMP_BAND_C", "28") or "28")
+    except Exception:
+        temp_band = 28.0
+    try:
+        max_extra = int(os.getenv("MELTING_KNN_TEMP_EXTRA_MAX", "16") or "16")
+    except Exception:
+        max_extra = 16
+    meta["knn_temp_band_c"] = round(temp_band, 2)
+
+    pool: Dict[str, Tuple[float, Any]] = {}
+    for d, item in knn_raw[:7]:
+        pool[str(item.get("name", ""))] = (float(d), item)
+
+    extra = 0
+    for item in db_prepared:
+        if extra >= max_extra:
+            break
+        nm = str(item.get("name", ""))
+        if nm in pool:
+            continue
+        try:
+            s = float(item["solidus"])
+            l = float(item["liquidus"])
+        except Exception:
+            continue
+        d_t = float("inf")
+        if ref_sol is not None:
+            d_t = min(d_t, abs(s - ref_sol))
+        if ref_liq is not None:
+            d_t = min(d_t, abs(l - ref_liq))
+        if d_t <= temp_band:
+            pool[nm] = (float(cdist(norm, item["comp"])), item)
+            extra += 1
+    meta["knn_temp_pool_extra"] = extra
+
+    scored: List[Tuple[float, float, Any]] = []
+    for d_comp, item in pool.values():
+        try:
+            s = float(item["solidus"])
+            l = float(item["liquidus"])
+        except Exception:
+            continue
+        d_t = float("inf")
+        if ref_sol is not None:
+            d_t = min(d_t, abs(s - ref_sol))
+        if ref_liq is not None:
+            d_t = min(d_t, abs(l - ref_liq))
+        align = 0.0
+        if d_t < float("inf") and temp_band > 1e-9:
+            align = max(0.0, (temp_band - min(d_t, temp_band)) / temp_band) * 7.5
+        scored.append((float(d_comp) - align, float(d_comp), item))
+    scored.sort(key=lambda x: x[0])
+    limit = 6
+    out = [(dc, it) for _, dc, it in scored[:limit]]
+    if not out:
+        out = [(d, it) for d, it in knn_raw[:5]]
+    meta["knn_pool_names"] = [str(x[1].get("name", "")) for x in out]
+    return out, meta
+
+
 def _near_pct(val, target, tol):
     """실측 앵커용 — 표시 wt% 라운딩 차이 허용."""
     try:
@@ -778,10 +891,52 @@ def _measured_anchor_sn88_ag35_cu05_in8(norm):
         return None
 
     return {
-        "label": "Sn88Ag3.5Cu0.5In8(measured)",
+        "label": "Sn88Ag3.5Cu0.5In8",
         "solidus": 198.0,
         "liquidus": 210.0,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 외부 CALPHAD / 미니 서버 게이트 (선택)
+# ─────────────────────────────────────────────────────────────────────────────
+def _external_calphad_http(norm):
+    """
+    환경변수 MELTING_CALPHAD_URL 이 설정된 경우에만 호출.
+
+    Request : POST JSON { "comp": { "Sn": 96.5, "Ag": 3.5, ... } }  (wt%)
+    Response: JSON { "solidus": float, "liquidus": float, "confidence"?: float 0~1 }
+
+    실패·타임아웃 시 None (기존 L4 근사만 사용).
+    """
+    url = (os.getenv("MELTING_CALPHAD_URL") or "").strip()
+    if not url:
+        return None
+    try:
+        import json as _json
+        import urllib.request
+
+        timeout = float(os.getenv("MELTING_CALPHAD_TIMEOUT", "4") or "4")
+        payload = _json.dumps({"comp": norm}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+        j = _json.loads(body)
+        if not isinstance(j, dict):
+            return None
+        sol = float(j["solidus"])
+        liq = float(j["liquidus"])
+        raw_c = j.get("confidence", j.get("conf", 0.85))
+        conf = float(raw_c) if raw_c is not None else 0.85
+        conf = max(0.05, min(1.0, conf))
+        return sol, liq, conf
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -801,6 +956,11 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     liquidus : float
     peak     : float
     detail   : dict  (레이어별 기여 정보)
+
+    Notes
+    -----
+    DB 행과 조성이 **정확히 일치**하면(`db_exact_match`) 해당 행의 고상·액상이 곧
+    출력 기준(실측 DB 우선). 그 외 조성만 앙상블·앵커·블렌드가 적용된다.
     """
     from .utils import composition_distance
 
@@ -820,9 +980,12 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             best_item = item
 
     knn_raw.sort(key=lambda x: x[0])
-    knn5 = knn_raw[:5]
 
     db_exact_match = best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
+    ext_calphad_detail = None
+    knn_augment_meta: Optional[Dict[str, Any]] = None
+    knn_ref_sol: Optional[float] = None
+    knn_ref_liq: Optional[float] = None
 
     if db_exact_match:
         # DB 직접 일치: 모델(L2/L3/L4)·plateau·물리 보정·AI를 섞지 않음
@@ -839,6 +1002,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         }
 
     else:
+        prof = get_ensemble_profile(family)
         # L1: 최근접 DB 행 — _db_neighbor_gate 로 거리에 따라 0~1 부드럽게 섞어 L2/L3와 앙상블
         l1_sol, l1_liq, l1_w = None, None, 0.0
         if best_item is not None:
@@ -855,18 +1019,47 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SnAg",
                                 "SnCu", "SnSb", "SnZn")
         if l2_sol is not None:
-            l2_w = l2_conf * (3.0 if is_simple else 1.8)
+            l2_w = l2_conf * (
+                float(prof["l2_simple_mult"]) if is_simple else float(prof["l2_other_mult"])
+            )
         else:
             l2_w = 0.0
 
+        ref_sol, ref_liq = _knn_reference_temperatures(l2_sol, l2_liq, knn_raw)
+        knn5, knn_augment_meta = _knn_pool_with_temp_or_band(
+            norm, db_prepared, knn_raw, ref_sol, ref_liq
+        )
+        knn_ref_sol, knn_ref_liq = ref_sol, ref_liq
+
         # ─── L3: KNN 가중 보간 ───────────────────────────────────────────────
         if knn5:
-            w_total = sum(1.0 / (d + 1e-6) for d, _ in knn5)
-            l3_sol  = sum(item["solidus"]  * (1.0/(d+1e-6)) for d, item in knn5) / w_total
-            l3_liq  = sum(item["liquidus"] * (1.0/(d+1e-6)) for d, item in knn5) / w_total
+            try:
+                tw = float(os.getenv("MELTING_KNN_TEMP_WEIGHT", "1.35") or "1.35")
+            except Exception:
+                tw = 1.35
+            band = float((knn_augment_meta or {}).get("knn_temp_band_c") or 28.0)
+
+            def _l3_w(d_comp: float, item: Any) -> float:
+                d_t = float("inf")
+                if ref_sol is not None:
+                    d_t = min(d_t, abs(float(item["solidus"]) - ref_sol))
+                if ref_liq is not None:
+                    d_t = min(d_t, abs(float(item["liquidus"]) - ref_liq))
+                boost = 1.0
+                if d_t < float("inf") and band > 1e-9:
+                    boost = 1.0 + tw * max(0.0, (band - min(d_t, band)) / band)
+                return (1.0 / (d_comp + 1e-6)) * boost
+
+            w_total = sum(_l3_w(d, it) for d, it in knn5)
+            l3_sol = sum(float(it["solidus"]) * _l3_w(d, it) for d, it in knn5) / w_total
+            l3_liq = sum(float(it["liquidus"]) * _l3_w(d, it) for d, it in knn5) / w_total
             l3_conf = math.exp(-knn5[0][0] * 0.6)
             # 이원계+L2가 있을 때 KNN(L3) 비중이 크면 공정부 근처에서 액상선이 과대(예: Sn-Cu 227→231)
-            l3_w    = l3_conf * (0.08 if is_simple and l2_sol is not None else 1.2)
+            l3_w = l3_conf * (
+                float(prof["l3_knn_with_l2_simple"])
+                if is_simple and l2_sol is not None
+                else float(prof["l3_knn_default"])
+            )
             # Sn-Bi 계열: DB 이웃이 멀면(KNN 거리↑) 성분이 달라 이웃 고상·액상이 왜곡되기 쉬움 → L3 추가 억제.
             if family == "SnBi":
                 d0 = float(knn5[0][0])
@@ -875,15 +1068,26 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         else:
             l3_sol, l3_liq, l3_w = 217.0, 221.0, 0.1
 
+        # Sn-Bi(-Ag-Cu-In): DB에 서로 비슷한 거리의 행이 여럿일 때 L1(최근접 1행)만으로 수렴하는 현상 완화.
+        # (l3_knn_with_l2_simple 기본값이 매우 작아 L3가 사실상 무시되기 쉬움 → 근접 2번째 이웃이 있으면 KNN 비중 상향)
+        if best_item is not None and family == "SnBi" and knn5 and len(knn5) >= 2:
+            d0 = float(knn5[0][0])
+            d1 = float(knn5[1][0])
+            if d0 > 1e-9 and d0 < 4.5 and d1 <= d0 * 1.55:
+                tight = max(0.0, min(1.0, (1.55 - d1 / d0) / 0.55))
+                l1_w *= 1.0 - 0.35 * tight
+                l3_w *= 1.0 + 2.0 * tight
+                l3_w = min(l3_w, float(prof["l3_knn_default"]) * 2.3)
+
         # ─── L4: CALPHAD ───────────────────────────────────────────────────────
         l4_sol, l4_liq, l4_conf = _calphad_approx(norm, family)
         # 상태도(L2)가 있으면 CALPHAD는 보조만. SnBi는 Bi 공정 인력 합산이 과추정되기 쉬워 항상 제외.
         if l2_sol is not None and (family == "SnBi" or l2_conf > 0.85):
             l4_w = 0.0
         elif l2_sol is not None:
-            l4_w = l4_conf * 0.3
+            l4_w = l4_conf * float(prof["l4_if_l2_weak_mult"])
         else:
-            l4_w = l4_conf * 0.9
+            l4_w = l4_conf * float(prof["l4_if_no_l2_mult"])
 
         # ─── 앙상블 ───────────────────────────────────────────────────────────
         layers = []
@@ -894,6 +1098,14 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         layers.append((l3_sol, l3_liq, l3_w, "L3:knn"))
         if l4_w > 0:
             layers.append((l4_sol, l4_liq, l4_w, "L4:calphad"))
+
+        ext = _external_calphad_http(norm)
+        if ext is not None:
+            es, el, ec = ext
+            ew = float(prof.get("l4_external_weight", 0.0))
+            if ew > 1e-12:
+                layers.append((es, el, ew * ec, "L4e:ext_calphad"))
+                ext_calphad_detail = {"applied": True, "weight": round(ew * ec, 4)}
 
         total_w = sum(w for _, _, w, _ in layers)
         if total_w == 0:
@@ -929,7 +1141,8 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     layers_snapshot = list(layers)
 
     measured_anchor_detail = None
-    ma = _measured_anchor_sn88_ag35_cu05_in8(norm)
+    # DB 직접 일치는 실측 DB가 기준 — 문서/특수 앵커로 덮어쓰지 않음.
+    ma = None if db_exact_match else _measured_anchor_sn88_ag35_cu05_in8(norm)
     if ma:
         final_sol = float(ma["solidus"])
         final_liq = float(ma["liquidus"])
@@ -939,7 +1152,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     unknown_blend_detail = None
     # 미지 원소가 극미량이라도 모델 화학계 밖 → 고신뢰 숫자처럼 보이지 않게 약하게 당김.
     # 기준점(bs, bl): BD 실측(DB 이웃, 핵심 성분 재규격화) → 계열 상태도(L2) → CALPHAD.
-    if measured_anchor_detail is None and unk_pct_global >= 0.05:
+    if (measured_anchor_detail is None and unk_pct_global >= 0.05 and not db_exact_match):
         bs, bl, blend_meta = _unknown_blend_baseline_sol_liq(norm, db_prepared, family)
         t = min(1.0, unk_pct_global / 7.0)
         bd_core = _min_db_distance_core(norm, db_prepared)
@@ -993,6 +1206,12 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         "db_exact_match_eps": DB_EXACT_MATCH_EPS,
         "db_neighbor_gate": round(_db_neighbor_gate(best_dist), 4) if best_item else 0.0,
     }
+    if knn_augment_meta is not None:
+        detail["knn_temp_or_augment"] = {
+            **knn_augment_meta,
+            "ref_solidus_c": knn_ref_sol,
+            "ref_liquidus_c": knn_ref_liq,
+        }
     if snbi_plateau_detail:
         detail["snbi_cu_plateau_anchor"] = snbi_plateau_detail
     if measured_anchor_detail:
@@ -1001,5 +1220,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         detail["unknown_noncore_pct"] = round(unk_pct_global, 4)
     if unknown_blend_detail:
         detail["unknown_metals_melting_blend"] = unknown_blend_detail
+    if ext_calphad_detail:
+        detail["external_calphad"] = ext_calphad_detail
 
     return round(final_sol, 1), round(final_liq, 1), round(final_peak, 1), detail

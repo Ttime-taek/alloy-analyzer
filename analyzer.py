@@ -128,13 +128,33 @@ class AlloyAnalyzer:
         # 고상선/액상선 L6 델타 보정 전용(고속 추론). 사용 불가 시 휴리스틱으로 폴백.
         self.melting_ai = CerebrasMeltingDeltaEngine()
 
+        self._solder_db_fingerprint = None
+        self.db_prepared = []
+        self._sync_db_prepared()
+
+    def _sync_db_prepared(self) -> None:
+        """
+        self.db(solder_db)가 갱신되면 db_prepared를 다시 구축한다.
+
+        - API 장기 실행 중에도 동일 list 객체가 in-place로 바뀌는 경우를 흡수.
+        - 지문은 AI 디스크 캐시 키에 포함되어 DB 수정 후 옛 요약이 재사용되지 않게 한다.
+        """
+        try:
+            from .solder_db import fingerprint_solder_db as _fp
+        except ImportError:
+            from test7.solder_db import fingerprint_solder_db as _fp
+
+        fp = _fp(self.db)
+        if fp == self._solder_db_fingerprint and self.db_prepared:
+            return
+        self._solder_db_fingerprint = fp
         self.db_prepared = [
             {
                 "name": item["name"],
                 "comp": item["comp"],
                 "comp_tuple": tuple(sorted(item["comp"].items())),
                 "solidus": item["solidus"],
-                "liquidus": item["liquidus"]
+                "liquidus": item["liquidus"],
             }
             for item in self.db
         ]
@@ -653,6 +673,7 @@ class AlloyAnalyzer:
                 except Exception:
                     pass
 
+        self._sync_db_prepared()
         _p(8, "입력 조성 검증·정규화 중...")
         self.validate_input_comp(comp)
         norm = self.normalize(comp)
@@ -794,7 +815,7 @@ class AlloyAnalyzer:
             norm,
             mode=mode,
             literature_mode=literature_mode,
-            extra=f"mv={_mv}",
+            extra=f"mv={_mv}|dbfp={getattr(self, '_solder_db_fingerprint', '') or ''}",
         )
         db_exact_hit = (score is not None and float(score) <= _DB_EXACT_EPS)
 
