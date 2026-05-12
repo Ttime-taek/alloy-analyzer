@@ -4,8 +4,10 @@ html {
 }
 
 :root {
-  /* 본문·인라인 SVG 텍스트 공통 — 한글 가독·리눅스 헤드리스에서도 시스템 글꼴 우선 */
+  /* 본문·차트·폼 공통 — Pretendard 우선, 미로드 시 한글 시스템 스택 */
   --font-sans:
+    "Pretendard",
+    Pretendard,
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
@@ -49,8 +51,22 @@ body {
   color: var(--text-primary);
 }
 
-.app-shell svg text {
+/* FINDING-DR-001: UA 기본( Times/Arial ) 누수 방지 — 셸·폼·SVG 전부 동일 스택 */
+.app-shell,
+.app-shell button,
+.app-shell input,
+.app-shell select,
+.app-shell textarea {
   font-family: var(--font-sans);
+}
+
+.app-shell svg {
+  font-family: inherit;
+}
+
+.app-shell svg text,
+.app-shell svg tspan {
+  font-family: inherit;
 }
 
 #root {
@@ -63,6 +79,7 @@ select,
 textarea {
   font-size: 16px;
   line-height: 1.35;
+  font-family: var(--font-sans);
 }
 
 input[type="checkbox"],
@@ -393,7 +410,7 @@ summary:focus-visible,
 
 .result-plain-pre {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
@@ -486,14 +503,14 @@ summary:focus-visible,
 /* 본문 기본 14px — 리포트의 12px 과밀 완화(인라인 스타일은 그대로 두되 베이스만 상향) */
 .app-shell {
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
-/* 메인 2컬럼: 좁은 화면에서 한 열로 */
+/* 메인 2컬럼: 좁은 화면에서 한 열로 — 열 간격 소폭 확대로 밀도 완화 */
 .app-main-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  gap: 24px;
+  gap: 28px;
   align-items: start;
 }
 

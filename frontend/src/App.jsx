@@ -1236,8 +1236,8 @@ export default function App() {
         minHeight: "100vh",
         background: "var(--bg-page)",
         color: "var(--text-primary)",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        padding: "24px"
+        fontFamily: "var(--font-sans)",
+        padding: "28px 26px"
       }}
     >
       <main
@@ -2513,8 +2513,7 @@ export default function App() {
                             <td
                               style={{
                                 padding: "6px 8px",
-                                fontFamily:
-                                  "ui-sans-serif, 'Segoe UI', system-ui, -apple-system, sans-serif",
+                                fontFamily: "var(--font-sans)",
                                 fontSize: 12,
                                 letterSpacing: "0.01em",
                                 maxWidth: 280,
@@ -6058,7 +6057,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           textAnchor="end"
           fill="#94a3b8"
           fontSize={fsAxis}
-          fontFamily="system-ui, sans-serif"
+          fontFamily="inherit"
         >
           {yMinLbl}℃
         </text>
@@ -6068,7 +6067,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           textAnchor="end"
           fill="#94a3b8"
           fontSize={fsAxis}
-          fontFamily="system-ui, sans-serif"
+          fontFamily="inherit"
         >
           {yMaxLbl}℃
         </text>
@@ -6089,7 +6088,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           textAnchor="middle"
           fill="#94a3b8"
           fontSize={fsAxis}
-          fontFamily="system-ui, sans-serif"
+          fontFamily="inherit"
         >
           시간 (s) · 축 0–{Math.round(axisTMax)}s · 프로파일 끝 {Math.round(tEnd)}s
         </text>
@@ -6099,7 +6098,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           textAnchor="middle"
           fill="#94a3b8"
           fontSize={fsAxis}
-          fontFamily="system-ui, sans-serif"
+          fontFamily="inherit"
           transform={`rotate(-90 ${14 * sc} ${padY + plotH / 2})`}
         >
           온도 (℃)

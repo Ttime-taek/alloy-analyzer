@@ -6,7 +6,7 @@ Single source of implementation: `frontend/src/index.css` (`:root`). Update both
 
 | Token | Value | Use |
 |--------|--------|-----|
-| `--font-sans` | `system-ui, … "Segoe UI", sans-serif` | `body`, 인라인 **SVG `<text>`** (`svg text { font-family: var(--font-sans); }`) — UA 기본(Times 계열) 혼입 방지 (**FINDING-FONT-MIX**). |
+| `--font-sans` | `"Pretendard", Pretendard, system-ui, … "Segoe UI", …` | `body`, `frontend/index.html`에서 **Pretendard** 정적 CSS 로드. `.app-shell` 및 `button`/`input`/`select`/`textarea`·전역 폼에 `var(--font-sans)`로 UA **Times/Arial** 혼입 방지 (**FINDING-DR-001**, **FINDING-FONT-MIX**). **SVG `<text>` / `<tspan>`**는 `inherit` + 차트 축 `fontFamily="inherit"`로 셸과 동일 스택. |
 
 ## Color (dark)
 
@@ -32,8 +32,8 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 
 ## Layout
 
-- **`.app-shell`**: root wrapper; base `font-size: 14px` (see `index.css`).
-- **`.app-main-grid`**: two-column main grid; below **720px** width stacks to a single column with tighter gap.
+- **`.app-shell`**: root wrapper; base `font-size: 14px`, `line-height: 1.55` (see `index.css`). 인라인 패딩 **`28px 26px`** (`App.jsx`)으로 페이지 여백 소폭 확대.
+- **`.app-main-grid`**: two-column main grid; **`gap: 28px`**; below **720px** width stacks to a single column with tighter gap.
 
 ### Touch targets
 
@@ -60,7 +60,8 @@ Respect `prefers-reduced-motion: reduce` (see `index.css`).
 | **FINDING-004** | Mode & literature toggles | `minHeight: 44` and increased padding on tab / fast–precision controls (`App.jsx`). |
 | **FINDING-005** | Favorites + periodic (A·B) | Save / delete / grid buttons aligned to 44px + padding for both compositions (`App.jsx`). |
 | **FINDING-006** | Secondary actions | Sync retry, Sn autofill, row remove, result collapse/expand — same 44px + padding (`App.jsx`). |
-| **FINDING-FONT-MIX** | SVG `<text>` 기본 글꼴 | `:root --font-sans` + `.app-shell svg text { font-family: var(--font-sans); }` (`index.css`). |
+| **FINDING-FONT-MIX** | SVG `<text>` 기본 글꼴 | `:root --font-sans` + `.app-shell svg` / `text` / `tspan`에 `inherit`·스택 강제 (`index.css`); 리플로우 차트 `App.jsx` 축 라벨 `fontFamily="inherit"`. |
+| **FINDING-DR-001** | DOM 샘플에 Times/Arial | Pretendard 우선 스택 + 폼·셸 명시 `font-family` + 위 SVG 규칙 (`index.css`, `index.html`, `App.jsx`). |
 
 ### Interaction (tactile hover)
 
