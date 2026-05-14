@@ -684,6 +684,25 @@ class AlloyAnalyzer:
 
         _p(66, "KNN 유사 합금 검색 중...")
         knn  = self.find_knn(norm, k=3)
+        alloy_inference = {}
+        try:
+            from .alloy_property_inference import predictAlloyProperties
+
+            alloy_inference = predictAlloyProperties(norm, self.db_prepared, k=3)
+        except Exception:
+            alloy_inference = {
+                "solidus": None,
+                "liquidus": None,
+                "recommended_peak_c": None,
+                "neighbors": [],
+                "neighbor_weights": [],
+                "element_weights_liquidus": {},
+                "element_weights_solidus": {},
+                "process_report": "데이터 추론 단계에서 오류가 발생했습니다.",
+                "inference_note": "오류",
+                "idw_baseline_solidus": None,
+                "idw_baseline_liquidus": None,
+            }
         _p(38, "리스크 예측 중...")
         risk = self.predict_risk(norm)
         _p(50, "물성 예측 모델 계산 중...")
@@ -1067,4 +1086,5 @@ class AlloyAnalyzer:
             "retrieved_candidates": retrieved_candidates,
             "ai_used_this_request": bool(ai_used_this_request),
             "ai_source": ai_source,  # "api" | "cache" | "db_exact"
+            "alloy_inference": alloy_inference,
         }

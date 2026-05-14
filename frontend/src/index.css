@@ -229,6 +229,11 @@ summary:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+/* 목표 융점 탐색 표: 고상·액상·ΔT 열 자릿수 정렬 (DESIGN.md) */
+.melt-rec-table .melt-rec-num {
+  font-variant-numeric: tabular-nums;
+}
+
 .result-prose--lab-report .result-prose-head {
   font-size: 13px;
   letter-spacing: 0.03em;

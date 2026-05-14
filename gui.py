@@ -2169,6 +2169,15 @@ class AlloyGUI:
                 _row("융점", f"A {self._fmt_num(a.get('solidus'),1)}~{self._fmt_num(a.get('liquidus'),1)}℃   |   "
                             f"B {self._fmt_num(b.get('solidus'),1)}~{self._fmt_num(b.get('liquidus'),1)}℃")
                 _row("피크", f"A {self._fmt_num(a.get('peak'),1)}℃   |   B {self._fmt_num(b.get('peak'),1)}℃")
+                ain = a.get("alloy_inference") if isinstance(a.get("alloy_inference"), dict) else {}
+                binf = b.get("alloy_inference") if isinstance(b.get("alloy_inference"), dict) else {}
+                if (ain.get("liquidus") is not None) or (binf.get("liquidus") is not None):
+                    _row(
+                        "데이터 추론 L/피크",
+                        f"A L {self._fmt_num(ain.get('liquidus'),1)}℃ ≈피크 {self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   "
+                        f"B L {self._fmt_num(binf.get('liquidus'),1)}℃ ≈피크 {self._fmt_num(binf.get('recommended_peak_c'),1)}℃",
+                        tag_label="KEY",
+                    )
                 pma = a.get("profile_metrics") if isinstance(a.get("profile_metrics"), dict) else {}
                 pmb = b.get("profile_metrics") if isinstance(b.get("profile_metrics"), dict) else {}
                 if pma or pmb:
@@ -2340,6 +2349,38 @@ class AlloyGUI:
                 _row("융점", f"Solidus {self._fmt_num(summary.get('solidus'),1)}℃   /   "
                            f"Liquidus {self._fmt_num(summary.get('liquidus'),1)}℃   /   "
                            f"Peak {self._fmt_num(summary.get('peak'),1)}℃")
+                ain = summary.get("alloy_inference") if isinstance(summary.get("alloy_inference"), dict) else {}
+                if ain.get("solidus") is not None and ain.get("liquidus") is not None:
+                    nei = ain.get("neighbors") if isinstance(ain.get("neighbors"), list) else []
+                    nei_txt = ", ".join(
+                        f"{n.get('name','?')}(w={self._fmt_num(n.get('weight'),3)})"
+                        for n in nei[:3]
+                        if isinstance(n, dict)
+                    ) or "N/A"
+                    wl = ain.get("element_weights_liquidus") if isinstance(ain.get("element_weights_liquidus"), dict) else {}
+                    wtxt = ", ".join(f"{k}:{v}" for k, v in sorted(wl.items())[:8]) if wl else "—"
+                    _row(
+                        "데이터 추론(3-NN)",
+                        f"S {self._fmt_num(ain.get('solidus'),1)}℃ / L {self._fmt_num(ain.get('liquidus'),1)}℃ / "
+                        f"권장피크≈{self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   이웃: {nei_txt}",
+                        tag_label="KEY",
+                    )
+                    _row("액상선 민감도(℃/wt%·근사)", wtxt, tag_label="KEY")
+                    try:
+                        ds = float(ain.get("solidus", 0)) - float(summary.get("solidus", 0) or 0)
+                        dl = float(ain.get("liquidus", 0)) - float(summary.get("liquidus", 0) or 0)
+                        rpk = ain.get("recommended_peak_c")
+                        pk = summary.get("peak")
+                        dpp = ""
+                        if rpk is not None and pk is not None:
+                            dpp = f" · 권장피크(추)−엔진피크 {float(rpk) - float(pk):+.1f}℃"
+                        _row("추론−하이브리드 Δ", f"고상 {ds:+.2f}℃ · 액상 {dl:+.2f}℃{dpp}", tag_label="KEY")
+                    except Exception:
+                        pass
+                    pr = str(ain.get("process_report") or "").strip()
+                    if pr:
+                        box.insert(tk.END, "\n", "SEP")
+                        box.insert(tk.END, pr + "\n", "MUTED")
                 pm = summary.get("profile_metrics") if isinstance(summary.get("profile_metrics"), dict) else {}
                 if pm:
                     _row(
@@ -2476,6 +2517,11 @@ class AlloyGUI:
                         "peak": (self.last_result.get("peak", 0) if isinstance(self.last_result, dict) else 0),
                         "profile_metrics": (self._profile_metrics_for_result(self.last_result) if isinstance(self.last_result, dict) else {}),
                         "props": (self.last_result.get("props") if isinstance(self.last_result, dict) else {}),
+                        "alloy_inference": (
+                            self.last_result.get("alloy_inference")
+                            if isinstance(self.last_result, dict)
+                            else {}
+                        ),
                     },
                     "B": {
                         "name": ((self.compare_result.get("best") or {}).get("name", "합금 B") if isinstance(self.compare_result, dict) else "합금 B"),
@@ -2486,6 +2532,11 @@ class AlloyGUI:
                         "peak": (self.compare_result.get("peak", 0) if isinstance(self.compare_result, dict) else 0),
                         "profile_metrics": (self._profile_metrics_for_result(self.compare_result) if isinstance(self.compare_result, dict) else {}),
                         "props": (self.compare_result.get("props") if isinstance(self.compare_result, dict) else {}),
+                        "alloy_inference": (
+                            self.compare_result.get("alloy_inference")
+                            if isinstance(self.compare_result, dict)
+                            else {}
+                        ),
                     },
                 }
                 self._render_result_text(output, summary=summary)
@@ -2710,6 +2761,7 @@ class AlloyGUI:
             "ai_cited_sources": (r.get("ai_cited_sources") if isinstance(r, dict) else []),
             "retrieved_candidates": (r.get("retrieved_candidates") if isinstance(r, dict) else []),
             "ai_used_this_request": (r.get("ai_used_this_request", False) if isinstance(r, dict) else False),
+            "alloy_inference": (r.get("alloy_inference") if isinstance(r, dict) else {}),
         }
         self._render_result_text(final_output, summary=summary)
 
@@ -2836,20 +2888,24 @@ class AlloyGUI:
             "A": {
                 "name": ((r_a.get("best") or {}).get("name", "합금 A") if isinstance(r_a, dict) else "합금 A"),
                 "confidence": (r_a.get("confidence", 0) if isinstance(r_a, dict) else 0),
+                "confidence_overall": (r_a.get("confidence_overall", 0) if isinstance(r_a, dict) else 0),
                 "solidus": (r_a.get("solidus", 0) if isinstance(r_a, dict) else 0),
                 "liquidus": (r_a.get("liquidus", 0) if isinstance(r_a, dict) else 0),
                 "peak": (r_a.get("peak", 0) if isinstance(r_a, dict) else 0),
                 "profile_metrics": (self._profile_metrics_for_result(r_a) if isinstance(r_a, dict) else {}),
                 "props": (r_a.get("props") if isinstance(r_a, dict) else {}),
+                "alloy_inference": (r_a.get("alloy_inference") if isinstance(r_a, dict) else {}),
             },
             "B": {
                 "name": ((r_b.get("best") or {}).get("name", "합금 B") if isinstance(r_b, dict) else "합금 B"),
                 "confidence": (r_b.get("confidence", 0) if isinstance(r_b, dict) else 0),
+                "confidence_overall": (r_b.get("confidence_overall", 0) if isinstance(r_b, dict) else 0),
                 "solidus": (r_b.get("solidus", 0) if isinstance(r_b, dict) else 0),
                 "liquidus": (r_b.get("liquidus", 0) if isinstance(r_b, dict) else 0),
                 "peak": (r_b.get("peak", 0) if isinstance(r_b, dict) else 0),
                 "profile_metrics": (self._profile_metrics_for_result(r_b) if isinstance(r_b, dict) else {}),
                 "props": (r_b.get("props") if isinstance(r_b, dict) else {}),
+                "alloy_inference": (r_b.get("alloy_inference") if isinstance(r_b, dict) else {}),
             },
         }
         self._render_result_text(output, summary=summary)

@@ -286,6 +286,10 @@ class AnalysisResponse(BaseModel):
         default_factory=list,
         description="입력 합이 100% 근처가 아닐 때 정규화 안내 문구",
     )
+    alloy_inference: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="3-NN IDW+릿지 기반 고상/액상 추정, 권장 피크, 공정 주의 리포트",
+    )
 
     @field_validator(
         "phase",
@@ -864,6 +868,7 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
         ),
         comp_input_wt_sum=float(sum_in),
         composition_notes=list(comp_notes),
+        alloy_inference=result.get("alloy_inference") or {},
     )
 
 

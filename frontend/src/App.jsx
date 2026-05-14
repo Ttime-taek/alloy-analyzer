@@ -36,6 +36,9 @@ const DEFAULT_SECTION_OPEN_LAB = {
 };
 const SECTION_LAYOUT_VERSION = 5;
 
+/** 리플로우 곡선·튜너가 사용할 고상/액상/기준피크: 하이브리드 엔진 vs 데이터 추론(3-NN) */
+const REFLOW_MELT_BASIS_STORAGE_KEY = "alloyReflowMeltBasis";
+
 /** 웹 리플로우 튜닝 기본값 (프리셋 "범용"과 동일) */
 const DEFAULT_REFLOW_TUNE = {
   rampRate: 1.5,
@@ -102,7 +105,7 @@ const ruleTd = {
   lineHeight: 1.45
 };
 
-/** 목표 융점 표 등: wt% 객체 → Sn88Ag3.5Bi8In0.5 형태(읽기 쉬운 나열) */
+/** 목표 융점 표 등: wt% 객체 → Sn 88, Ag 3.5, … (청크 단위 줄바꿈은 WtPercentCompositionReadable) */
 const DISPLAY_ELEMENT_ORDER = [
   "Sn",
   "Pb",
@@ -127,8 +130,8 @@ const DISPLAY_ELEMENT_ORDER = [
   "Si"
 ];
 
-function formatWtPercentCompositionReadable(comp) {
-  if (!comp || typeof comp !== "object") return "—";
+function getWtPercentCompositionChunks(comp) {
+  if (!comp || typeof comp !== "object") return [];
   const fmt = (v) => {
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) return null;
@@ -145,9 +148,77 @@ function formatWtPercentCompositionReadable(comp) {
   const chunks = [];
   for (const el of ordered) {
     const s = fmt(comp[el]);
-    if (s != null) chunks.push(`${el}${s}`);
+    if (s != null) chunks.push(`${el} ${s}`);
   }
-  return chunks.length ? chunks.join("") : "—";
+  return chunks;
+}
+
+/** 한 줄 문자열(복사·title 등) */
+function formatWtPercentCompositionReadable(comp) {
+  const chunks = getWtPercentCompositionChunks(comp);
+  return chunks.length ? chunks.join(", ") : "—";
+}
+
+/** 표 셀용: 줄바꿈 시 원소+wt% 덩어리 단위로 다음 줄에 내려감(구분은 간격만, 점 문자 없음) */
+function WtPercentCompositionReadable({ comp }) {
+  const chunks = getWtPercentCompositionChunks(comp);
+  if (!chunks.length) return "—";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        columnGap: 10,
+        rowGap: 4,
+        maxWidth: "100%"
+      }}
+    >
+      {chunks.map((text, i) => (
+        <span key={`${text}-${i}`} style={{ whiteSpace: "nowrap" }}>
+          {text}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** solder_db `db_close_names` 등 — 백엔드가 ` · `로 이은 문자열을 덩어리 단위로만 줄바꿈(가운뎃점 미표시) */
+function splitDbCloseLabels(raw) {
+  if (raw == null) return [];
+  const s = String(raw).trim();
+  if (!s) return [];
+  return s.split(/\s*·\s*/u).map((x) => x.trim()).filter(Boolean);
+}
+
+function DbCloseNamesReadable({ text }) {
+  const parts = splitDbCloseLabels(text);
+  if (!parts.length) return "—";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        columnGap: 8,
+        rowGap: 4,
+        maxWidth: "100%"
+      }}
+    >
+      {parts.map((p, i) => (
+        <span
+          key={i}
+          style={{
+            whiteSpace: "nowrap",
+            fontSize: 11,
+            color: i === 0 ? "var(--text-primary)" : "var(--text-secondary)"
+          }}
+        >
+          {p}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /** 공통 클릭·실행 버튼: tactile-hit + 라벨 (주기율표 periodic-cell-btn과 중복 사용하지 않음) */
@@ -199,13 +270,23 @@ export default function App() {
   /** 리플로우: 피크 온도 + 구간 튜닝 (데스크톱 peak-based 템플릿과 동일) */
   const [reflowPeakUser, setReflowPeakUser] = useState(null);
   const [reflowTune, setReflowTune] = useState(DEFAULT_REFLOW_TUNE);
+  const [reflowMeltBasis, setReflowMeltBasis] = useState(() => {
+    if (typeof window === "undefined") return "hybrid";
+    try {
+      const v = window.localStorage.getItem(REFLOW_MELT_BASIS_STORAGE_KEY);
+      if (v === "inference" || v === "hybrid") return v;
+    } catch {
+      /* noop */
+    }
+    return "hybrid";
+  });
   const [sectionOpen, setSectionOpen] = useState(DEFAULT_SECTION_OPEN);
   const [resultPanelOpen, setResultPanelOpen] = useState(true);
   const [uiPrefsLoaded, setUiPrefsLoaded] = useState(false);
   const [aboutInfo, setAboutInfo] = useState(null);
   const [trustOpen, setTrustOpen] = useState(false);
   /** 목표 고상/액상 → POST /api/recommend_melt (격자 조건은 UI 밖 기본값) */
-  const [meltRecSolidus, setMeltRecSolidus] = useState("138");
+  const [meltRecSolidus, setMeltRecSolidus] = useState("");
   const [meltRecLiquidus, setMeltRecLiquidus] = useState("");
   const [meltRecLoading, setMeltRecLoading] = useState(false);
   const [meltRecError, setMeltRecError] = useState("");
@@ -263,6 +344,16 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    try {
+      window.localStorage.setItem(REFLOW_MELT_BASIS_STORAGE_KEY, reflowMeltBasis);
+    } catch {
+      /* noop */
+    }
+    return undefined;
+  }, [reflowMeltBasis]);
 
   // Popup(새 창) ↔ 메인 동기화 채널
   useEffect(() => {
@@ -952,17 +1043,41 @@ export default function App() {
       coolRate: pset.cool_rate,
       peakMargin: pset.peak_margin
     });
-    if (Number.isFinite(result.peak)) setReflowPeakUser(Number(result.peak));
   }, [result]);
+
+  useEffect(() => {
+    if (!result) return;
+    const md = getReflowMeltDisplay(result, reflowMeltBasis);
+    if (Number.isFinite(md.modelPeak)) setReflowPeakUser(Number(md.modelPeak));
+  }, [result, reflowMeltBasis]);
 
   const reflowProfile = useMemo(() => {
     if (!result) return null;
     try {
-      return buildPeakProfilePoints(result, reflowTune, reflowPeakUser);
+      return buildPeakProfilePoints(result, reflowTune, reflowPeakUser, reflowMeltBasis);
     } catch {
       return null;
     }
-  }, [result, reflowTune, reflowPeakUser]);
+  }, [result, reflowTune, reflowPeakUser, reflowMeltBasis]);
+
+  const reflowMeltDisplay = useMemo(
+    () => (result ? getReflowMeltDisplay(result, reflowMeltBasis) : null),
+    [result, reflowMeltBasis]
+  );
+
+  const imcProfileMeltOverride = useMemo(() => {
+    if (reflowMeltBasis !== "inference" || !result) return null;
+    const inf = getAlloyInferenceMelt(result);
+    if (!inf) return null;
+    return { solidus: inf.solidus, liquidus: inf.liquidus };
+  }, [reflowMeltBasis, result]);
+
+  useEffect(() => {
+    if (!result) return;
+    if (reflowMeltBasis === "inference" && !getAlloyInferenceMelt(result)) {
+      setReflowMeltBasis("hybrid");
+    }
+  }, [result, reflowMeltBasis]);
 
   const reflowPeakEffective = Number(reflowProfile?.meta?.peak ?? result?.peak ?? 0);
 
@@ -1478,13 +1593,10 @@ export default function App() {
           >
             <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 10 }}>목표 고상·액상 (℃)</h2>
             <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
-              격자는 기본으로 <strong style={{ color: "#94a3b8" }}>Sn–Ag–Cu–In–Bi</strong> 계열(예: Sn1Ag0.8Cu8In10Bi
-              근처)에 맞춰 <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi wt%</strong>를 바꿔 스윕하고, 나머지는 Sn으로
-              맞춥니다. 아래 표에는 그 탐색 결과와{" "}
-              <strong style={{ color: "#94a3b8" }}>solder_db</strong>에서 목표 밴드에 걸리는 등록 합금이 함께
-              나옵니다(표는 대략 <strong style={{ color: "#94a3b8" }}>10행 전후</strong>, 고상·액상을 둘 다 넣으면
-              <strong style={{ color: "#94a3b8" }}>더 가까운 한 축</strong> 기준으로 정렬). 결과는 오른쪽{" "}
-              <strong style={{ color: "#94a3b8" }}>분석 결과</strong> 상단에 표시됩니다.
+              <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi</strong> 격자를 스윕하고 나머지는{" "}
+              <strong style={{ color: "#94a3b8" }}>Sn</strong>으로 맞춥니다. 표에는 격자 후보와 목표 온도에 맞는{" "}
+              <strong style={{ color: "#94a3b8" }}>DB 등록 합금</strong>이 함께 나옵니다. 결과는 오른쪽 분석 패널
+              상단에 붙습니다.
             </p>
             {meltSupport === "checking" ? (
               <p role="status" style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
@@ -1492,9 +1604,8 @@ export default function App() {
               </p>
             ) : null}
             <p style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
-              탐색 실행 시 Ag·Cu·In·Bi 격자(약 81점)마다 융점을 계산하므로{" "}
-              <strong style={{ color: "#94a3b8" }}>약 10~20초</strong> 정도 걸릴 수 있습니다. 완료될 때까지
-              창을 닫지 마세요.
+              실행 시 약 <strong style={{ color: "#94a3b8" }}>10~20초</strong> 걸릴 수 있습니다. 끝날 때까지 이
+              페이지를 두세요.
             </p>
             {meltSupport === "no" ? (
               <div
@@ -2411,6 +2522,7 @@ export default function App() {
                 {Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length ? (
                   <div style={{ overflowX: "auto" }}>
                     <table
+                      className="melt-rec-table"
                       style={{
                         width: "100%",
                         borderCollapse: "collapse",
@@ -2465,9 +2577,14 @@ export default function App() {
                           <th style={{ textAlign: "left", padding: "6px 8px" }}>#</th>
                           <th style={{ textAlign: "left", padding: "6px 8px" }}>출처</th>
                           <th style={{ textAlign: "left", padding: "6px 8px" }}>조성 (wt%)</th>
-                          <th style={{ textAlign: "right", padding: "6px 8px" }}>고상</th>
-                          <th style={{ textAlign: "right", padding: "6px 8px" }}>액상</th>
+                          <th className="melt-rec-num" style={{ textAlign: "right", padding: "6px 8px" }}>
+                            고상
+                          </th>
+                          <th className="melt-rec-num" style={{ textAlign: "right", padding: "6px 8px" }}>
+                            액상
+                          </th>
                           <th
+                            className="melt-rec-num"
                             style={{ textAlign: "right", padding: "6px 8px" }}
                             title="액상 − 고상(℃). 값이 작을수록 응고(과냉각) 구간이 짧아 동시에 고형·액체가 공존하는 온도 범위가 좁습니다."
                           >
@@ -2482,8 +2599,8 @@ export default function App() {
                             key={i}
                             style={{ borderBottom: "1px solid var(--bg-table-head)" }}
                           >
-                            <td style={{ padding: "6px 8px" }}>{i + 1}</td>
-                            <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                            <td style={{ padding: "6px 8px", verticalAlign: "top" }}>{i + 1}</td>
+                            <td style={{ padding: "6px 8px", whiteSpace: "nowrap", verticalAlign: "top" }}>
                               {row.melt_row_source === "solder_db_registered" ? (
                                 <span
                                   style={{
@@ -2515,23 +2632,36 @@ export default function App() {
                                 padding: "6px 8px",
                                 fontFamily: "var(--font-sans)",
                                 fontSize: 12,
-                                letterSpacing: "0.01em",
-                                maxWidth: 280,
-                                wordBreak: "break-word",
-                                color: "#e5e7eb"
+                                letterSpacing: "0.02em",
+                                maxWidth: 340,
+                                lineHeight: 1.5,
+                                color: "#e5e7eb",
+                                verticalAlign: "top"
                               }}
-                              title={JSON.stringify(row.comp)}
+                              title={formatWtPercentCompositionReadable(row.comp)}
                             >
-                              {formatWtPercentCompositionReadable(row.comp)}
+                              <WtPercentCompositionReadable comp={row.comp} />
                             </td>
-                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                            <td
+                              className="melt-rec-num"
+                              style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top" }}
+                            >
                               {Number(row.solidus).toFixed(1)}
                             </td>
-                            <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                            <td
+                              className="melt-rec-num"
+                              style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top" }}
+                            >
                               {Number(row.liquidus).toFixed(1)}
                             </td>
                             <td
-                              style={{ padding: "6px 8px", textAlign: "right", color: "#cbd5e1" }}
+                              className="melt-rec-num"
+                              style={{
+                                padding: "6px 8px",
+                                textAlign: "right",
+                                color: "#cbd5e1",
+                                verticalAlign: "top"
+                              }}
                               title="액상 − 고상(℃)"
                             >
                               {(row.plastic_range_c != null && Number.isFinite(Number(row.plastic_range_c))
@@ -2539,8 +2669,11 @@ export default function App() {
                                 : Number(row.liquidus) - Number(row.solidus)
                               ).toFixed(1)}
                             </td>
-                            <td style={{ padding: "6px 8px", maxWidth: 320, verticalAlign: "top", lineHeight: 1.35 }}>
-                              {row.db_close_names || row.best_name || "—"}
+                            <td
+                              style={{ padding: "6px 8px", maxWidth: 320, verticalAlign: "top", lineHeight: 1.35 }}
+                              title={String(row.db_close_names || row.best_name || "").trim() || undefined}
+                            >
+                              <DbCloseNamesReadable text={row.db_close_names || row.best_name} />
                             </td>
                           </tr>
                         ))}
@@ -2875,35 +3008,113 @@ export default function App() {
                     }}
                   >
                     <ReflowCard
-                      solidus={result.solidus}
-                      liquidus={result.liquidus}
+                      solidus={reflowMeltDisplay.solidus}
+                      liquidus={reflowMeltDisplay.liquidus}
                       peak={reflowPeakEffective}
-                      modelPeak={result.peak}
+                      modelPeak={reflowMeltDisplay.modelPeak}
                       profileMeta={reflowProfile?.meta}
                     />
                     <RegulationCard norm={result.norm} />
                   </div>
                   <ReflowChart
                     profile={reflowProfile}
-                    solidus={result.solidus}
-                    liquidus={result.liquidus}
+                    solidus={reflowMeltDisplay.solidus}
+                    liquidus={reflowMeltDisplay.liquidus}
                     expandable
                     expandPayload={{
                       result,
                       initialTune: reflowTune,
-                      initialPeakUser: reflowPeakUser
+                      initialPeakUser: reflowPeakUser,
+                      meltBasis: reflowMeltBasis
                     }}
                   />
+                  {getAlloyInferenceMelt(result) ? (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        marginBottom: 8,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #334155",
+                        background: "rgba(15,23,42,0.5)",
+                        fontSize: 12,
+                        color: "#cbd5e1",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 10,
+                        alignItems: "center"
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: "#94a3b8" }}>리플로우 곡선 기준</span>
+                      <span style={{ color: "#64748b" }}>(고상·액상·초기 피크 슬라이더)</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                        <TactileButton
+                          type="button"
+                          onClick={() => setReflowMeltBasis("hybrid")}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 6,
+                            border:
+                              reflowMeltBasis === "hybrid"
+                                ? "1px solid #38bdf8"
+                                : "1px solid #475569",
+                            background:
+                              reflowMeltBasis === "hybrid"
+                                ? "rgba(56,189,248,0.15)"
+                                : "transparent",
+                            color: "#e2e8f0",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: "pointer"
+                          }}
+                        >
+                          하이브리드 엔진
+                        </TactileButton>
+                        <TactileButton
+                          type="button"
+                          onClick={() => setReflowMeltBasis("inference")}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 6,
+                            border:
+                              reflowMeltBasis === "inference"
+                                ? "1px solid #a78bfa"
+                                : "1px solid #475569",
+                            background:
+                              reflowMeltBasis === "inference"
+                                ? "rgba(167,139,250,0.15)"
+                                : "transparent",
+                            color: "#e2e8f0",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: "pointer"
+                          }}
+                        >
+                          데이터 추론(3-NN)
+                        </TactileButton>
+                      </div>
+                      <span style={{ color: "#64748b", fontSize: 11 }}>
+                        적용 중: {reflowMeltDisplay.label}
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                      데이터 추론(3-NN) 결과가 없어 리플로우는 하이브리드 엔진 융점만 사용합니다.
+                    </div>
+                  )}
                   <ReflowTuneBar
-                    liquidus={result.liquidus}
-                    modelPeak={result.peak}
+                    liquidus={reflowMeltDisplay.liquidus}
+                    modelPeak={reflowMeltDisplay.modelPeak}
                     reflowPeakUser={reflowPeakUser}
                     reflowPeakEffective={reflowPeakEffective}
                     presetName={reflowProfile?.meta?.presetName}
                     reflowTune={reflowTune}
                     onReflowTuneChange={setReflowTune}
                     onPeakChange={setReflowPeakUser}
-                    onResetPeak={() => setReflowPeakUser(Number(result.peak))}
+                    onResetPeak={() => {
+                      const md = getReflowMeltDisplay(result, reflowMeltBasis);
+                      if (Number.isFinite(md.modelPeak)) setReflowPeakUser(Number(md.modelPeak));
+                    }}
                     onResetTune={() => {
                       const name = pickPresetName(result);
                       const pset = { ...REFLOW_PRESETS.범용, ...(REFLOW_PRESETS[name] || {}) };
@@ -2926,6 +3137,7 @@ export default function App() {
                     reflowProfile={reflowProfile}
                     reflowTune={reflowTune}
                     presetName={reflowProfile?.meta?.presetName || pickPresetName(result)}
+                    profileMeltOverride={imcProfileMeltOverride}
                     onSubstrateChange={setImcSubstrate}
                     onTalModeChange={setImcTalMode}
                     onTalRefChange={setImcTalRef}
@@ -3927,6 +4139,54 @@ function ResultSummaryBlock({
         <SummaryCard label="물성 DB 인장" value={formatTensileDbMpa(result.props)} variant="tensileDb" />
       </div>
       <SummaryWettingTensileFootnotes />
+      {result.alloy_inference &&
+      result.alloy_inference.solidus != null &&
+      result.alloy_inference.liquidus != null ? (
+        <div
+          role="region"
+          aria-label="데이터 추론 융점 및 리플로우 가이드"
+          style={{
+            marginBottom: 12,
+            padding: "12px 14px",
+            borderRadius: 8,
+            border: "1px solid rgba(56, 189, 248, 0.35)",
+            background: "rgba(15, 23, 42, 0.65)",
+            color: "#e2e8f0",
+            fontSize: 12,
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap"
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "#7dd3fc" }}>
+            데이터 추론 (상위 3개 DB 이웃 + 함량 민감도)
+          </div>
+          <div style={{ marginBottom: 6 }}>
+            추정 고상선 {Number(result.alloy_inference.solidus).toFixed(1)} ℃ · 액상선{" "}
+            {Number(result.alloy_inference.liquidus).toFixed(1)} ℃ · 권장 피크(참고) 약{" "}
+            {Number(result.alloy_inference.recommended_peak_c).toFixed(1)} ℃
+          </div>
+          {Array.isArray(result.alloy_inference.neighbors) && result.alloy_inference.neighbors.length ? (
+            <div style={{ marginBottom: 8, color: "#94a3b8", fontSize: 11 }}>
+              이웃:{" "}
+              {result.alloy_inference.neighbors
+                .map((n) => `${n.name || "?"}(w=${Number(n.weight).toFixed(3)})`)
+                .join(" · ")}
+            </div>
+          ) : null}
+          <div style={{ marginBottom: 8, color: "#94a3b8", fontSize: 11, lineHeight: 1.45 }}>
+            하이브리드 엔진 대비 Δ(추론 − 하이브리드): 고상{" "}
+            {(Number(result.alloy_inference.solidus) - Number(result.solidus)).toFixed(2)} ℃ · 액상{" "}
+            {(Number(result.alloy_inference.liquidus) - Number(result.liquidus)).toFixed(2)} ℃
+            {Number.isFinite(Number(result.alloy_inference.recommended_peak_c)) &&
+            Number.isFinite(Number(result.peak))
+              ? ` · 권장피크(추) − 엔진피크 ${(
+                  Number(result.alloy_inference.recommended_peak_c) - Number(result.peak)
+                ).toFixed(1)} ℃`
+              : null}
+          </div>
+          <div style={{ color: "#cbd5e1" }}>{String(result.alloy_inference.process_report || "").trim()}</div>
+        </div>
+      ) : null}
       <CollapsibleSection
         title="온도별 젖음 (Fmax·T₀)"
         open={wettingSectionOpen}
@@ -4679,15 +4939,47 @@ function pickPresetName(result) {
   return "범용";
 }
 
+/** alloy_inference가 유효하면 { solidus, liquidus, modelPeak } — 없으면 null */
+function getAlloyInferenceMelt(result) {
+  const ai = result?.alloy_inference;
+  if (!ai || ai.solidus == null || ai.liquidus == null) return null;
+  const solidus = Number(ai.solidus);
+  const liquidus = Number(ai.liquidus);
+  const recPeak = Number(ai.recommended_peak_c);
+  if (!Number.isFinite(solidus) || !Number.isFinite(liquidus)) return null;
+  return {
+    solidus,
+    liquidus,
+    modelPeak: Number.isFinite(recPeak) ? recPeak : liquidus + 22
+  };
+}
+
+/** 리플로우 차트/튜너에 쓸 고상·액상·기준 피크 */
+function getReflowMeltDisplay(result, meltBasis) {
+  const inf = getAlloyInferenceMelt(result);
+  if (meltBasis === "inference" && inf) {
+    return { ...inf, basis: "inference", label: "데이터 추론(3-NN)" };
+  }
+  const r = result || {};
+  return {
+    solidus: Number(r.solidus || 0),
+    liquidus: Number(r.liquidus || 0),
+    modelPeak: Number(r.peak || 0),
+    basis: "hybrid",
+    label: "하이브리드 엔진"
+  };
+}
+
 /**
  * 데스크톱 `gui.py` `_build_peak_profile_curve`와 동일 규칙.
  * @returns {{ points: {t:number,y:number}[], meta: object }}
  */
-function buildPeakProfilePoints(result, tune, peakUser) {
+function buildPeakProfilePoints(result, tune, peakUser, meltBasis = "hybrid") {
   const r = result || {};
-  const solidus = Number(r.solidus || 0);
-  const liquidus = Number(r.liquidus || 0);
-  const peakInModel = Number(r.peak || 0);
+  const md = getReflowMeltDisplay(r, meltBasis);
+  const solidus = Number(md.solidus || 0);
+  const liquidus = Number(md.liquidus || 0);
+  const peakInModel = Number(md.modelPeak || 0);
   const presetName = pickPresetName(result);
   const base = REFLOW_PRESETS.범용;
   const pset = { ...base, ...(REFLOW_PRESETS[presetName] || {}) };
@@ -4760,7 +5052,8 @@ function buildPeakProfilePoints(result, tune, peakUser) {
       tC,
       tD,
       tE,
-      tF
+      tF,
+      meltBasis: md.basis || meltBasis
     }
   };
 }
@@ -4818,8 +5111,9 @@ function calcInRange(points, lowC, highC) {
 }
 
 function computeProfileMetrics(result, talRef, talDeltaC, profileOpts = {}) {
-  const solidus = Number(result?.solidus || 0);
-  const liquidus = Number(result?.liquidus || 0);
+  const mo = profileOpts.meltOverride;
+  const solidus = Number.isFinite(mo?.solidus) ? Number(mo.solidus) : Number(result?.solidus || 0);
+  const liquidus = Number.isFinite(mo?.liquidus) ? Number(mo.liquidus) : Number(result?.liquidus || 0);
   const modelPeak = Number(result?.peak || 0);
   const pts = profileOpts.points;
   let peak = Number.isFinite(profileOpts.peakForMetrics)
@@ -4849,10 +5143,12 @@ function computeProfileMetrics(result, talRef, talDeltaC, profileOpts = {}) {
 }
 
 /** peakC: 리플로우 튜닝 적용 피크(없으면 분석 peak) — TAL 시간과 동일 프로파일 기준 */
-function computeImcLayers(result, substrate, talSec, peakC) {
+function computeImcLayers(result, substrate, talSec, peakC, liquidusOverride) {
   const modelPeak = Number(result?.peak || 240);
   const peak = Number.isFinite(peakC) ? Number(peakC) : modelPeak;
-  const liquidus = Number(result?.liquidus || 217);
+  const liquidus = Number.isFinite(liquidusOverride)
+    ? Number(liquidusOverride)
+    : Number(result?.liquidus || 217);
   const T = Math.max(liquidus + 1, peak);
   const R = 8.314;
   const Tk = T + 273.15;
@@ -4940,6 +5236,7 @@ function ImcInterfaceCard({
   reflowProfile,
   reflowTune,
   presetName,
+  profileMeltOverride,
   onSubstrateChange,
   onTalModeChange,
   onTalRefChange,
@@ -4960,10 +5257,14 @@ function ImcInterfaceCard({
   })();
   const metrics = computeProfileMetrics(result, talRef, talDeltaC, {
     points: reflowProfile?.points,
-    peakForMetrics: reflowProfile?.meta?.peak
+    peakForMetrics: reflowProfile?.meta?.peak,
+    meltOverride: profileMeltOverride
   });
   const talS = talMode === "manual" ? Number(talSec || 0) : metrics.talS;
-  const layers = computeImcLayers(result, substrate, talS, reflowProfile?.meta?.peak);
+  const liqImc = Number.isFinite(profileMeltOverride?.liquidus)
+    ? Number(profileMeltOverride.liquidus)
+    : Number(result?.liquidus || 217);
+  const layers = computeImcLayers(result, substrate, talS, reflowProfile?.meta?.peak, liqImc);
   const sumUm = layers.reduce((a, x) => a + Number(x.um || 0), 0);
   const norm = result?.norm || {};
   const visAg = Number(norm.Ag || 0);
@@ -6194,7 +6495,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
   );
 }
 
-function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow }) {
+function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow, meltBasis = "hybrid" }) {
   const [peakUser, setPeakUser] = useState(
     Number.isFinite(initialPeakUser) ? Number(initialPeakUser) : Number(result?.peak || 0)
   );
@@ -6202,15 +6503,16 @@ function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow }) 
 
   const profile = useMemo(() => {
     try {
-      return buildPeakProfilePoints(result, tune, peakUser);
+      return buildPeakProfilePoints(result, tune, peakUser, meltBasis);
     } catch {
       return null;
     }
-  }, [result, tune, peakUser]);
+  }, [result, tune, peakUser, meltBasis]);
 
-  const solidus = Number(result?.solidus || 0);
-  const liquidus = Number(result?.liquidus || 0);
-  const modelPeak = Number(result?.peak || 0);
+  const md = getReflowMeltDisplay(result, meltBasis);
+  const solidus = Number(md.solidus || 0);
+  const liquidus = Number(md.liquidus || 0);
+  const modelPeak = Number(md.modelPeak || 0);
   const reflowPeakEffective = Number(profile?.meta?.peak ?? modelPeak ?? 0);
 
   return (
@@ -6301,7 +6603,10 @@ function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow }) 
         reflowTune={tune}
         onReflowTuneChange={setTune}
         onPeakChange={setPeakUser}
-        onResetPeak={() => setPeakUser(Number(result?.peak || 0))}
+        onResetPeak={() => {
+          const m = getReflowMeltDisplay(result, meltBasis);
+          if (Number.isFinite(m.modelPeak)) setPeakUser(Number(m.modelPeak));
+        }}
         onResetTune={() => {
           const name = pickPresetName(result);
           const pset = { ...REFLOW_PRESETS.범용, ...(REFLOW_PRESETS[name] || {}) };
@@ -6328,6 +6633,7 @@ function openReflowChartInNewWindow(payload) {
   const liquidus = p.liquidus;
   const initialTune = p.initialTune;
   const initialPeakUser = p.initialPeakUser;
+  const meltBasis = p.meltBasis === "inference" ? "inference" : "hybrid";
 
   if (result) {
     // ok
@@ -6376,6 +6682,7 @@ function openReflowChartInNewWindow(payload) {
           initialTune={initialTune}
           initialPeakUser={initialPeakUser}
           hostWindow={w}
+          meltBasis={meltBasis}
         />
       ) : (
         <ReflowChart profile={profile} solidus={solidus} liquidus={liquidus} layoutScale={2} expandable={false} />

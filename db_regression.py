@@ -2,6 +2,7 @@
 # parse_alloy: 하이픈 표기 + solder_db 연속 BD명(Sn3.0Ag0.5Cu, Sn63Pb37, Sn0.7Cu 등)
 
 from .SOLDER_PROPERTIES_DB import SOLDER_PROPERTIES_DB
+from .solder_properties import rows_for_alloy
 from .utils import composition_distance
 import re
 import statistics
@@ -96,7 +97,7 @@ def parse_alloy(alloy_str):
 # ② 특정 합금의 평균 + 표준편차 계산
 # ------------------------------------------------
 def get_statistics(alloy_name):
-    rows = [r for r in SOLDER_PROPERTIES_DB if r["alloy"] == alloy_name]
+    rows = rows_for_alloy(alloy_name)
 
     if not rows:
         return None
