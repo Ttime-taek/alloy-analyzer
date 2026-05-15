@@ -994,7 +994,8 @@ export default function App() {
           max_results: 10,
           max_db_similar_alloys: 12,
           max_db_registered_in_candidates: 4,
-          rank_match_any_axis: true,
+          // 고상·액상 둘 다 지정 시 true면 한 축만 맞춰도 상위(액상만 맞고 고상은 어긋나기 쉬움) → |Δ고상|+|Δ액상| 합으로 정렬
+          rank_match_any_axis: false,
           max_grid_points
         })
       });
@@ -2543,7 +2544,9 @@ export default function App() {
                         <strong style={{ color: "#94a3b8" }}>격자·DB 통합</strong>
                         — solder_db는 목표 융점 밴드에 들어가는 <strong>기준(등록) 조성</strong>을,
                         모델 행은 고정·가변 wt%를 스윕한 <strong>미지 후보</strong>입니다. 같은 조성이
-                        아니라 빼고·늘리고 맞추는 탐색 결과이며, 목표에 더 가까운 행이 위로 옵니다.
+                        아니라 빼고·늘리고 맞추는 탐색 결과이며, 목표에 더 가까운 행이 위로 옵니다. 고상·액상을
+                        둘 다 넣은 경우 정렬은{" "}
+                        <code style={{ color: "#94a3b8" }}>|Δ고상|+|Δ액상|</code> 합이 작은 순입니다.
                         {typeof meltRecResult.meta?.melt_candidates_db_registered_cap === "number" ? (
                           <span style={{ color: "#94a3b8" }}>
                             {" "}

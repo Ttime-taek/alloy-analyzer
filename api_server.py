@@ -454,10 +454,10 @@ class RecommendMeltRequest(BaseModel):
         ),
     )
     rank_match_any_axis: bool = Field(
-        default=True,
+        default=False,
         description=(
             "고상·액상 목표를 **둘 다** 줄 때: True면 정렬 점수·penalty가 더 잘 맞는 축(min) 기준 "
-            "(한 축만 목표에 가까워도 상위). False면 기존 L1 합(|Δ고상|+|Δ액상|)."
+            "(한 축만 목표에 가까워도 상위). False면 L1 합(|Δ고상|+|Δ액상|) — 이중 목표에 권장."
         ),
     )
 
