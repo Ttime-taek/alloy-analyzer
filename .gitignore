@@ -20,11 +20,34 @@ venv/
 literature_cache.json
 frontend/dist/
 frontend/node_modules/
+frontend/node_modules.bak/
+tools/node22/
 frontend/.eslintcache
 .gstack/
 # AI 응답 디스크 캐시 (ai_cache.py) — Gemini/Cerebras 호출 결과를 조성·모드 해시로 저장.
 # 프로젝트 루트의 .cache/ai/*.json. 자동 재생성되며 TTL 30일.
 .cache/
+
+# 로컬 디버그·Vite/npm 임시 로그(재생성 가능)
+vite-*.log
+vite-*.txt
+npm-*.log
+npm-install.log
+trace.txt
+t.txt
+t[0-9].txt
+pv-err.txt
+rollup-test.txt
+esbuild-test.txt
+import-vite.txt
+_diag.log
+frontend/_npm_*.log
+frontend/_vite_*.txt
+frontend/v*.txt
+frontend/vite-*.log
+frontend/vite-*.txt
+frontend/npm_*.txt
+frontend/npm_*.log
 
 # Design QA 리포트·스크린샷(재생성 가능)
 .design-audit/

@@ -22,7 +22,7 @@ Write-Host "browse: $browseExe"
 if (Test-Path $browseExe) { Write-Host '(browse.exe OK)' } else { Write-Host '(WARN: browse.exe still missing)' }
 
 Write-Host ''
-Write-Host '1) Terminal A - API (optional):  python api_server.py'
-Write-Host '2) Terminal B - frontend:       cd frontend; npm run dev'
-Write-Host '3) Open / tell agents URL:      http://127.0.0.1:5173/'
-Write-Host '4) Run /gstack-design-review with that URL (master branch).'
+Write-Host '1) Start stack:  start_all.bat  (or run_api_server.bat)'
+Write-Host '2) Open URL:     http://127.0.0.1:8000/'
+Write-Host '3) Run /gstack-design-review with that URL (master branch).'
+Write-Host '   After UI changes: cd frontend; npm run build; refresh browser.'

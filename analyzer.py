@@ -1,9 +1,6 @@
 # ============================================================
-#  analyzer.py (v7.0 — Hybrid Melting Point Engine 통합)
-#  수정:
-#   1. melting_predictor.hybrid_melting_predict 통합
-#   2. calc_melting → 하이브리드 6레이어 예측으로 교체
-#   3. 기존 KNN/AI 단순 보간 제거
+#  analyzer.py — Hybrid melting (melting_predictor) + AI 디스크 캐시
+#  AI 캐시 키: mode/lit/조성 + mv(융점 엔진 버전) + solder_db 지문
 # ============================================================
 
 from functools import lru_cache
@@ -13,7 +10,7 @@ from .models import PropertyModels
 from .ai_engine import AIEngine
 from .cerebras_melting import CerebrasMeltingDeltaEngine
 from .db_regression import predict_from_db
-from .melting_predictor import hybrid_melting_predict
+from .melting_predictor import MELTING_ENGINE_VERSION, hybrid_melting_predict
 import os
 from . import ai_cache
 
@@ -585,7 +582,17 @@ class AlloyAnalyzer:
         Returns: solidus, liquidus, peak, stage(int), detail(dict)
         """
         if not norm:
-            return 217.0, 221.0, 246.0, 5, {"best_dist": 9999, "forced_db": False}
+            return (
+                217.0,
+                221.0,
+                246.0,
+                5,
+                {
+                    "best_dist": 9999,
+                    "forced_db": False,
+                    "engine_version": MELTING_ENGINE_VERSION,
+                },
+            )
 
         solidus, liquidus, peak, detail = hybrid_melting_predict(
             norm, self.db_prepared, ai_engine=self.melting_ai
@@ -825,11 +832,11 @@ class AlloyAnalyzer:
         }
 
         ai_source = "api"            # api / cache / db_exact
-        _mv = (
-            str((melting_detail or {}).get("engine_version") or "0").strip()
-            if isinstance(melting_detail, dict)
-            else "0"
-        )
+        # detail에 engine_version이 없으면(레거시·예외 경로) 상수로 채워 캐시가 엔진 버전과 어긋나지 않게 함
+        if isinstance(melting_detail, dict):
+            _mv = str(melting_detail.get("engine_version") or MELTING_ENGINE_VERSION).strip()
+        else:
+            _mv = str(MELTING_ENGINE_VERSION).strip()
         cache_key = ai_cache.make_key(
             norm,
             mode=mode,

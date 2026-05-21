@@ -28,6 +28,23 @@ class HighBiWithInClassificationTest(unittest.TestCase):
         self.assertLess(liq, 230.0)
         self.assertGreater(sol, 110.0)
 
+    def test_grid_candidate_sn_bi_14_in_11_not_l4_250c(self):
+        """목표 융점 탐색 격자 후보 Sn73.2 Ag0.8 Cu1 Bi14 In11 — 과거 other+L4 ~228/250 방지."""
+        norm = {"Sn": 73.2, "Ag": 0.8, "Cu": 1.0, "Bi": 14.0, "In": 11.0}
+        self.assertEqual(_classify(norm), "SnBi")
+        from test7.analyzer import AlloyAnalyzer
+        from test7.ai_engine import AIEngine
+        from test7.solder_db import SOLDER_DB
+
+        a = AlloyAnalyzer(SOLDER_DB, ai_engine=AIEngine())
+        a._sync_db_prepared()
+        nn = a.normalize(norm)
+        sol, liq, _, detail = hybrid_melting_predict(nn, a.db_prepared, ai_engine=a.melting_ai)
+        self.assertEqual(detail.get("family"), "SnBi")
+        self.assertLess(sol, 175.0, "고상이 SnBi L2 근처로 내려와야 함 (과거 ~228℃는 오류)")
+        self.assertLess(liq, 215.0, "액상이 저융대로 — DB 인접 159/200 및 L2와 정합")
+        self.assertGreater(sol, 125.0)
+
 
 if __name__ == "__main__":
     unittest.main()

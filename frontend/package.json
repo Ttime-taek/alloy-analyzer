@@ -3,11 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "vite",
     "api": "node ../scripts/run_api_child.mjs",
-    "dev:all": "node ../scripts/dev_all.mjs",
-    "build": "vite build",
-    "preview": "vite preview",
+    "build": "node ./node_modules/vite/bin/vite.js build",
     "lint": "eslint \"./src/**/*.{js,jsx}\"",
     "lint:fix": "eslint \"./src/**/*.{js,jsx}\" --fix",
     "test": "vitest run"

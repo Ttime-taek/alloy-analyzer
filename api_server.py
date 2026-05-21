@@ -13,8 +13,8 @@ Usage (dev, 로컬만):
     # ALLOY_API_HOST, ALLOY_API_PORT 로 바인딩 변경 / ALLOY_API_CORS=0 이면 CORS 미들웨어 끔
 
 웹 UI를 다른 기기에서 쓰려면: FastAPI를 위처럼 0.0.0.0으로 띄운 뒤,
-frontend에서 `npm run dev`(vite server.host=true)로 접속하거나,
-빌드 산출물을 같은 호스트의 정적 서버와 함께 배포하세요. Windows는
+`frontend/dist`를 이 서버가 함께 제공하므로 http://<host>:8000/ 로 접속하거나,
+빌드 산출물을 별도 정적 서버와 함께 배포하세요. Windows는
 고급 방화벽에서 해당 포트 인바운드 허용이 필요할 수 있습니다.
 
 배포(웹 공개) 요약:
@@ -48,7 +48,6 @@ try:
 except ImportError:
     # package context가 아닐 때는 상위 디렉터리를 sys.path에 추가
     import sys
-    from pathlib import Path
 
     root = Path(__file__).resolve().parent
     sys.path.insert(0, str(root.parent))
@@ -63,6 +62,7 @@ try:
         list_db_compositions_matching_melt_target,
         merge_db_registered_into_recommend_candidates,
         recommend_compositions,
+        _melt_target_l1_score,
     )
 except ImportError:
     try:
@@ -71,12 +71,22 @@ except ImportError:
             list_db_compositions_matching_melt_target,
             merge_db_registered_into_recommend_candidates,
             recommend_compositions,
+            _melt_target_l1_score,
         )
     except Exception:
         MeltTarget = None  # type: ignore
         recommend_compositions = None  # type: ignore
         list_db_compositions_matching_melt_target = None  # type: ignore
         merge_db_registered_into_recommend_candidates = None  # type: ignore
+        _melt_target_l1_score = None  # type: ignore
+
+try:
+    from .melting_predictor import MELTING_ENGINE_VERSION  # type: ignore
+except ImportError:
+    try:
+        from test7.melting_predictor import MELTING_ENGINE_VERSION  # type: ignore
+    except Exception:
+        MELTING_ENGINE_VERSION = "?"  # type: ignore
 
 try:
     from .env_loader import load_env_keys  # type: ignore
@@ -93,9 +103,6 @@ def _load_gemini_key_from_file() -> None:
     .gemini_api_key 또는 gemini_api_key.txt(한 줄)에서 키를 읽어 환경변수에 넣습니다.
     환경변수가 이미 있으면 덮어쓰지 않습니다.
     """
-    import os
-    from pathlib import Path
-
     if (os.getenv("GEMINI_API_KEY") or "").strip():
         return
     root = Path(__file__).resolve().parent
@@ -395,13 +402,21 @@ class MeltTargetPayload(BaseModel):
     solidus_tolerance_c: float = Field(
         default=50.0,
         ge=0,
-        description="고상 허용 ±℃(요청값). solder_db 밴드는 축별 max(이 값, 50℃)로 적용.",
+        description=(
+            "고상 허용 ±℃(격자·penalty). "
+            "DB 밴드는 한 축만 목표일 때 축별 max(이 값, 50℃); "
+            "고상·액상 동시 목표일 때는 요청 허용만 사용(추가 ±50℃ 확장 없음)."
+        ),
     )
     liquidus_c: float | None = Field(default=None, description="목표 액상선(℃)")
     liquidus_tolerance_c: float = Field(
         default=50.0,
         ge=0,
-        description="액상 허용 ±℃(요청값). solder_db 밴드는 축별 max(이 값, 50℃)로 적용.",
+        description=(
+            "액상 허용 ±℃(격자·penalty). "
+            "DB 밴드는 한 축만 목표일 때 축별 max(이 값, 50℃); "
+            "고상·액상 동시 목표일 때는 요청 허용만 사용."
+        ),
     )
 
     @model_validator(mode="after")
@@ -523,7 +538,7 @@ class RecommendMeltRow(BaseModel):
 
 
 class RecommendMeltDbSimilarRow(BaseModel):
-    """solder_db 등록 합금 — 목표 고상 또는 목표 액상 중 하나라도 ±허용 안이면 포함(OR)."""
+    """레거시 스키마 호환용. DB 행은 ``candidates``에 병합되며 이 목록은 항상 비어 있습니다."""
 
     name: str
     comp: Dict[str, float]
@@ -545,11 +560,7 @@ class RecommendMeltResponse(BaseModel):
     meta: Dict[str, Any]
     db_similar_alloys: List[RecommendMeltDbSimilarRow] = Field(
         default_factory=list,
-        description=(
-            "목표 밴드에 맞는 solder_db 행(OR 규칙). "
-            "표시용 통합 목록은 candidates와 동일 소스에서 병합되며, 이 필드는 동일 DB 목록을 "
-            "간단 형태로 중복 제공(다른 클라이언트·디버그용)합니다."
-        ),
+        description="스키마 호환용으로 항상 빈 배열. solder_db 행은 candidates에 포함됩니다.",
     )
 
 
@@ -895,7 +906,7 @@ async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
     한 목록(`candidates`)으로 합쳐 반환합니다. 등록 DB 행은 고상·액상에 실측/문헌값을 쓰며,
     표에는 `max_db_registered_in_candidates`로 DB 행 수를 제한해 격자(미지 조성) 후보가 밀리지 않게 합니다.
 
-    `db_similar_alloys`에는 동일 밴드의 DB 행을 간단 형태로 함께 담습니다(웹 UI는 `candidates` 한 표로만 표시).
+    solder_db 근접 행은 `candidates`에만 병합되어 반환됩니다(`db_similar_alloys`는 비어 있음).
 
     GUI 엔진과 동일하게 validate → normalize → find_best_match → calc_melting_with_detail 경로를 사용합니다.
 
@@ -936,14 +947,46 @@ async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
 
     db_meta: Dict[str, Any] = {}
     db_raw: List[Dict[str, Any]] = []
+    dual_melt_target = (
+        req.target.solidus_c is not None and req.target.liquidus_c is not None
+    )
     if list_db_compositions_matching_melt_target:
         try:
+            # 고상·액상 동시 목표: AND + 사용자 허용만(±50℃ 강제 확장 끔)으로 DB 밀림 방지.
+            # 한 축만 목표: OR + 최소 밴드로 근사 행 회수 유지.
             db_raw, db_meta = list_db_compositions_matching_melt_target(
                 _analyzer,
                 tgt,
-                match_any_specified_axis=True,
+                match_any_specified_axis=not dual_melt_target,
                 max_rows=int(req.max_db_similar_alloys),
+                min_axis_band_tolerance_c=0.0 if dual_melt_target else 50.0,
             )
+            if (
+                dual_melt_target
+                and db_raw
+                and callable(_melt_target_l1_score)
+            ):
+                tol_sum = float(req.target.solidus_tolerance_c) + float(
+                    req.target.liquidus_tolerance_c
+                )
+                l1_cap = max(15.0, 0.23 * tol_sum)
+                before = len(db_raw)
+                db_raw = [
+                    r
+                    for r in db_raw
+                    if _melt_target_l1_score(
+                        float(r["solidus"]),
+                        float(r["liquidus"]),
+                        tgt,
+                    )
+                    <= l1_cap
+                ]
+                db_meta = {
+                    **db_meta,
+                    "db_similar_l1_cap": round(l1_cap, 3),
+                    "db_similar_pre_l1_filter": before,
+                    "db_similar_post_l1_filter": len(db_raw),
+                }
         except Exception as e:
             db_meta = {"db_similar_match_error": str(e)}
             db_raw = []
@@ -970,7 +1013,12 @@ async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
         "melt_unified_max_rows": unified_max,
         "melt_unified_list": True,
         "melt_rank_match_any_axis": bool(req.rank_match_any_axis),
-        "db_similar_match_rule": "solidus_or_liquidus_in_band_merged_candidates_sorted_by_melt_penalty",
+        "db_similar_match_rule": (
+            "dual_target_and_band_user_only_l1_cap"
+            if dual_melt_target
+            else "solidus_or_liquidus_in_band_merged_candidates_sorted_by_target_score"
+        ),
+        "melting_engine_version": str(MELTING_ENGINE_VERSION),
     }
 
     candidates: List[RecommendMeltRow] = []
@@ -998,31 +1046,10 @@ async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
             )
         )
 
-    db_similar: List[RecommendMeltDbSimilarRow] = []
-    for dr in db_raw:
-        if not isinstance(dr, dict):
-            continue
-        try:
-            db_similar.append(
-                RecommendMeltDbSimilarRow(
-                    name=str(dr.get("name", "")),
-                    comp={str(k): float(v) for k, v in (dr.get("comp") or {}).items()},
-                    solidus=float(dr["solidus"]),
-                    liquidus=float(dr["liquidus"]),
-                    penalty=float(dr.get("penalty", 0.0)),
-                    plastic_range_c=float(
-                        dr.get("plastic_range_c", float(dr["liquidus"]) - float(dr["solidus"]))
-                    ),
-                    source=str(dr.get("source", "solder_db")),
-                )
-            )
-        except Exception:
-            continue
-
     return RecommendMeltResponse(
         candidates=candidates,
         meta=meta,
-        db_similar_alloys=db_similar,
+        db_similar_alloys=[],
     )
 
 

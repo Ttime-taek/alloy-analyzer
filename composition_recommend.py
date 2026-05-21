@@ -4,11 +4,13 @@
 
 - 융점은 AlloyAnalyzer.calc_melting_with_detail 과 동일 경로.
 - `list_db_compositions_matching_melt_target`: solder_db에서 목표 온도 밴드에
-  들어가는 등록 조성 나열. AND/OR(고상·액상 모두 vs 하나만) 선택 가능.
-  밴드 필터는 축별 `max(요청 허용오차, min_axis_band_tolerance_c)`(기본 50℃)로
-  넓혀 근사 데이터가 빠지지 않게 한다. 정렬용 점수는 ``MeltTarget.rank_match_any_axis``에 따라
+  들어가는 등록 조성 나열. AND/OR(`match_any_specified_axis`)·`min_axis_band_tolerance_c`로
+  밴드 폭을 제어합니다(API는 고상·액상 동시 목표 시 AND+사용자 허용만, 한 축만 목표 시 OR+축별
+  max(요청 허용, min_axis_band_tolerance_c) 기본 50℃).
+  정렬용 점수는 ``MeltTarget.rank_match_any_axis``에 따라
   L1 합 또는(고상·액상 동시 지정 시) 더 나은 축의 min 편차를 사용한다.
-  API `/api/recommend_melt`는 OR 밴드로 DB 행을 가져와 격자 후보와 **한 목록**으로 합칩니다.
+- HTTP 응답 `db_similar_alloys`는 스키마 호환용 빈 배열이며, DB 행은 격자와 **한 목록**
+  ``candidates``로만 반환된다.
 - 격자 후보에는 `db_close_names`(조성 최근접 + 예측 고상·액상 근접 DB명, 중점 구분)가 포함됩니다.
 - `merge_db_registered_into_recommend_candidates`: `list_db_compositions_matching_melt_target`과
   동일한 DB 행 목록을 격자 결과와 합칩니다. 등록 DB 조성은 모델 예측보다 우선(고상·액상은
@@ -43,7 +45,7 @@ class MeltTarget:
 
     def validate(self) -> None:
         if self.solidus_c is None and self.liquidus_c is None:
-            raise ValueError("target_solidus_c 또는 target_liquidus_c 중 하나 이상을 지정하세요.")
+            raise ValueError("solidus_c 또는 liquidus_c 중 하나 이상을 지정하세요.")
         for name, v in (
             ("solidus_tolerance_c", self.solidus_tolerance_c),
             ("liquidus_tolerance_c", self.liquidus_tolerance_c),
@@ -125,26 +127,6 @@ def _db_close_names_for_predicted_melt(
     return " · ".join(out) if out else (comp_best_name or "")
 
 
-def _melt_penalty(solidus: float, liquidus: float, tgt: MeltTarget) -> float:
-    if tgt.solidus_c is not None:
-        d_s = abs(float(solidus) - float(tgt.solidus_c))
-        pen_s = max(0.0, d_s - float(tgt.solidus_tolerance_c)) ** 2
-    else:
-        pen_s = 0.0
-    if tgt.liquidus_c is not None:
-        d_l = abs(float(liquidus) - float(tgt.liquidus_c))
-        pen_l = max(0.0, d_l - float(tgt.liquidus_tolerance_c)) ** 2
-    else:
-        pen_l = 0.0
-    if (
-        getattr(tgt, "rank_match_any_axis", False)
-        and tgt.solidus_c is not None
-        and tgt.liquidus_c is not None
-    ):
-        return float(min(pen_s, pen_l))
-    return float(pen_s + pen_l)
-
-
 def _melt_target_l1_score(solidus: float, liquidus: float, tgt: MeltTarget) -> float:
     """
     목표 융점 대비 정렬용 점수(낮을수록 우선).
@@ -199,6 +181,7 @@ def _effective_band_target_for_db(
         solidus_tolerance_c=s_tol,
         liquidus_c=target.liquidus_c,
         liquidus_tolerance_c=l_tol,
+        rank_match_any_axis=bool(getattr(target, "rank_match_any_axis", False)),
     )
 
 
@@ -242,7 +225,7 @@ def list_db_compositions_matching_melt_target(
 
     격자 탐색(`recommend_compositions`)과 별개로, **DB에 저장된 실측·문헌 고상/액상 값** 기준이다.
     온도 밴드는 축별로 ``max(사용자 허용, min_axis_band_tolerance_c)``(기본 50℃)로 잡는다.
-    행의 penalty(L1)는 사용자가 지정한 목표 온도 그대로 기준이다.
+    행의 penalty는 ``_melt_target_l1_score``(L1 합 또는 rank_match_any_axis 시 min 축)이다.
     """
     target.validate()
     band_tgt = _effective_band_target_for_db(

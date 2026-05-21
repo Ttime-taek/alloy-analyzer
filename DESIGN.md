@@ -89,6 +89,6 @@ Vite dev server proxies `/api`, `/docs`, `/openapi.json` to `http://127.0.0.1:80
 
 ### Design review (gstack browse, Windows)
 
-- **Dev URL for agents:** `http://127.0.0.1:5173/` (see `vite.config.mjs`; port **5173**, strict).
+- **Local URL for agents:** `http://127.0.0.1:8000/` (`api_server.py` serves `frontend/dist`; rebuild with `npm run build` after UI edits).
 - **Browse CLI:** gstack ships headless automation as `browse.exe` under `%USERPROFILE%\.cursor\skills\gstack\browse\dist\` after `bun build --compile browse/src/cli.ts --outfile browse/dist/browse`. Repo helper: **`scripts/prep_design_review.ps1`** (compiles if missing, prints steps).
 - Full API is optional for layout/contrast passes; start **`python api_server.py`** when flows need live data.

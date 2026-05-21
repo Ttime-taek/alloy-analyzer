@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "7"
+MELTING_ENGINE_VERSION = "9"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -271,11 +271,12 @@ def _classify(norm):
     # Bi > 5%: Sn-Bi 계열. (Bi ≤ 5%인 SAC+Bi/In 첨가는 SAC 경로.)
     # 과거 inp==0 일 때만 SnBi로 두면 Bi≥In 인 고Bi+In(예: Bi10 In6 …)이 neither SAC nor SnBi 가 되어
     # other+L4로 고상·액상이 과대(≈250℃+) 평가된다.
-    # In≤8% 이고 Bi≥In 이면 저융 거동이 Sn-Bi 쪽에 더 가깝다고 보고 SnBi로 분류한다.
+    # In 상한(과거 8%)는 Ag–Cu 저함량·고Bi–In(예 In 11, Bi 14)이 SAC·SnBi 모두 아니게
+    # other→L4 단독 ~250℃ 과대평가되던 구간. SnBi L2+In 보정이 커버하므로 14%까지 완화.
     if bi > 5 and pb == 0:
         if inp == 0:
             return "SnBi"
-        if inp <= 8.0 and bi >= inp:
+        if inp <= 14.0 and bi >= inp:
             return "SnBi"
     # Sn-In: Bi 미량(≤1%)까진 허용. In≥5이면 In 강하가 지배하므로 SnIn 경로.
     # (단, Ag>0 + In≥5는 Sn-Ag 반응도 병존 → SnAg 경로에서 In/Bi 보정 처리.)
@@ -293,7 +294,10 @@ def _classify(norm):
     # - In 첨가 SAC(In≤~8%): 분류만 inp==0으로 막히면 family=="other"가 되어 L4만 지배하고
     #   실측(예: Ag3.5 Bi0.5 Cu0.8 In6 Sn89 → 고상~202℃/액상~206℃)과 크게 어긋남.
     #   하단 SAC 상태도에는 이미 In/Bi 보정식이 있으므로 inp≤8은 SAC로 본다.
-    if sn > 80 and ag > 0 and cu > 0 and bi <= 5.0 and inp <= 8.0:
+    # - 저Ag·Cu 유지 + Bi≤12·In≤14·Bi<In 인 경우: SnBi(Bi≥In)에 안 걸려 other+L4(과대)로
+    #   떨어지기 쉬움(예: Sn79 Ag1 Cu1 Bi8 In11). SAC 5원 보정이 더 물리적으로 일관.
+    #   (고Bi+고In에서 Bi≥In 은 위 SnBi 분기가 우선.)
+    if sn >= 78 and ag > 0 and cu > 0 and bi <= 12.0 and inp <= 14.0:
         return "SAC"
     if sn > 80 and ag > 0 and cu == 0:
         return "SnAg"
@@ -1010,6 +1014,14 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             l1_liq = float(best_item["liquidus"])
             gate = _db_neighbor_gate(best_dist)
             l1_w = math.exp(-best_dist * 6.0) * (4.0 + 22.0 * gate)
+            # 성분 거리가 커도 최근접 solder_db 융점을 0으로 만들면 other+L4만 남는 경우가 있음 —
+            # Sn 매트릭스 핵심 조성에서는 완만한 바닥 가중으로 닻을 유지.
+            if (
+                unk_pct_global <= 1e-9
+                and _pct(norm, "Sn") >= 45.0
+                and float(best_dist) < 42.0
+            ):
+                l1_w = max(l1_w, 0.18 / (1.0 + float(best_dist) * 0.11))
 
         # ─── L2: 상태도 보간 ─────────────────────────────────────────────────
         phase_result = _phase_diagram_predict(norm, family)
@@ -1053,7 +1065,16 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             w_total = sum(_l3_w(d, it) for d, it in knn5)
             l3_sol = sum(float(it["solidus"]) * _l3_w(d, it) for d, it in knn5) / w_total
             l3_liq = sum(float(it["liquidus"]) * _l3_w(d, it) for d, it in knn5) / w_total
-            l3_conf = math.exp(-knn5[0][0] * 0.6)
+            knn_d0 = float(knn5[0][0])
+            try:
+                knn_decay = float(os.getenv("MELTING_KNN_D0_DECAY", "0.38") or "0.38")
+            except Exception:
+                knn_decay = 0.38
+            l3_conf = math.exp(-knn_d0 * knn_decay)
+            if knn_d0 > 3.0:
+                l3_conf = max(
+                    l3_conf, 0.07 + 0.31 * math.exp(-(knn_d0 - 3.0) * 0.11)
+                )
             # 이원계+L2가 있을 때 KNN(L3) 비중이 크면 공정부 근처에서 액상선이 과대(예: Sn-Cu 227→231)
             l3_w = l3_conf * (
                 float(prof["l3_knn_with_l2_simple"])
@@ -1088,6 +1109,9 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             l4_w = l4_conf * float(prof["l4_if_l2_weak_mult"])
         else:
             l4_w = l4_conf * float(prof["l4_if_no_l2_mult"])
+        if family == "other" and l2_sol is None and best_item is not None:
+            bd = float(best_dist)
+            l4_w *= min(1.0, 2.6 / (1.0 + max(0.0, bd - 2.0) * 0.11))
 
         # ─── 앙상블 ───────────────────────────────────────────────────────────
         layers = []

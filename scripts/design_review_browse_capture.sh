@@ -5,7 +5,7 @@ if [[ -z "${NS:-}" ]]; then
   echo "ERROR: no nameserver in /etc/resolv.conf" >&2
   exit 1
 fi
-URL="http://${NS}:5173/"
+URL="http://${NS}:8000/"
 B="${BROWSE_BIN:-/home/lg/.cursor/skills/gstack/browse/dist/browse}"
 ROOT_WIN="/mnt/c/Coding/Auto/test7"
 R="${ROOT_WIN}/.gstack/design-scratch"

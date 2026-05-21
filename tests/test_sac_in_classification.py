@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SAC + In 저함량 분류(Sn>80·Ag·Cu·Bi≤5·In≤8)가 other로 떨어지지 않는지."""
+"""SAC(+Bi/In 중첨가) 분류가 other로 떨어져 L4 과대평가되지 않는지."""
 from __future__ import annotations
 
 import sys
@@ -35,6 +35,15 @@ class SacInClassificationTest(unittest.TestCase):
         sol, liq, _ = _phase_diagram_predict(norm, "SAC")
         self.assertAlmostEqual(sol, 217.0, delta=1.5)
         self.assertAlmostEqual(liq, 222.0, delta=2.0)
+
+    def test_low_ag_bi8_in11_is_sac_not_other_high_melt(self):
+        """Bi<In 이고 저Ag·Cu일 때 SnBi 미적용 → 과거 other+L4 ~207/230℃ 과대 방지."""
+        norm = {"Sn": 79.0, "Ag": 1.0, "Cu": 1.0, "Bi": 8.0, "In": 11.0}
+        self.assertEqual(_classify(norm), "SAC")
+        sol, liq, _, detail = hybrid_melting_predict(norm, [], ai_engine=None)
+        self.assertEqual(detail.get("family"), "SAC")
+        self.assertLess(sol, 195.0, msg="SAC 경로로 저융 고상에 귀속해야 함")
+        self.assertLess(liq, 215.0, msg="SAC 경로로 액상 과대 억제")
 
 
 if __name__ == "__main__":

@@ -285,9 +285,10 @@ export default function App() {
   const [uiPrefsLoaded, setUiPrefsLoaded] = useState(false);
   const [aboutInfo, setAboutInfo] = useState(null);
   const [trustOpen, setTrustOpen] = useState(false);
-  /** 목표 고상/액상 → POST /api/recommend_melt (격자 조건은 UI 밖 기본값) */
+  /** 목표 융점 → POST /api/recommend_melt (기본 액상만; 고상은 옵션) */
   const [meltRecSolidus, setMeltRecSolidus] = useState("");
   const [meltRecLiquidus, setMeltRecLiquidus] = useState("");
+  const [meltRecAlsoSolidusTarget, setMeltRecAlsoSolidusTarget] = useState(false);
   const [meltRecLoading, setMeltRecLoading] = useState(false);
   const [meltRecError, setMeltRecError] = useState("");
   const [meltRecResult, setMeltRecResult] = useState(null);
@@ -877,7 +878,7 @@ export default function App() {
         msg === "Failed to fetch"
       ) {
         msg +=
-          "\n\n백엔드가 꺼져 있을 수 있습니다. 터미널에서 `python api_server.py` 로 FastAPI(127.0.0.1:8000)를 먼저 실행한 뒤 다시 시도하세요.";
+          "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다.\n• start_all.bat 실행 후 그 창을 열어 둔 채 새로고침\n• 또는 run_api_server.bat → http://localhost:8000/";
       }
       setError(msg);
       setAnalysisLogs((prev) => [
@@ -958,23 +959,37 @@ export default function App() {
     ];
     const balance_element = "Sn";
     const max_grid_points = 15_000;
-    const solidus_tolerance_c = 50;
-    const liquidus_tolerance_c = 50;
-    const solidus_c =
-      String(meltRecSolidus || "").trim() === "" ? null : Number(meltRecSolidus);
-    const liquidus_c =
-      String(meltRecLiquidus || "").trim() === "" ? null : Number(meltRecLiquidus);
-    if (solidus_c === null && liquidus_c === null) {
-      setMeltRecError("목표 고상(℃) 또는 액상(℃) 중 하나 이상을 입력하세요.");
-      return;
-    }
-    if (solidus_c !== null && !Number.isFinite(solidus_c)) {
-      setMeltRecError("목표 고상 온도가 숫자가 아닙니다.");
-      return;
-    }
-    if (liquidus_c !== null && !Number.isFinite(liquidus_c)) {
-      setMeltRecError("목표 액상 온도가 숫자가 아닙니다.");
-      return;
+    const solidus_tolerance_c = 20;
+    const liquidus_tolerance_c = 20;
+    const solidusTrim = String(meltRecSolidus || "").trim();
+    const liquidusTrim = String(meltRecLiquidus || "").trim();
+    let solidus_c = null;
+    let liquidus_c = null;
+    if (!meltRecAlsoSolidusTarget) {
+      liquidus_c = liquidusTrim === "" ? null : Number(meltRecLiquidus);
+      if (liquidus_c === null) {
+        setMeltRecError("목표 액상(℃)을 입력하세요.");
+        return;
+      }
+      if (!Number.isFinite(liquidus_c)) {
+        setMeltRecError("목표 액상 온도가 숫자가 아닙니다.");
+        return;
+      }
+    } else {
+      solidus_c = solidusTrim === "" ? null : Number(meltRecSolidus);
+      liquidus_c = liquidusTrim === "" ? null : Number(meltRecLiquidus);
+      if (solidus_c === null && liquidus_c === null) {
+        setMeltRecError("목표 고상(℃) 또는 액상(℃) 중 하나 이상을 입력하세요.");
+        return;
+      }
+      if (solidus_c !== null && !Number.isFinite(solidus_c)) {
+        setMeltRecError("목표 고상 온도가 숫자가 아닙니다.");
+        return;
+      }
+      if (liquidus_c !== null && !Number.isFinite(liquidus_c)) {
+        setMeltRecError("목표 액상 온도가 숫자가 아닙니다.");
+        return;
+      }
     }
     setMeltRecLoading(true);
     try {
@@ -1025,7 +1040,7 @@ export default function App() {
         msg === "Failed to fetch"
       ) {
         msg +=
-          "\n\n백엔드를 실행한 뒤 다시 시도하세요. (예: python api_server.py)";
+          "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다. start_all.bat 또는 run_api_server.bat 실행 후 새로고침하세요.";
       }
       setMeltRecError(msg);
     } finally {
@@ -1421,11 +1436,18 @@ export default function App() {
           >
             <strong style={{ color: "#fef3c7" }}>API 오프라인</strong>
             {" — "}
-            백엔드(보통{" "}
-            <code style={{ fontSize: 12, color: "#fcd34d" }}>127.0.0.1:8000</code>)에 연결되지 않았습니다.
-            즐겨찾기는 이 브라우저에만 저장됩니다. 터미널에서{" "}
-            <code style={{ fontSize: 12, color: "#fcd34d" }}>python api_server.py</code> 실행 후
-            새로고침하세요.
+            백엔드(
+            <code style={{ fontSize: 12, color: "#fcd34d" }}>127.0.0.1:8000</code>)에 연결되지
+            않았습니다. 즐겨찾기는 이 브라우저에만 저장됩니다.{" "}
+            <code style={{ fontSize: 12, color: "#fcd34d" }}>start_all.bat</code> 또는{" "}
+            <code style={{ fontSize: 12, color: "#fcd34d" }}>run_api_server.bat</code> 실행 후{" "}
+            <a
+              href="http://localhost:8000/"
+              style={{ color: "#fcd34d", textDecoration: "underline" }}
+            >
+              http://localhost:8000/
+            </a>
+            에서 새로고침하세요.
           </div>
         )}
         {aboutInfo?.runtime && aboutInfo.runtime.cloud_llm_any === false ? (
@@ -1592,8 +1614,9 @@ export default function App() {
               minWidth: 0
             }}
           >
-            <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 10 }}>목표 고상·액상 (℃)</h2>
+            <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 10 }}>목표 융점 탐색 (℃)</h2>
             <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+              기본은 데이터시트에 흔한 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
               <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi</strong> 격자를 스윕하고 나머지는{" "}
               <strong style={{ color: "#94a3b8" }}>Sn</strong>으로 맞춥니다. 표에는 격자 후보와 목표 온도에 맞는{" "}
               <strong style={{ color: "#94a3b8" }}>DB 등록 합금</strong>이 함께 나옵니다. 결과는 오른쪽 분석 패널
@@ -1629,66 +1652,104 @@ export default function App() {
             <div
               style={{
                 display: "flex",
-                flexWrap: "wrap",
+                flexDirection: "column",
                 gap: 10,
-                alignItems: "flex-end",
                 marginBottom: 14,
                 paddingBottom: 14,
                 borderBottom: "1px solid var(--border-muted)"
               }}
             >
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 고상 ℃</span>
-                <input
-                  value={meltRecSolidus}
-                  onChange={(e) => setMeltRecSolidus(e.target.value)}
-                  placeholder="비우면 무시"
-                  style={{
-                    width: 88,
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-muted)",
-                    background: "var(--bg-page)",
-                    color: "#e5e7eb",
-                    fontSize: 13
-                  }}
-                />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 액상 ℃</span>
-                <input
-                  value={meltRecLiquidus}
-                  onChange={(e) => setMeltRecLiquidus(e.target.value)}
-                  placeholder="선택"
-                  style={{
-                    width: 88,
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-muted)",
-                    background: "var(--bg-page)",
-                    color: "#e5e7eb",
-                    fontSize: 13
-                  }}
-                />
-              </label>
-              <TactileButton
-                type="button"
-                onClick={runMeltRecommend}
-                disabled={meltRecLoading}
+              <div
                 style={{
-                  padding: "8px 14px",
-                  borderRadius: 6,
-                  border: "1px solid var(--accent)",
-                  background: meltRecLoading
-                    ? "rgba(55, 65, 81, 0.5)"
-                    : "rgba(37, 99, 235, 0.35)",
-                  color: "var(--text-primary)",
-                  cursor: meltRecLoading ? "wait" : "pointer",
-                  fontSize: 13
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 10,
+                  alignItems: "flex-end"
                 }}
               >
-                {meltRecLoading ? "탐색 중…" : "탐색 실행"}
-              </TactileButton>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 액상 ℃</span>
+                  <input
+                    value={meltRecLiquidus}
+                    onChange={(e) => setMeltRecLiquidus(e.target.value)}
+                    placeholder="예: 200"
+                    inputMode="decimal"
+                    style={{
+                      width: 96,
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      border: "1px solid var(--border-muted)",
+                      background: "var(--bg-page)",
+                      color: "#e5e7eb",
+                      fontSize: 13
+                    }}
+                  />
+                </label>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                    padding: "6px 0",
+                    fontSize: 12,
+                    color: "#94a3b8",
+                    userSelect: "none"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={meltRecAlsoSolidusTarget}
+                    onChange={(e) => setMeltRecAlsoSolidusTarget(e.target.checked)}
+                    style={{ width: 15, height: 15, accentColor: "var(--accent)" }}
+                  />
+                  고상 목표도 지정
+                </label>
+                <TactileButton
+                  type="button"
+                  onClick={runMeltRecommend}
+                  disabled={meltRecLoading}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    border: "1px solid var(--accent)",
+                    background: meltRecLoading
+                      ? "rgba(55, 65, 81, 0.5)"
+                      : "rgba(37, 99, 235, 0.35)",
+                    color: "var(--text-primary)",
+                    cursor: meltRecLoading ? "wait" : "pointer",
+                    fontSize: 13
+                  }}
+                >
+                  {meltRecLoading ? "탐색 중…" : "탐색 실행"}
+                </TactileButton>
+              </div>
+              {meltRecAlsoSolidusTarget ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontWeight: 600, color: "#9ca3af" }}>목표 고상 ℃</span>
+                    <input
+                      value={meltRecSolidus}
+                      onChange={(e) => setMeltRecSolidus(e.target.value)}
+                      placeholder="선택 (고상만 맞출 때 가능)"
+                      inputMode="decimal"
+                      style={{
+                        width: 220,
+                        maxWidth: "100%",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: "1px solid var(--border-muted)",
+                        background: "var(--bg-page)",
+                        color: "#e5e7eb",
+                        fontSize: 13
+                      }}
+                    />
+                  </label>
+                  <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.45, maxWidth: 320 }}>
+                    고상·액상 중 하나만 넣어도 됩니다. 둘 다 넣으면 두 축 밴드에 맞춥니다.
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <h2 style={{ fontSize: 18, marginBottom: 12 }}>조성 입력 (wt%)</h2>
@@ -2518,6 +2579,13 @@ export default function App() {
                 {meltRecResult?.meta?.disclaimer ? (
                   <p style={{ margin: "0 0 10px", color: "#fbbf24", fontSize: 12 }}>
                     {meltRecResult.meta.disclaimer}
+                  </p>
+                ) : null}
+                {meltRecResult?.meta?.melting_engine_version ? (
+                  <p style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
+                    융점 엔진 v{meltRecResult.meta.melting_engine_version}. 입력은 기본 액상만이며, 고상 목표도
+                    지정을 켜면 두 축을 넣을 수 있고 DB는 두 축 모두 허용 밴드에 들어간 행만 합칩니다. 값이
+                    반영되지 않으면 API(8000)를 재시작했는지 확인하세요.
                   </p>
                 ) : null}
                 {Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length ? (
