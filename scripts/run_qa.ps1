@@ -4,4 +4,6 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 py -3 scripts/qa_http_smoke.py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 py -3 scripts/qa_ui_selenium.py
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+py -3 scripts/qa_ui_selenium.py
 exit $LASTEXITCODE

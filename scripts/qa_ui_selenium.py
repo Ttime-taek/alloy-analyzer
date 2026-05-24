@@ -2,48 +2,49 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from qa_browser_common import (
+    CDP_ADDR,
+    ELEMS,
+    URL,
+    find_chrome,
+    fresh_profile,
+    free_cdp_port,
+    start_chrome,
+    stop_chrome,
+)
+
 OUT = Path(__file__).resolve().parents[1] / ".gstack" / "qa-reports" / "screenshots"
-URL = "http://127.0.0.1:8000/"
-PROFILE = Path(__file__).resolve().parents[1] / ".gstack" / "chrome-qa-profile"
-CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
-ELEMS = ["Sn", "Ag", "Bi", "Cu"]
-
-
-def start_chrome() -> subprocess.Popen:
-    PROFILE.mkdir(parents=True, exist_ok=True)
-    return subprocess.Popen(
-        [
-            str(CHROME),
-            "--remote-debugging-port=9222",
-            f"--user-data-dir={PROFILE}",
-            "--no-first-run",
-            URL,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
 
 
 def comp_select(driver):
-    """First 'add element' dropdown under composition A."""
     for sel in driver.find_elements(By.CSS_SELECTOR, "select"):
         if any(o.text == "원소 추가…" for o in sel.find_elements(By.TAG_NAME, "option")):
             return sel
     raise RuntimeError("composition select not found")
 
 
-def add_elem(driver, sym: str) -> None:
+def reset_ui(driver) -> None:
+    for btn in driver.find_elements(By.CSS_SELECTOR, "button.tactile-hit"):
+        if btn.text.strip() == "초기화":
+            btn.click()
+            time.sleep(0.6)
+            return
+
+
+def ensure_elem(driver, sym: str) -> None:
+    if driver.find_elements(By.XPATH, f"//label[normalize-space()='{sym}']"):
+        return
     Select(comp_select(driver)).select_by_value(sym)
     time.sleep(0.25)
 
@@ -68,28 +69,32 @@ def is_disabled(btn) -> bool:
         return True
     if btn.get_attribute("aria-disabled") == "true":
         return True
-    pe = btn.value_of_css_property("pointer-events")
-    return pe == "none"
+    return btn.value_of_css_property("pointer-events") == "none"
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    proc = start_chrome()
-    time.sleep(4)
+    free_cdp_port()
+    fresh_profile()
+    proc = start_chrome(URL, find_chrome())
+    time.sleep(5)
 
     opts = Options()
-    opts.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+    opts.add_experimental_option("debuggerAddress", CDP_ADDR)
     driver = webdriver.Chrome(options=opts)
     wait = WebDriverWait(driver, 30)
 
     try:
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select")))
+        driver.get(URL)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select")))
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(0.5)
+        reset_ui(driver)
         driver.save_screenshot(str(OUT / "home-selenium.png"))
 
         for sym in ELEMS:
-            add_elem(driver, sym)
+            ensure_elem(driver, sym)
 
         fill_row(driver, "Sn", "96.2")
         fill_row(driver, "Ag", "0.3")
@@ -98,8 +103,7 @@ def main() -> int:
         time.sleep(0.6)
         driver.save_screenshot(str(OUT / "composition-99p5-selenium.png"))
 
-        analyze = analyze_button(driver)
-        d995 = is_disabled(analyze)
+        d995 = is_disabled(analyze_button(driver))
         block = driver.find_elements(By.CSS_SELECTOR, "[role='status']")
         block_text = block[0].text if block else ""
 
@@ -115,9 +119,12 @@ def main() -> int:
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if d995 and not d100 else 2
+    except NoSuchElementException as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        return 1
     finally:
         driver.quit()
-        proc.terminate()
+        stop_chrome(proc)
 
 
 if __name__ == "__main__":
