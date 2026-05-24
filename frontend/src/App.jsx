@@ -153,6 +153,76 @@ function getWtPercentCompositionChunks(comp) {
   return chunks;
 }
 
+/** FastAPI 오류 detail(문자열·검증 배열·객체)을 UI에 표시 가능한 문자열로 변환 */
+function formatApiDetail(detail, status = 500) {
+  if (detail == null || detail === "") return `HTTP ${status}`;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (!item || typeof item !== "object") return String(item);
+      const msg = item.msg != null ? String(item.msg) : JSON.stringify(item);
+      const loc = Array.isArray(item.loc)
+        ? item.loc.filter((x) => x !== "body").join(".")
+        : "";
+      return loc ? `${loc}: ${msg}` : msg;
+    });
+    return parts.length ? parts.join("; ") : `HTTP ${status}`;
+  }
+  if (typeof detail === "object") {
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return `HTTP ${status}`;
+    }
+  }
+  return String(detail);
+}
+
+/** 화면 총합(소수 둘째 자리 반올림)이 100.00%일 때만 분석 — 99.50% 등은 불가 */
+function compositionTotalIsComplete(total) {
+  return Number(Number(total).toFixed(2)) === 100;
+}
+
+function cleanCompositionWt(src) {
+  return Object.fromEntries(
+    Object.entries(src)
+      .filter(([_, v]) => v !== "" && !Number.isNaN(Number(v)))
+      .map(([k, v]) => [k, Number(v)])
+  );
+}
+
+/** 조성 패널에 보이는 입력란(activeElems)만 합산·검증 — 주기율표만 눌러 comp에만 남은 값은 제외 */
+function compositionWtForPanel(comp, activeElems) {
+  const out = {};
+  for (const el of activeElems || []) {
+    const v = comp[el];
+    if (v !== "" && v !== undefined && !Number.isNaN(Number(v))) {
+      out[el] = Number(v);
+    }
+  }
+  return out;
+}
+
+function compositionTotalPct(obj) {
+  return Object.values(obj).reduce((s, v) => s + (Number(v) || 0), 0);
+}
+
+/** null이면 분석 가능; 문자열이면 버튼 비활성·제출 차단 사유 */
+function compositionAnalyzeBlockReason(obj, label) {
+  if (!Object.keys(obj).length) {
+    return `${label}에 최소 1개 이상 원소(%)를 입력하세요.`;
+  }
+  const total = compositionTotalPct(obj);
+  const hasPositive = Object.values(obj).some((v) => Number(v) > 0);
+  if (!hasPositive || total <= 0) {
+    return `${label}에 0보다 큰 wt%를 최소 1개 입력하세요. (현재 총합 ${total.toFixed(2)}%)`;
+  }
+  if (!compositionTotalIsComplete(total)) {
+    return `${label} 총합이 ${total.toFixed(2)}%입니다. 총합이 100.00%가 되도록 맞춘 뒤 분석하세요.`;
+  }
+  return null;
+}
+
 /** 한 줄 문자열(복사·title 등) */
 function formatWtPercentCompositionReadable(comp) {
   const chunks = getWtPercentCompositionChunks(comp);
@@ -711,7 +781,22 @@ export default function App() {
     }));
   };
 
+  const analyzeBlockReason = useMemo(() => {
+    const a = compositionWtForPanel(comp, activeElemsA);
+    if (mode === "single") {
+      return compositionAnalyzeBlockReason(a, "조성 A");
+    }
+    const b = compositionWtForPanel(compB, activeElemsB);
+    return compositionAnalyzeBlockReason(a, "조성 A") || compositionAnalyzeBlockReason(b, "조성 B");
+  }, [comp, compB, mode, activeElemsA, activeElemsB]);
+
+  const analyzeReady = analyzeBlockReason === null;
+
   const handleAnalyze = async () => {
+    if (!analyzeReady) {
+      if (analyzeBlockReason) setError(analyzeBlockReason);
+      return;
+    }
     setLoading(true);
     setAnalysisStage("입력값 검증 중...");
     setAnalysisElapsedSec(0);
@@ -755,38 +840,12 @@ export default function App() {
         idx += 1;
       }, 900);
 
-      const clean = (src) =>
-        Object.fromEntries(
-          Object.entries(src)
-            .filter(([_, v]) => v !== "" && !Number.isNaN(Number(v)))
-            .map(([k, v]) => [k, Number(v)])
-        );
+      const a = compositionWtForPanel(comp, activeElemsA);
+      const b = compositionWtForPanel(compB, activeElemsB);
 
-      const a = clean(comp);
-      const b = clean(compB);
-
-      // 조성 합계: 100% 근처가 아니면 서버가 Sn 보정/스케일 — 차단 vs 로그만 안내
       const checkTotal = (obj, label) => {
-        const total = Object.values(obj).reduce((s, v) => s + (Number(v) || 0), 0);
-        if (total > 100.5) {
-          return {
-            block: true,
-            msg: `${label} 총합(${total.toFixed(2)}%)이 100%를 초과합니다. 서버가 비율로 맞추므로 의도와 다를 수 있습니다. 수정 후 다시 분석하세요.`
-          };
-        }
-        if (total > 0 && total < 50) {
-          return {
-            block: true,
-            msg: `${label} 총합(${total.toFixed(2)}%)이 너무 낮습니다. wt% 값을 확인하세요.`
-          };
-        }
-        if (total >= 50 && total < 99.5) {
-          return {
-            block: false,
-            msg: `${label} 총합(${total.toFixed(2)}%)입니다. 100% 미만이면 서버가 주로 Sn으로 잔량을 채웁니다. 가능하면 100%에 맞춰 주세요.`
-          };
-        }
-        return null;
+        const msg = compositionAnalyzeBlockReason(obj, label);
+        return msg ? { block: true, msg } : null;
       };
 
       if (mode === "single") {
@@ -802,9 +861,6 @@ export default function App() {
           appendLog(`입력 검증: ${totalCheck.msg}`);
           setLoading(false);
           return;
-        }
-        if (totalCheck?.msg) {
-          appendLog(`입력 안내: ${totalCheck.msg}`);
         }
       } else {
         if (!Object.keys(a).length || !Object.keys(b).length) {
@@ -823,8 +879,6 @@ export default function App() {
           setLoading(false);
           return;
         }
-        if (checkA?.msg) appendLog(`입력 안내: ${checkA.msg}`);
-        if (checkB?.msg) appendLog(`입력 안내: ${checkB.msg}`);
       }
 
       let res;
@@ -854,8 +908,9 @@ export default function App() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        appendLog(`서버 오류 응답: ${data.detail || `HTTP ${res.status}`}`);
-        throw new Error(data.detail || `HTTP ${res.status}`);
+        const detail = formatApiDetail(data.detail, res.status);
+        appendLog(`서버 오류 응답: ${detail}`);
+        throw new Error(detail);
       }
       setAnalysisStage("응답 데이터 반영 중...");
       appendLog("서버 응답 수신, 결과 반영 중...");
@@ -931,7 +986,7 @@ export default function App() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.detail || `HTTP ${res.status}`);
+        throw new Error(formatApiDetail(data.detail, res.status));
       }
       const rows = Array.isArray(data.wetting_by_temp) ? data.wetting_by_temp : [];
       setWettingGridRows(rows);
@@ -1016,12 +1071,7 @@ export default function App() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        let detail =
-          typeof data.detail === "string"
-            ? data.detail
-            : Array.isArray(data.detail)
-              ? JSON.stringify(data.detail)
-              : `HTTP ${res.status}`;
+        let detail = formatApiDetail(data.detail, res.status);
         if (res.status === 405) {
           detail =
             "HTTP 405 — 백엔드에 POST /api/recommend_melt 없음. 127.0.0.1:8000에서 최신 python api_server.py 실행 확인.";
@@ -1224,17 +1274,11 @@ export default function App() {
     [favorites]
   );
 
-  const totalA = Object.values(comp).reduce(
-    (sum, v) => sum + (Number(v) || 0),
-    0
-  );
-  const totalB = Object.values(compB).reduce(
-    (sum, v) => sum + (Number(v) || 0),
-    0
-  );
+  const totalA = compositionTotalPct(compositionWtForPanel(comp, activeElemsA));
+  const totalB = compositionTotalPct(compositionWtForPanel(compB, activeElemsB));
 
   const totalColor = (t) => {
-    if (Math.abs(t - 100) <= 0.5) return "#22c55e";
+    if (compositionTotalIsComplete(t)) return "#22c55e";
     if (t >= 95 && t <= 105) return "#fbbf24";
     return "#f97316";
   };
@@ -2361,19 +2405,37 @@ export default function App() {
               </>
             )}
 
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <div style={{ marginTop: 12 }}>
+              {analyzeBlockReason && !loading && (
+                <p
+                  role="status"
+                  style={{
+                    margin: "0 0 8px 0",
+                    fontSize: 12,
+                    color: "#f97316",
+                    lineHeight: 1.45
+                  }}
+                >
+                  {analyzeBlockReason}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
               <TactileButton
                 onClick={handleAnalyze}
-                disabled={loading}
+                disabled={loading || !analyzeReady}
+                aria-disabled={loading || !analyzeReady}
+                title={analyzeBlockReason && !loading ? analyzeBlockReason : undefined}
                 style={{
                   flex: 1,
                   padding: "8px 12px",
                   borderRadius: 8,
                   border: "none",
-                  background: loading ? "#4b5563" : "#2563eb",
+                  background: loading || !analyzeReady ? "#4b5563" : "#2563eb",
                   color: "white",
                   fontWeight: 600,
-                  cursor: loading ? "default" : "pointer"
+                  cursor: loading || !analyzeReady ? "not-allowed" : "pointer",
+                  opacity: loading || !analyzeReady ? 0.65 : 1,
+                  pointerEvents: loading || !analyzeReady ? "none" : "auto"
                 }}
               >
                 {loading ? (
@@ -2474,6 +2536,7 @@ export default function App() {
                 오류: {error}
               </p>
             )}
+            </div>
           </div>
 
           {/* 결과 패널 */}

@@ -62,6 +62,8 @@ function Ensure-FrontendBuild {
     } else {
         Write-Host "[start_all] Building UI (npm run build)..."
     }
+    $env:VITE_ESLINT_CHECK = "0"
+    if (Test-Path $NodeDir) { $env:Path = "$NodeDir;$env:Path" }
     Push-Location $Fe
     & $Npm run build 2>&1 | ForEach-Object { Write-Host $_ }
     $ok = (Test-Path $Dist)

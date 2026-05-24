@@ -179,6 +179,16 @@ def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
     return clean
 
 
+def _require_wt_sum_100_00(comp: Dict[str, float], label: str = "comp") -> None:
+    """웹·API 공통: 화면과 동일하게 소수 둘째 자리 반올림 합이 100.00%일 때만 분석."""
+    total = round(float(sum(comp.values())), 2)
+    if total != 100.0:
+        raise ValueError(
+            f"{label}: wt% 합이 {total:.2f}% 입니다. "
+            "총합이 100.00%가 되도록 맞춘 뒤 분석하세요."
+        )
+
+
 def _composition_notes_for_raw_comp(comp: Dict[str, float]) -> tuple[float, list[str]]:
     """정규화 전 요청 comp 합계에 대한 사용자 안내(분석 응답에 실어 표시)."""
     total = float(sum(comp.values()))
@@ -722,6 +732,17 @@ async def _ensure_utf8_charset(request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _no_cache_spa_assets(request, call_next):
+    """UI 빌드 후에도 브라우저가 예전 index.html/JS를 쓰지 않도록 캐시 억제."""
+    response = await call_next(request)
+    path = request.url.path or ""
+    if path == "/" or path.endswith((".html", ".js", ".css", ".mjs")):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 # 다른 PC·다른 포트의 웹에서 API를 직접 호출할 때 브라우저 CORS 차단 방지.
 # ALLOY_API_CORS=0 이면 비활성화(폐쇄망 전용 등).
 if (os.getenv("ALLOY_API_CORS") or "").strip().lower() not in ("0", "false", "no", "off"):
@@ -793,6 +814,10 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
     React 등 클라이언트에서는 이 엔드포인트만 호출하면 됩니다.
     """
     _ai_engine, _analyzer = _get_engine_bundle()
+    try:
+        _require_wt_sum_100_00(dict(req.comp), "comp")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     sum_in, comp_notes = _composition_notes_for_raw_comp(dict(req.comp))
     # Cerebras 폴백이 이번 요청에서 실제 응답을 만들었는지 카운터 델타로 판정
     _cb_before = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
@@ -1060,6 +1085,11 @@ async def compare(req: CompareRequest) -> CompareResponse:
     비교 분석용 핵심 요약만 반환.
     """
     _ai_engine, _analyzer = _get_engine_bundle()
+    try:
+        _require_wt_sum_100_00(dict(req.comp_a), "comp_a")
+        _require_wt_sum_100_00(dict(req.comp_b), "comp_b")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     try:
         lm = req.literature_mode or "fast"
         ra = _analyzer.analyze_all(

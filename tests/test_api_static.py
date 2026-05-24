@@ -48,3 +48,18 @@ class ApiStaticSmokeTest(unittest.TestCase):
         """StaticFiles on / must not return 405 for POST /api/*."""
         r = self.client.post("/api/compare", json={"comp_a": {}, "comp_b": {"Sn": 50, "Bi": 50}})
         self.assertEqual(r.status_code, 422, r.text)
+
+    def test_analyze_rejects_incomplete_wt_sum(self) -> None:
+        r = self.client.post(
+            "/api/analyze",
+            json={"comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.0}},
+        )
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertIn("100.00", r.text)
+
+    def test_analyze_accepts_exact_100_wt_sum(self) -> None:
+        r = self.client.post(
+            "/api/analyze",
+            json={"comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}},
+        )
+        self.assertNotEqual(r.status_code, 422, r.text[:500])
