@@ -372,6 +372,8 @@ export default function App() {
   const [imcTalDeltaC, setImcTalDeltaC] = useState(3);
   const [imcTalSec, setImcTalSec] = useState(35);
   const analysisLogScrollRef = useRef(null);
+  /** 분석 완료 후 KPI 카드 그리드가 뷰포트 밖에 있을 때 스크롤 앵커 (DR-007) */
+  const resultKpiScrollRef = useRef(null);
 
   const showMeltRecommendPanel =
     Boolean(meltRecError) ||
@@ -768,6 +770,17 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [loading, analysisLogs, analysisStage]);
+
+  useEffect(() => {
+    if (mode !== "single" || !result || loading) return;
+    const scrollToKpi = () => {
+      const el = resultKpiScrollRef.current;
+      if (!el?.isConnected) return;
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    const t = window.setTimeout(scrollToKpi, 120);
+    return () => window.clearTimeout(t);
+  }, [result, mode, loading]);
 
   const handleChange = (elem, value) => {
     setComp((prev) => ({
@@ -2873,6 +2886,7 @@ export default function App() {
                 </div>
                 <ResultSummaryBlock
                   result={result}
+                  kpiGridRef={resultKpiScrollRef}
                   wettingSectionOpen={wettingSectionOpen}
                   setWettingSectionOpen={setWettingSectionOpen}
                   wettingGridRows={wettingGridRows}
@@ -2900,6 +2914,7 @@ export default function App() {
                 <ResultSummaryBlock
                   result={result}
                   showDbMeta
+                  kpiGridRef={resultKpiScrollRef}
                   wettingSectionOpen={wettingSectionOpen}
                   setWettingSectionOpen={setWettingSectionOpen}
                   wettingGridRows={wettingGridRows}
@@ -4272,6 +4287,7 @@ function ResultAnalyzeSkeleton() {
 function ResultSummaryBlock({
   result,
   showDbMeta = false,
+  kpiGridRef,
   wettingSectionOpen,
   setWettingSectionOpen,
   wettingGridRows,
@@ -4311,6 +4327,8 @@ function ResultSummaryBlock({
         </div>
       ) : null}
       <div
+        ref={kpiGridRef}
+        id="results-kpi-strip"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
