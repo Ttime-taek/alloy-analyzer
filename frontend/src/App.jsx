@@ -8,6 +8,7 @@ import {
   deviationHintAgainstRecommended,
   readReflowTuningGoalInitial as _readReflowTuningGoalInitial
 } from "./reflow_tune_engine.js";
+import AnalysisReportSlideshow from "./AnalysisReportSlideshow.jsx";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -355,6 +356,7 @@ export default function App() {
   const [uiPrefsLoaded, setUiPrefsLoaded] = useState(false);
   const [aboutInfo, setAboutInfo] = useState(null);
   const [trustOpen, setTrustOpen] = useState(false);
+  const [chartReportOpen, setChartReportOpen] = useState(false);
   /** 목표 융점 → POST /api/recommend_melt (기본 액상만; 고상은 옵션) */
   const [meltRecSolidus, setMeltRecSolidus] = useState("");
   const [meltRecLiquidus, setMeltRecLiquidus] = useState("");
@@ -1274,10 +1276,21 @@ export default function App() {
     [favorites]
   );
 
-  const totalA = compositionTotalPct(compositionWtForPanel(comp, activeElemsA));
-  const totalB = compositionTotalPct(compositionWtForPanel(compB, activeElemsB));
+  const panelWtA = useMemo(() => compositionWtForPanel(comp, activeElemsA), [comp, activeElemsA]);
+  const panelWtB = useMemo(() => compositionWtForPanel(compB, activeElemsB), [compB, activeElemsB]);
+  const totalA = compositionTotalPct(panelWtA);
+  const totalB = compositionTotalPct(panelWtB);
+  const compositionAHasInput = useMemo(
+    () => Object.values(panelWtA).some((v) => Number(v) > 0),
+    [panelWtA]
+  );
+  const compositionBHasInput = useMemo(
+    () => Object.values(panelWtB).some((v) => Number(v) > 0),
+    [panelWtB]
+  );
 
-  const totalColor = (t) => {
+  const totalColor = (t, hasInput) => {
+    if (!hasInput && Number(t) < 0.01) return "#64748b";
     if (compositionTotalIsComplete(t)) return "#22c55e";
     if (t >= 95 && t <= 105) return "#fbbf24";
     return "#f97316";
@@ -1461,7 +1474,7 @@ export default function App() {
           }}
         >
           {aboutInfo?.tagline ||
-            "조성(wt%)을 입력한 뒤 분석하면 융점 추정·상·문헌·AI 요약을 한 화면에서 확인할 수 있습니다."}
+            "합금 조성을 입력하면 융점·상·IMC·리플로우 추천을 한 번에 제공합니다."}
         </p>
         {(favSyncStatus === "offline" || favSyncStatus === "error") && (
           <div
@@ -1919,7 +1932,7 @@ export default function App() {
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: totalColor(totalA)
+                  color: totalColor(totalA, compositionAHasInput)
                 }}
               >
                 조성 A 총합: {totalA.toFixed(2)} %
@@ -1929,7 +1942,7 @@ export default function App() {
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: totalColor(totalB)
+                    color: totalColor(totalB, compositionBHasInput)
                   }}
                 >
                   조성 B 총합: {totalB.toFixed(2)} %
@@ -2817,30 +2830,16 @@ export default function App() {
                 ) : null}
               </div>
             ) : null}
-            {!result && !compareResult && !error && !showMeltRecommendPanel && (
+            {loading && mode === "single" && !result && !compareResult && !showMeltRecommendPanel && (
+              <ResultAnalyzeSkeleton />
+            )}
+            {!result && !compareResult && !error && !showMeltRecommendPanel && !loading && (
               <div className="empty-state-guide">
                 <div style={{ fontSize: 32, opacity: 0.35 }}>⚗️</div>
                 <p style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
-                  왼쪽에서 조성을 입력한 뒤, 하단의 <strong style={{ color: "#e5e7eb" }}>분석</strong> 버튼을 누르면
-                  결과가 여기 표시됩니다.
+                  왼쪽에서 원소와 wt%를 입력한 뒤 <strong style={{ color: "#e5e7eb" }}>분석</strong>을 누르면
+                  융점·상·문헌·AI 요약이 여기 표시됩니다.
                 </p>
-                <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
-                  처음이시면 아래 순서대로 진행해 보세요.
-                </p>
-                <div className="empty-state-steps">
-                  <div className="empty-state-step">
-                    <span className="empty-state-step-num">1</span>
-                    <span>주기율표에서 원소 클릭 (예: Sn → Ag → Cu)</span>
-                  </div>
-                  <div className="empty-state-step">
-                    <span className="empty-state-step-num">2</span>
-                    <span>각 원소의 wt% 입력 (합계 100%)</span>
-                  </div>
-                  <div className="empty-state-step">
-                    <span className="empty-state-step-num">3</span>
-                    <span>분석 버튼 클릭 → 융점·문헌·AI 요약 확인</span>
-                  </div>
-                </div>
               </div>
             )}
             {!result && !compareResult && error && (
@@ -2848,8 +2847,14 @@ export default function App() {
                 {error}
               </p>
             )}
-            {((mode === "single" && result) || (mode === "compare" && compareResult)) && !resultPanelOpen && (
+            {mode === "compare" && compareResult && !resultPanelOpen && (
               <p style={{ color: "#64748b", marginTop: 6 }}>분석 결과가 접혀 있습니다. “분석 결과 펼치기”를 눌러 확인하세요.</p>
+            )}
+            {mode === "single" && result && !resultPanelOpen && (
+              <p style={{ color: "#64748b", marginTop: 6 }}>
+                상세 분석(탭·문헌·리플로우)이 접혀 있습니다. KPI는 아래에 표시됩니다. “분석 결과 펼치기”로 전체를
+                확인하세요.
+              </p>
             )}
             {mode === "single" && result && !resultPanelOpen && (
               <>
@@ -2902,6 +2907,25 @@ export default function App() {
                   wettingGridError={wettingGridError}
                   loadWettingGrid={loadWettingGrid}
                 />
+                <div style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <TactileButton
+                    type="button"
+                    onClick={() => setChartReportOpen(true)}
+                    style={{
+                      minHeight: 44,
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #2563eb",
+                      background: "linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%)",
+                      color: "#f8fafc",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      cursor: "pointer"
+                    }}
+                  >
+                    슬라이드 보고서
+                  </TactileButton>
+                </div>
                 {result.evidence?.wetting?.source === "Heuristic" && (
                   <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px 0" }}>
                     젖음: 측정 DB 보간 대신 조성·온도 휴리스틱 추정입니다. (융점 DB 최근접 거리는 요약·신뢰도 블록 참고)
@@ -2976,7 +3000,7 @@ export default function App() {
                   </div>
                   <p style={{ fontSize: 13, color: "var(--text-dim)", margin: "0 0 10px 0" }}>
                     {reportMode === "eng"
-                      ? "IMC는 금속 사이 단단한 반응층을 뜻합니다. 항목에 마우스를 올리면 부연 설명이 있습니다."
+                      ? "IMC는 금속 사이 얇은 반응층을 뜻합니다. 항목에 마우스를 올리면 부가 설명을 봅니다."
                       : "항목에 마우스를 올리면 간단 설명을 볼 수 있습니다."}
                   </p>
                   <div className="result-imc-wrap">
@@ -3326,6 +3350,18 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {mode === "single" && result ? (
+          <AnalysisReportSlideshow
+            open={chartReportOpen}
+            onClose={() => setChartReportOpen(false)}
+            payload={{
+              result,
+              profile: reflowProfile,
+              melt: reflowMeltDisplay
+            }}
+          />
+        ) : null}
 
         <footer
           style={{
@@ -3864,7 +3900,7 @@ const SUMMARY_VARIANT_HINT = {
   tensileDb: "물성 DB 최근접 합금의 인장강도(MPa)"
 };
 
-/** 하단 힌트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
+/** 하단 폰트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
 const SUMMARY_COMPACT_VALUE_VARIANTS = new Set(["wetting", "tensileDb"]);
 
 function SummaryWettingTensileFootnotes() {
@@ -3898,6 +3934,158 @@ function formatWettingFmaxPrimary(props) {
 function formatTensileDbMpa(props) {
   const v = Number(props?.tensile_strength_db_mpa);
   return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : "—";
+}
+
+function SummaryCard({ label, value, variant }) {
+  const gradients = {
+    solidus: {
+      background:
+        "linear-gradient(145deg, #172554 0%, #1e40af 42%, #3b82f6 100%)",
+      border: "1px solid rgba(147, 197, 253, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(37, 99, 235, 0.28)",
+      labelColor: "rgba(219, 234, 254, 0.92)",
+      valueColor: "#f8fafc"
+    },
+    liquidus: {
+      background:
+        "linear-gradient(145deg, #431407 0%, #b45309 48%, #f97316 100%)",
+      border: "1px solid rgba(253, 186, 116, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(234, 88, 12, 0.26)",
+      labelColor: "rgba(255, 237, 213, 0.95)",
+      valueColor: "#fffbeb"
+    },
+    peak: {
+      background:
+        "linear-gradient(145deg, #3b0764 0%, #7c3aed 50%, #c084fc 100%)",
+      border: "1px solid rgba(216, 180, 254, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(124, 58, 237, 0.28)",
+      labelColor: "rgba(237, 233, 254, 0.95)",
+      valueColor: "#faf5ff"
+    },
+    dbConfidence: {
+      background:
+        "linear-gradient(145deg, #064e3b 0%, #059669 52%, #34d399 100%)",
+      border: "1px solid rgba(110, 231, 183, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(16, 185, 129, 0.24)",
+      labelColor: "rgba(209, 250, 229, 0.95)",
+      valueColor: "#ecfdf5"
+    },
+    overallConfidence: {
+      background:
+        "linear-gradient(145deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)",
+      border: "1px solid rgba(94, 234, 212, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(13, 148, 136, 0.26)",
+      labelColor: "rgba(204, 251, 241, 0.95)",
+      valueColor: "#f0fdfa"
+    },
+    bestMatch: {
+      background:
+        "linear-gradient(145deg, #312e81 0%, #4f46e5 48%, #818cf8 100%)",
+      border: "1px solid rgba(165, 180, 252, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(79, 70, 229, 0.26)",
+      labelColor: "rgba(224, 231, 255, 0.95)",
+      valueColor: "#eef2ff"
+    },
+    wetting: {
+      background:
+        "linear-gradient(145deg, #0c4a6e 0%, #0369a1 48%, #38bdf8 100%)",
+      border: "1px solid rgba(125, 211, 252, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(14, 165, 233, 0.26)",
+      labelColor: "rgba(224, 242, 254, 0.95)",
+      valueColor: "#f0f9ff"
+    },
+    tensileDb: {
+      background:
+        "linear-gradient(145deg, #14532d 0%, #15803d 48%, #4ade80 100%)",
+      border: "1px solid rgba(134, 239, 172, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(22, 163, 74, 0.26)",
+      labelColor: "rgba(220, 252, 231, 0.95)",
+      valueColor: "#f0fdf4"
+    }
+  };
+  const g = variant && gradients[variant] ? gradients[variant] : null;
+  const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
+  const hintText =
+    variant &&
+    SUMMARY_VARIANT_HINT[variant] &&
+    !SUMMARY_COMPACT_VALUE_VARIANTS.has(variant)
+      ? SUMMARY_VARIANT_HINT[variant]
+      : null;
+  return (
+    <div
+      className="summary-card"
+      style={{
+        height: "100%",
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        padding: 10,
+        borderRadius: 10,
+        border: g ? g.border : "1px solid var(--border-muted)",
+        background: g ? g.background : "var(--bg-table-head)",
+        boxShadow: g ? g.boxShadow : undefined
+      }}
+    >
+      <div
+        style={{
+          fontSize: 13,
+          color: g ? g.labelColor : "#9ca3af",
+          marginBottom: 4,
+          fontWeight: g ? 600 : 400,
+          letterSpacing: g ? 0.02 : undefined,
+          flexShrink: 0
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          flex: "1 1 auto",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          minHeight: 0
+        }}
+      >
+        <div
+          style={{
+            fontSize: compactValue ? 18 : 16,
+            fontWeight: 700,
+            color: g ? g.valueColor : undefined,
+            wordBreak: "break-word",
+            lineHeight: compactValue ? 1.3 : 1.35,
+            textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
+            whiteSpace: variant === "wetting" ? "pre-line" : undefined
+          }}
+        >
+          {value}
+        </div>
+      </div>
+      {hintText ? (
+        <div
+          style={{
+            fontSize: compactValue ? 9 : 11,
+            marginTop: compactValue ? 6 : 8,
+            lineHeight: compactValue ? 1.32 : 1.35,
+            fontWeight: 400,
+            color: g ? g.labelColor : "#94a3b8",
+            opacity: compactValue ? 0.82 : g ? 0.88 : 0.95,
+            flexShrink: 0
+          }}
+        >
+          {hintText}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC, onLoadGrid, loadPending, loadError }) {
@@ -4050,153 +4238,33 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
   );
 }
 
-function SummaryCard({ label, value, variant }) {
-  const gradients = {
-    solidus: {
-      background:
-        "linear-gradient(145deg, #172554 0%, #1e40af 42%, #3b82f6 100%)",
-      border: "1px solid rgba(147, 197, 253, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(37, 99, 235, 0.28)",
-      labelColor: "rgba(219, 234, 254, 0.92)",
-      valueColor: "#f8fafc"
-    },
-    liquidus: {
-      background:
-        "linear-gradient(145deg, #431407 0%, #b45309 48%, #f97316 100%)",
-      border: "1px solid rgba(253, 186, 116, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(234, 88, 12, 0.26)",
-      labelColor: "rgba(255, 237, 213, 0.95)",
-      valueColor: "#fffbeb"
-    },
-    peak: {
-      background:
-        "linear-gradient(145deg, #3b0764 0%, #7c3aed 50%, #c084fc 100%)",
-      border: "1px solid rgba(216, 180, 254, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(124, 58, 237, 0.28)",
-      labelColor: "rgba(237, 233, 254, 0.95)",
-      valueColor: "#faf5ff"
-    },
-    dbConfidence: {
-      background:
-        "linear-gradient(145deg, #064e3b 0%, #059669 52%, #34d399 100%)",
-      border: "1px solid rgba(110, 231, 183, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(16, 185, 129, 0.24)",
-      labelColor: "rgba(209, 250, 229, 0.95)",
-      valueColor: "#ecfdf5"
-    },
-    overallConfidence: {
-      background:
-        "linear-gradient(145deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)",
-      border: "1px solid rgba(94, 234, 212, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(13, 148, 136, 0.26)",
-      labelColor: "rgba(204, 251, 241, 0.95)",
-      valueColor: "#f0fdfa"
-    },
-    bestMatch: {
-      background:
-        "linear-gradient(145deg, #312e81 0%, #4f46e5 48%, #818cf8 100%)",
-      border: "1px solid rgba(165, 180, 252, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(79, 70, 229, 0.26)",
-      labelColor: "rgba(224, 231, 255, 0.95)",
-      valueColor: "#eef2ff"
-    },
-    wetting: {
-      background:
-        "linear-gradient(145deg, #0c4a6e 0%, #0369a1 48%, #38bdf8 100%)",
-      border: "1px solid rgba(125, 211, 252, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(14, 165, 233, 0.26)",
-      labelColor: "rgba(224, 242, 254, 0.95)",
-      valueColor: "#f0f9ff"
-    },
-    tensileDb: {
-      background:
-        "linear-gradient(145deg, #14532d 0%, #15803d 48%, #4ade80 100%)",
-      border: "1px solid rgba(134, 239, 172, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(22, 163, 74, 0.26)",
-      labelColor: "rgba(220, 252, 231, 0.95)",
-      valueColor: "#f0fdf4"
-    }
-  };
-  const g = variant && gradients[variant] ? gradients[variant] : null;
-  const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
-  const hintText =
-    variant &&
-    SUMMARY_VARIANT_HINT[variant] &&
-    !SUMMARY_COMPACT_VALUE_VARIANTS.has(variant)
-      ? SUMMARY_VARIANT_HINT[variant]
-      : null;
+function ResultAnalyzeSkeleton() {
   return (
-    <div
-      style={{
-        height: "100%",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        padding: 10,
-        borderRadius: 10,
-        border: g ? g.border : "1px solid var(--border-muted)",
-        background: g ? g.background : "var(--bg-table-head)",
-        boxShadow: g ? g.boxShadow : undefined
-      }}
-    >
+    <div className="result-analyze-skeleton" role="status" aria-live="polite" aria-label="분석 중">
+      <p style={{ margin: "0 0 12px 0", fontSize: 14, color: "#94a3b8" }}>
+        융점·상분석·문헌 요약을 계산하고 있습니다…
+      </p>
       <div
         style={{
-          fontSize: 13,
-          color: g ? g.labelColor : "#9ca3af",
-          marginBottom: 4,
-          fontWeight: g ? 600 : 400,
-          letterSpacing: g ? 0.02 : undefined,
-          flexShrink: 0
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
+          gap: 8,
+          opacity: 0.45
         }}
+        aria-hidden
       >
-        {label}
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div
+            key={i}
+            style={{
+              minHeight: 88,
+              borderRadius: 10,
+              background: "var(--bg-table-head)",
+              border: "1px solid var(--border-muted)"
+            }}
+          />
+        ))}
       </div>
-      <div
-        style={{
-          flex: "1 1 auto",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          minHeight: 0
-        }}
-      >
-        <div
-          style={{
-            fontSize: compactValue ? 18 : 16,
-            fontWeight: 700,
-            color: g ? g.valueColor : undefined,
-            wordBreak: "break-word",
-            lineHeight: compactValue ? 1.3 : 1.35,
-            textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
-            whiteSpace: variant === "wetting" ? "pre-line" : undefined
-          }}
-        >
-          {value}
-        </div>
-      </div>
-      {hintText ? (
-        <div
-          style={{
-            fontSize: compactValue ? 9 : 11,
-            marginTop: compactValue ? 6 : 8,
-            lineHeight: compactValue ? 1.32 : 1.35,
-            fontWeight: 400,
-            color: g ? g.labelColor : "#94a3b8",
-            opacity: compactValue ? 0.82 : g ? 0.88 : 0.95,
-            flexShrink: 0
-          }}
-        >
-          {hintText}
-        </div>
-      ) : null}
     </div>
   );
 }

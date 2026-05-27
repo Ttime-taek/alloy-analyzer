@@ -1,3 +1,7 @@
+## Communication
+
+- Agent 채팅(대화창) 응답의 기본 언어는 **한국어**이다. 사용자가 다른 언어를 명시하지 않는 한 설명·요약·안내는 한국어로 작성한다.
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill

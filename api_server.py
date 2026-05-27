@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # 패키지/직접 실행 모두 지원:
@@ -1162,6 +1163,18 @@ def _should_serve_frontend_static() -> bool:
     if v in ("0", "false", "no", "off"):
         return False
     return _frontend_dist_dir() is not None
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    """브라우저 기본 요청 — public/favicon.svg 제공."""
+    dist = _frontend_dist_dir()
+    if dist is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    svg = dist / "favicon.svg"
+    if not svg.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(svg, media_type="image/svg+xml")
 
 
 # 배포: `frontend`에서 npm run build 후, 같은 프로세스가 UI+API 제공 (fetch "/api/..." 동일 출처).

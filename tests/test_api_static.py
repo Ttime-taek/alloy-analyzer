@@ -44,6 +44,15 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertIn("text/html", ct)
         self.assertGreater(len(r.text), 100)
 
+    def test_favicon_not_404_when_dist_built(self) -> None:
+        favicon = _ROOT / "frontend" / "dist" / "favicon.svg"
+        if not favicon.is_file():
+            self.skipTest("frontend/dist/favicon.svg missing — run: cd frontend && npm run build")
+        r = self.client.get("/favicon.ico")
+        self.assertEqual(r.status_code, 200, r.text)
+        ct = (r.headers.get("content-type") or "").lower()
+        self.assertTrue("image" in ct or "svg" in ct, ct)
+
     def test_api_routes_not_blocked_by_spa_mount(self) -> None:
         """StaticFiles on / must not return 405 for POST /api/*."""
         r = self.client.post("/api/compare", json={"comp_a": {}, "comp_b": {"Sn": 50, "Bi": 50}})

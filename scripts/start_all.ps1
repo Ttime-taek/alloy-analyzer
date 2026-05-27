@@ -66,7 +66,12 @@ function Ensure-FrontendBuild {
     if (Test-Path $NodeDir) { $env:Path = "$NodeDir;$env:Path" }
     Push-Location $Fe
     & $Npm run build 2>&1 | ForEach-Object { Write-Host $_ }
-    $ok = (Test-Path $Dist)
+    $ok = (Test-Path (Join-Path $Dist "index.html"))
+    if (-not $ok) {
+        Write-Host "[start_all] npm run build failed — trying esbuild fallback..."
+        & (Join-Path $Root "scripts\build_frontend_esbuild.ps1")
+        $ok = (Test-Path (Join-Path $Dist "index.html"))
+    }
     Pop-Location
     return $ok
 }
@@ -83,7 +88,13 @@ function Test-ApiReady {
 function Test-UiReady {
     try {
         $r = Invoke-WebRequest -Uri "http://127.0.0.1:8000/" -UseBasicParsing -TimeoutSec 4
-        return ($r.StatusCode -eq 200 -and $r.Content.Length -gt 100)
+        if ($r.StatusCode -ne 200 -or $r.Content.Length -lt 100) { return $false }
+        if ($r.Content -match 'src="(/assets/[^"]+\.js)"') {
+            $asset = $Matches[1]
+            $ar = Invoke-WebRequest -Uri "http://127.0.0.1:8000$asset" -UseBasicParsing -TimeoutSec 4
+            if ($ar.StatusCode -ne 200 -or $ar.Content.Length -lt 500) { return $false }
+        }
+        return $true
     } catch { return $false }
 }
 
