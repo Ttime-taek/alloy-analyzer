@@ -29,6 +29,15 @@ frontend/.eslintcache
 .cache/
 
 # 로컬 디버그·Vite/npm 임시 로그(재생성 가능)
+build-*.log
+try-vite-build.log
+vb.log
+vb2.log
+vb-err.txt
+vb-out.txt
+browse-restart*.txt
+node-test.txt
+qa-reverify-out.txt
 vite-*.log
 vite-*.txt
 npm-*.log
