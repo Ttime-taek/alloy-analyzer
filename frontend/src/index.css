@@ -1670,3 +1670,514 @@ summary:focus-visible,
 .pro-wetting-table td {
   color: #e2e8f0;
 }
+
+/* 조성 입력 패널: 뷰포트가 아닌 패널 너비 기준으로 비교 2열 전환 */
+.compose-input-panel {
+  container-type: inline-size;
+  container-name: compose-panel;
+}
+
+.compare-compose-col {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.compare-compose-sn-row,
+.compare-compose-add-block,
+.compare-compose-inputs {
+  min-width: 0;
+}
+
+.compare-compose-col-head {
+  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.compare-compose-col-total {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* A·B 즐겨찾기 행 높이를 맞춰 주기율표 상단 정렬 */
+.compare-compose-fav-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  min-height: 44px;
+}
+
+.compare-compose-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.compare-compose-input-row > label {
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.compare-compose-input-row > input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 비교 모드: 기본 세로 스택 — 패널이 충분히 넓을 때만 A·B 나란히 */
+.compare-dual-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+@container compose-panel (min-width: 600px) {
+  /* 행 단위 subgrid: 헤더·총합·즐겨찾기·주기율표 등 각 줄이 A/B에서 수평 정렬 */
+  .compare-dual-compose {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: repeat(7, auto);
+    column-gap: 16px;
+    row-gap: 0;
+    align-items: start;
+  }
+
+  .compare-compose-col--a {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    display: grid;
+    grid-template-rows: subgrid;
+    padding-right: 8px;
+  }
+
+  .compare-compose-col--b {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    display: grid;
+    grid-template-rows: subgrid;
+    border-left: 1px solid var(--border-muted);
+    padding-left: 16px;
+  }
+}
+
+/* container query 미지원 폴백: 넓은 뷰포트 + 단일열 패널일 때만 */
+@supports not (container-type: inline-size) {
+  @media (min-width: 1280px) {
+    .compare-dual-compose {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .compare-compose-col--b {
+      border-left: 1px solid var(--border-muted);
+      padding-left: 16px;
+    }
+  }
+}
+
+/* --- Premium Glassmorphism & HSL Theme --- */
+
+/* 1. Global Glassmorphism Class */
+.summary-card {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .summary-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 
+      0 12px 38px 0 rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* 2. Harmonious HSL Gradient Variants for KPI Cards */
+
+/* 고상선: Soft Blue-Indigo */
+.summary-card--solidus {
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.3) 0%, rgba(59, 130, 246, 0.1) 100%);
+  border: 1px solid rgba(147, 197, 253, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(59, 130, 246, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--solidus:hover {
+  border-color: rgba(147, 197, 253, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(59, 130, 246, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 액상선: Cozy Amber-Orange */
+.summary-card--liquidus {
+  background: linear-gradient(135deg, rgba(120, 53, 4, 0.25) 0%, rgba(249, 115, 22, 0.1) 100%);
+  border: 1px solid rgba(253, 186, 116, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(249, 115, 22, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--liquidus:hover {
+  border-color: rgba(253, 186, 116, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(249, 115, 22, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 피크: Mystic Violet-Purple */
+.summary-card--peak {
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.25) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border: 1px solid rgba(216, 180, 254, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(139, 92, 246, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--peak:hover {
+  border-color: rgba(216, 180, 254, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(139, 92, 246, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* DB 신뢰도: Emerald Green */
+.summary-card--dbConfidence {
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.25) 0%, rgba(16, 185, 129, 0.1) 100%);
+  border: 1px solid rgba(110, 231, 183, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(16, 185, 129, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--dbConfidence:hover {
+  border-color: rgba(110, 231, 183, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(16, 185, 129, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 종합 신뢰도: Ocean Teal */
+.summary-card--overallConfidence {
+  background: linear-gradient(135deg, rgba(19, 78, 74, 0.25) 0%, rgba(20, 148, 136, 0.1) 100%);
+  border: 1px solid rgba(94, 234, 212, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(20, 148, 136, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--overallConfidence:hover {
+  border-color: rgba(94, 234, 212, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(20, 148, 136, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 최적 일치: Indigo-Royal Blue */
+.summary-card--bestMatch {
+  background: linear-gradient(135deg, rgba(49, 46, 129, 0.25) 0%, rgba(79, 70, 229, 0.1) 100%);
+  border: 1px solid rgba(165, 180, 252, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(79, 70, 229, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--bestMatch:hover {
+  border-color: rgba(165, 180, 252, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(79, 70, 229, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 젖음: Sky Blue */
+.summary-card--wetting {
+  background: linear-gradient(135deg, rgba(12, 74, 110, 0.25) 0%, rgba(14, 165, 233, 0.1) 100%);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(14, 165, 233, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--wetting:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(14, 165, 233, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 물성 DB 인장: Forest-Emerald Green */
+.summary-card--tensileDb {
+  background: linear-gradient(135deg, rgba(20, 83, 45, 0.25) 0%, rgba(34, 197, 94, 0.1) 100%);
+  border: 1px solid rgba(134, 239, 172, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    0 0 15px rgba(34, 197, 94, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.summary-card--tensileDb:hover {
+  border-color: rgba(134, 239, 172, 0.45);
+  box-shadow: 
+    0 12px 38px 0 rgba(0, 0, 0, 0.45),
+    0 0 25px rgba(34, 197, 94, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 비교 분석 — 상단 융점·피크 시각 요약 */
+.compare-hero-panel {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: linear-gradient(
+    165deg,
+    rgba(15, 23, 42, 0.72) 0%,
+    rgba(11, 18, 32, 0.55) 55%,
+    rgba(30, 41, 59, 0.35) 100%
+  );
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.compare-hero-panel__title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+  letter-spacing: 0.01em;
+}
+
+.compare-hero-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.compare-hero-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+
+.compare-hero-chip__badge {
+  flex-shrink: 0;
+  min-width: 1.35rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.compare-hero-chip__badge--a {
+  color: #dbeafe;
+  background: rgba(37, 99, 235, 0.28);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+.compare-hero-chip__badge--b {
+  color: #ffedd5;
+  background: rgba(234, 88, 12, 0.22);
+  border: 1px solid rgba(251, 146, 60, 0.38);
+}
+
+.compare-hero-chip__text {
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.compare-hero-chip__db {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.compare-hero-chart-wrap {
+  margin-bottom: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.compare-hero-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.compare-hero-deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compare-hero-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  background: rgba(15, 23, 42, 0.65);
+  color: #cbd5e1;
+}
+
+.compare-hero-delta__label {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.compare-hero-delta--up {
+  border-color: rgba(251, 191, 36, 0.35);
+  color: #fde68a;
+}
+
+.compare-hero-delta--down {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #bae6fd;
+}
+
+.compare-hero-delta--flat {
+  color: #94a3b8;
+}
+
+.compare-hero-footnote {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* 3. Empty State Guide Enhancement */
+.empty-state-guide {
+  background: rgba(15, 23, 42, 0.35) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 16px !important;
+  padding: 40px 32px !important;
+  box-shadow: 
+    0 10px 35px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  margin-top: 10px;
+}
+
+.empty-state-guide__icon {
+  font-size: 36px;
+  filter: drop-shadow(0 0 15px rgba(96, 165, 250, 0.35));
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(96, 165, 250, 0.2)); opacity: 0.8; }
+  50% { filter: drop-shadow(0 0 20px rgba(96, 165, 250, 0.5)); opacity: 1; }
+}
+
+.empty-state-steps {
+  margin-top: 24px;
+}
+
+.empty-state-step-num {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.25) 0%, rgba(37, 99, 235, 0.15) 100%) !important;
+  border: 1px solid rgba(96, 165, 250, 0.5) !important;
+  box-shadow: 0 0 10px rgba(96, 165, 250, 0.15) !important;
+}
+
+/* 5. Periodic Table Cell Active States */
+.periodic-cell-btn.is-active {
+  border: 1px solid rgba(56, 189, 248, 0.85) !important;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.25) 0%, rgba(56, 189, 248, 0.15) 100%) !important;
+  color: #fff !important;
+  box-shadow: 
+    0 0 15px rgba(56, 189, 248, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .periodic-cell-btn:hover {
+    border-color: rgba(56, 189, 248, 0.6) !important;
+  }
+  .periodic-cell-btn.is-active:hover {
+    border-color: rgba(56, 189, 248, 1) !important;
+    box-shadow: 
+      0 0 20px rgba(56, 189, 248, 0.35),
+      0 6px 18px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  }
+}
+
+/* 6. Result Fade-in Transition */
+.result-fade-in {
+  animation: resultReveal 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes resultReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 7. Slide transition animation */
+@keyframes slideFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+

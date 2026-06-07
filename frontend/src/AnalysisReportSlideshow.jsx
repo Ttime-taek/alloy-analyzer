@@ -352,7 +352,7 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
             >
               ‹
             </button>
-            <div className="rs-deck__slide">
+            <div className="rs-deck__slide" key={index}>
               <SlideBody slide={slide} norm={norm} profile={deckPayload.profile} />
             </div>
             <button

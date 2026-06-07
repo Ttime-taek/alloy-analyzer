@@ -36,19 +36,35 @@ class PropertyModels:
         """포화 함수: 최대 A에 수렴"""
         return A * (1.0 - math.exp(-max(0, x) / tau))
 
+    @staticmethod
+    def _smoothstep01(t):
+        """t∈[0,1] 매끈한 S곡선 — 물성 계단(anti-step) 방지."""
+        t = max(0.0, min(1.0, float(t)))
+        return t * t * (3.0 - 2.0 * t)
+
     # -----------------------------------------------------
     # 인장강도(MPa)
     # -----------------------------------------------------
     def predict_tensile_strength(self, comp, solidus, liquidus):
         try:
-            base = 34.0  # 순Sn 기준
+            # 문헌·내부실측 정렬 (SAC305 ~41–49 MPa, Sn0.7Cu ~31–39 MPa)
+            base = 29.0
             delta_t = max(0, liquidus - solidus)
             temp_factor = max(0, 8.0 - delta_t * 0.1)
 
+            ag = float(comp.get("Ag", 0) or 0.0)
+            bi = float(comp.get("Bi", 0) or 0.0)
+
             comp_factor = 0.0
-            comp_factor += self._sat(comp.get("Ag", 0),  A=20, tau=3)
-            comp_factor += self._sat(comp.get("Cu", 0),  A=25, tau=2)
-            comp_factor += self._sat(comp.get("Bi", 0),  A=80, tau=20)  # Bi 포화
+            comp_factor += self._sat(ag, A=15, tau=3.5)
+            comp_factor += self._sat(comp.get("Cu", 0), A=10, tau=2)
+            # SAC+Bi 저함량: Bi 1–3%에서 UTS 급상승 (실측·MDPI metals-12-01245)
+            if ag >= 0.5 and 0.0 < bi < 20.0:
+                comp_factor += self._sat(bi, A=42, tau=2.5)
+            elif bi >= 20.0:
+                comp_factor += self._sat(bi, A=80, tau=20)
+            elif bi > 0.0:
+                comp_factor += self._sat(bi, A=50, tau=15)
             comp_factor += self._sat(comp.get("Sb", 0),  A=35, tau=8)
             comp_factor += self._sat(comp.get("In", 0),  A=12, tau=10)
             comp_factor += self._sat(comp.get("Ni", 0),  A=15, tau=0.5)
@@ -95,14 +111,17 @@ class PropertyModels:
     def predict_shear_strength(self, comp, solidus, liquidus):
         try:
             tensile = self.predict_tensile_strength(comp, solidus, liquidus)
-            bi = comp.get("Bi", 0)
-            if bi >= 40:
-                # Sn-Bi계: 인장은 높지만 전단은 상대적으로 낮음
-                factor = 0.40
-            elif bi >= 5:
-                factor = 0.55
-            else:
-                factor = 1.55
+            bi = float(comp.get("Bi", 0) or 0.0)
+            if bi >= 40.0:
+                # Sn-Bi 고함량: 인장 대비 전단 비율 ≈0.30–0.40 (실측 Sn57Bi 등)
+                return tensile * 0.40
+            # Bi 미량(≥0.3%)부터 SAC+Bi·저Bi SAC에서 전단/인장 비가 급격히 하락
+            # (실측 Sn3Ag0.5Cu3Bi shear/tensile≈0.36, Sn4Ag0.5Cu2.5Bi≈0.30).
+            # 기존 bi≥5 hard step(×1.55→×0.55)은 0.1%p 변화로 ~70 MPa 전단 점프 유발.
+            w = self._smoothstep01((bi - 0.3) / 2.2)  # 0.3%→0, 2.5%→~1
+            factor_hi = 1.72  # 무 Bi SAC/SnCu (실측·DB shear/tensile≈1.7–1.8)
+            factor_lo = 0.34 + 0.06 * self._smoothstep01(bi / 30.0)
+            factor = factor_hi * (1.0 - w) + factor_lo * w
             return tensile * factor
         except:
             return 0.0

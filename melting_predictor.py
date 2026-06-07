@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "9"
+MELTING_ENGINE_VERSION = "10"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -265,6 +265,13 @@ def _classify(norm):
 
     non_sn_maj = max(bi, inp, pb, zn)   # 주요 저융점 원소
 
+    # SAC 모재(고-Sn, Ag+Cu, In 거의 없음)는 Bi를 첨가해도 SAC 경로가 정확하다.
+    # 이진 Sn-Bi 경로는 SAC+Bi 액상선을 ~25℃ 과대평가하고 Bi=5% 분류 경계에서 액상선이
+    # 불연속(점프)하므로(프로젝트 Anti-step 규칙 위반), In이 거의 없는(≤2%) SAC 모재는
+    # SnBi로 라우팅하지 않고 SAC로 유지한다.
+    # (In 동반 고-Bi(예 Bi10 In6, Bi14 In11)는 Sn-In 반응이 지배 → 기존대로 SnBi.)
+    sac_matrix_lowin = (sn >= 78 and ag > 0 and cu > 0 and inp <= 2.0 and zn <= 1.0)
+
     # Pb 1% 이상은 SnPb 경로(저-Pb Sn97.8Pb2.2 등 상용 커버리지). 1% 미만은 불순물 취급.
     if pb >= 1:
         return "SnPb"
@@ -273,7 +280,7 @@ def _classify(norm):
     # other+L4로 고상·액상이 과대(≈250℃+) 평가된다.
     # In 상한(과거 8%)는 Ag–Cu 저함량·고Bi–In(예 In 11, Bi 14)이 SAC·SnBi 모두 아니게
     # other→L4 단독 ~250℃ 과대평가되던 구간. SnBi L2+In 보정이 커버하므로 14%까지 완화.
-    if bi > 5 and pb == 0:
+    if bi > 5 and pb == 0 and not sac_matrix_lowin:
         if inp == 0:
             return "SnBi"
         if inp <= 14.0 and bi >= inp:
@@ -297,6 +304,10 @@ def _classify(norm):
     # - 저Ag·Cu 유지 + Bi≤12·In≤14·Bi<In 인 경우: SnBi(Bi≥In)에 안 걸려 other+L4(과대)로
     #   떨어지기 쉬움(예: Sn79 Ag1 Cu1 Bi8 In11). SAC 5원 보정이 더 물리적으로 일관.
     #   (고Bi+고In에서 Bi≥In 은 위 SnBi 분기가 우선.)
+    # In 거의 없는 SAC 모재는 Bi 12~18%까지도 SAC로 유지(Sn>=78 이 상한을 자연 한정).
+    # 그렇지 않으면 Bi 12~18 구간이 other→L4 로 떨어져 과대평가된다.
+    if sac_matrix_lowin and bi <= 18.0:
+        return "SAC"
     if sn >= 78 and ag > 0 and cu > 0 and bi <= 12.0 and inp <= 14.0:
         return "SAC"
     if sn > 80 and ag > 0 and cu == 0:
@@ -479,7 +490,11 @@ def _phase_diagram_predict(norm, family):
             # 저-Ag + Bi에서 Cu가 액상선을 약간 더 끌어올림 (Cu6Sn5 재용해 지연)
             if ag < 1.5 and cu > 0:
                 liq -= bi * 0.25 * min(1.0, cu / 0.7)
-            sol  = max(sol, 200.0)
+            # 고-Bi(>6%) SAC+Bi: 1차 용융 개시가 Sn-Bi 공정(~139℃) 쪽으로 부드럽게 하강한다.
+            # 하드 분류 전환(SnBi 경로) 없이 연속적으로 처리해 Bi=5% 경계 액상선 점프를 제거.
+            if bi > 6.0:
+                w = _smoothstep01((bi - 6.0) / 12.0)   # Bi 6→0, 18→1
+                sol = sol * (1.0 - 0.82 * w) + 139.0 * (0.82 * w)
             if inp > 0 and bi > 0:
                 liq -= min(float(bi), 5.0) * float(inp) * 0.022
 
@@ -496,6 +511,10 @@ def _phase_diagram_predict(norm, family):
         if sb > 0:
             liq += sb * 2.5
 
+        # Sn-Bi 공정 고상선(≈139℃) 아래로는 내려가지 않음
+        sol = max(sol, 139.0)
+        if liq < sol:
+            liq = sol + 1.0
         return sol, liq, 0.90
 
     # ── Sn-Ag 이원계 (± In, Bi 소량) ────────────────────────────────────────

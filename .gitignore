@@ -28,8 +28,12 @@ frontend/.eslintcache
 # 프로젝트 루트의 .cache/ai/*.json. 자동 재생성되며 TTL 30일.
 .cache/
 
+# 실수로 복사된 별도 프로젝트(저장소와 무관)
+VitalProgram-qa/
+
 # 로컬 디버그·Vite/npm 임시 로그(재생성 가능)
 build-*.log
+build-last.log
 try-vite-build.log
 vb.log
 vb2.log

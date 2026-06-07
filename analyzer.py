@@ -776,6 +776,35 @@ class AlloyAnalyzer:
                 props["tensile_strength_db_mpa"] = float(db_pred["tensile"])
             except Exception:
                 pass
+
+        # 문헌·업계 참고 인장 (비교 모드·근거 표시용)
+        strength_lit = None
+        try:
+            from .strength_literature_refs import nearest_strength_literature
+
+            strength_lit = nearest_strength_literature(norm)
+            if isinstance(strength_lit, dict) and strength_lit.get("tensile_mpa") is not None:
+                props["tensile_strength_lit_mpa"] = float(strength_lit["tensile_mpa"])
+                if strength_lit.get("tensile_range"):
+                    props["tensile_strength_lit_range_mpa"] = list(strength_lit["tensile_range"])
+                # DB가 멀 때만 문헌 참고치로 인장을 소폭 보정 (비교·신규 조성)
+                if db_w <= 0.1:
+                    try:
+                        d_lit = float(strength_lit.get("best_dist", 999.0))
+                        if d_lit <= 2.5:
+                            lit_w = min(0.25, 1.0 / (1.0 + d_lit / 1.2))
+                            tv = props.get("tensile_strength")
+                            lv = float(strength_lit["tensile_mpa"])
+                            if tv is not None and lit_w > 0.0:
+                                props["tensile_strength"] = float(tv) * (1.0 - lit_w) + lv * lit_w
+                                props["yield_strength"] = float(props["yield_strength"]) * (1.0 - lit_w) + lv * 0.78 * lit_w
+                                prop_sources["tensile_strength"] = f"LIT(blend,w={lit_w:.2f})"
+                                prop_sources["yield_strength"] = f"LIT(blend,w={lit_w:.2f})"
+                    except Exception:
+                        pass
+        except Exception:
+            strength_lit = None
+
         # Fill defaults
         for k in ("tensile_strength", "yield_strength", "elongation", "shear_strength", "wetting_score"):
             prop_sources.setdefault(k, "MODEL")
@@ -806,6 +835,13 @@ class AlloyAnalyzer:
 
             evidence = dict(evidence)
             evidence["standards_refs"] = list(IPC_JIS_SUMMARY_FOR_EVIDENCE)
+            if isinstance(strength_lit, dict) and strength_lit.get("refs"):
+                evidence["strength_literature"] = {
+                    "tensile_mpa": strength_lit.get("tensile_mpa"),
+                    "tensile_range": strength_lit.get("tensile_range"),
+                    "best_dist": strength_lit.get("best_dist"),
+                    "refs": strength_lit.get("refs", [])[:5],
+                }
         except Exception:
             pass
 

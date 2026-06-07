@@ -66,11 +66,12 @@ function Ensure-FrontendBuild {
     if (Test-Path $NodeDir) { $env:Path = "$NodeDir;$env:Path" }
     Push-Location $Fe
     & $Npm run build 2>&1 | ForEach-Object { Write-Host $_ }
-    $ok = (Test-Path (Join-Path $Dist "index.html"))
+    # $Dist is already .../frontend/dist/index.html (do not Join-Path index.html again)
+    $ok = Test-Path $Dist
     if (-not $ok) {
         Write-Host "[start_all] npm run build failed — trying esbuild fallback..."
         & (Join-Path $Root "scripts\build_frontend_esbuild.ps1")
-        $ok = (Test-Path (Join-Path $Dist "index.html"))
+        $ok = Test-Path $Dist
     }
     Pop-Location
     return $ok

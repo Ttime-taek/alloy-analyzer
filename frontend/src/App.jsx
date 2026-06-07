@@ -372,7 +372,7 @@ export default function App() {
   const [imcTalDeltaC, setImcTalDeltaC] = useState(3);
   const [imcTalSec, setImcTalSec] = useState(35);
   const analysisLogScrollRef = useRef(null);
-  /** 분석 완료 후 KPI 카드 그리드가 뷰포트 밖에 있을 때 스크롤 앵커 (DR-007) */
+  /** 단일 분석 완료 후 KPI 카드 스크롤 앵커 */
   const resultKpiScrollRef = useRef(null);
 
   const showMeltRecommendPanel =
@@ -939,6 +939,7 @@ export default function App() {
         setSectionOpen(reportMode === "lab" ? DEFAULT_SECTION_OPEN_LAB : DEFAULT_SECTION_OPEN);
       } else {
         setCompareResult(data);
+        setResultPanelOpen(true);
       }
       appendLog("분석 완료");
     } catch (e) {
@@ -1676,6 +1677,7 @@ export default function App() {
         <div className="app-main-grid">
           {/* 입력 패널 */}
           <div
+            className="compose-input-panel"
             style={{
               background: "var(--bg-page)",
               borderRadius: 12,
@@ -1924,7 +1926,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 총합 · 즐겨찾기 · 동기화 — 주기율표와 시각 구역 분리 */}
+            {/* 총합 · 즐겨찾기 — 단일 모드만 공통 영역 / 비교 모드는 각 열 내부 */}
             <div
               style={{
                 paddingBottom: 14,
@@ -1932,115 +1934,117 @@ export default function App() {
                 borderBottom: "1px solid var(--border-muted)"
               }}
             >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 8,
-                flexWrap: "wrap"
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: totalColor(totalA, compositionAHasInput)
-                }}
-              >
-                조성 A 총합: {totalA.toFixed(2)} %
-              </span>
-              {mode === "compare" && (
-                <span
+            {mode !== "compare" ? (
+              <>
+                <div
                   style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: totalColor(totalB, compositionBHasInput)
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                    flexWrap: "wrap"
                   }}
                 >
-                  조성 B 총합: {totalB.toFixed(2)} %
-                </span>
-              )}
-              <label style={{ fontSize: 13, color: "#9ca3af", marginLeft: "auto" }}>
-                <input
-                  type="checkbox"
-                  checked={showMetalsOnly}
-                  onChange={(e) => setShowMetalsOnly(e.target.checked)}
-                  style={{ marginRight: 4 }}
-                />
-                금속만 보기
-              </label>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 8,
-                flexWrap: "wrap"
-              }}
-            >
-              <TactileButton
-                onClick={saveFavoriteA}
-                style={{
-                  minHeight: 44,
-                  padding: "10px 12px",
-                  borderRadius: 6,
-                  border: "1px solid var(--accent)",
-                  background: "rgba(37, 99, 235, 0.35)",
-                  color: "var(--text-primary)",
-                  fontSize: 13,
-                  cursor: "pointer"
-                }}
-              >
-                조성 A 즐겨찾기 저장
-              </TactileButton>
-              {favorites.length > 0 && (
-                <>
-                  <span style={{ fontSize: 13, color: "#9ca3af" }}>
-                    {mode === "compare" ? "A 합금 불러오기" : "합금 불러오기"}
-                  </span>
-                  <select
-                    onChange={(e) => loadFavoriteToA(e.target.value)}
-                    value={selectedFavoriteName}
+                  <span
                     style={{
-                      background: "var(--bg-page)",
-                      color: "#e5e7eb",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-muted)",
                       fontSize: 13,
-                      padding: "3px 6px"
+                      fontWeight: 600,
+                      color: totalColor(totalA, compositionAHasInput)
                     }}
                   >
-                    <option value="" disabled>
-                      선택…
-                    </option>
-                    {favoritesSorted.map((f) => (
-                      <option key={f.name} value={f.name}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
+                    조성 A 총합: {totalA.toFixed(2)} %
+                  </span>
+                  <label style={{ fontSize: 13, color: "#9ca3af", marginLeft: "auto" }}>
+                    <input
+                      type="checkbox"
+                      checked={showMetalsOnly}
+                      onChange={(e) => setShowMetalsOnly(e.target.checked)}
+                      style={{ marginRight: 4 }}
+                    />
+                    금속만 보기
+                  </label>
+                </div>
+                <div className="compare-compose-fav-row" style={{ marginBottom: 8 }}>
                   <TactileButton
-                    onClick={deleteFavoriteA}
-                    disabled={!selectedFavoriteName}
+                    onClick={saveFavoriteA}
                     style={{
                       minHeight: 44,
                       padding: "10px 12px",
                       borderRadius: 6,
-                      border: "1px solid #7f1d1d",
-                      background: selectedFavoriteName ? "#7f1d1d" : "var(--border-muted)",
-                      color: "white",
+                      border: "1px solid var(--accent)",
+                      background: "rgba(37, 99, 235, 0.35)",
+                      color: "var(--text-primary)",
                       fontSize: 13,
-                      cursor: selectedFavoriteName ? "pointer" : "default"
+                      cursor: "pointer"
                     }}
                   >
-                    선택 삭제
+                    조성 A 즐겨찾기 저장
                   </TactileButton>
-                </>
-              )}
-            </div>
+                  {favorites.length > 0 && (
+                    <>
+                      <span style={{ fontSize: 13, color: "#9ca3af" }}>합금 불러오기</span>
+                      <select
+                        onChange={(e) => loadFavoriteToA(e.target.value)}
+                        value={selectedFavoriteName}
+                        style={{
+                          background: "var(--bg-page)",
+                          color: "#e5e7eb",
+                          borderRadius: 6,
+                          border: "1px solid var(--border-muted)",
+                          fontSize: 13,
+                          padding: "3px 6px"
+                        }}
+                      >
+                        <option value="" disabled>
+                          선택…
+                        </option>
+                        {favoritesSorted.map((f) => (
+                          <option key={f.name} value={f.name}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <TactileButton
+                        onClick={deleteFavoriteA}
+                        disabled={!selectedFavoriteName}
+                        style={{
+                          minHeight: 44,
+                          padding: "10px 12px",
+                          borderRadius: 6,
+                          border: "1px solid #7f1d1d",
+                          background: selectedFavoriteName ? "#7f1d1d" : "var(--border-muted)",
+                          color: "white",
+                          fontSize: 13,
+                          cursor: selectedFavoriteName ? "pointer" : "default"
+                        }}
+                      >
+                        선택 삭제
+                      </TactileButton>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                  flexWrap: "wrap"
+                }}
+              >
+                <label style={{ fontSize: 13, color: "#9ca3af", marginLeft: "auto" }}>
+                  <input
+                    type="checkbox"
+                    checked={showMetalsOnly}
+                    onChange={(e) => setShowMetalsOnly(e.target.checked)}
+                    style={{ marginRight: 4 }}
+                  />
+                  금속만 보기
+                </label>
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               {(favSyncStatus === "syncing" || favSyncStatus === "offline" || favSyncStatus === "error") && (
               <span style={{ fontSize: 13, color: favSyncColor }}>
@@ -2067,6 +2071,86 @@ export default function App() {
             </div>
             </div>
 
+            <div
+              className={mode === "compare" ? "compare-dual-compose" : undefined}
+              style={mode !== "compare" ? { display: "contents" } : undefined}
+            >
+            <div
+              className={mode === "compare" ? "compare-compose-col compare-compose-col--a" : undefined}
+              style={mode !== "compare" ? { display: "contents" } : undefined}
+            >
+            {mode === "compare" && (
+              <>
+                <div className="compare-compose-col-head" style={{ color: "#60a5fa" }}>
+                  조성 A
+                </div>
+                <div
+                  className="compare-compose-col-total"
+                  style={{ color: totalColor(totalA, compositionAHasInput) }}
+                >
+                  조성 A 총합: {totalA.toFixed(2)} %
+                </div>
+                <div className="compare-compose-fav-row">
+                  <TactileButton
+                    onClick={saveFavoriteA}
+                    style={{
+                      minHeight: 44,
+                      padding: "10px 12px",
+                      borderRadius: 6,
+                      border: "1px solid var(--accent)",
+                      background: "rgba(37, 99, 235, 0.35)",
+                      color: "var(--text-primary)",
+                      fontSize: 13,
+                      cursor: "pointer"
+                    }}
+                  >
+                    조성 A 즐겨찾기 저장
+                  </TactileButton>
+                  {favorites.length > 0 && (
+                    <>
+                      <span style={{ fontSize: 13, color: "#9ca3af" }}>A 합금 불러오기</span>
+                      <select
+                        onChange={(e) => loadFavoriteToA(e.target.value)}
+                        value={selectedFavoriteName}
+                        style={{
+                          background: "var(--bg-page)",
+                          color: "#e5e7eb",
+                          borderRadius: 6,
+                          border: "1px solid var(--border-muted)",
+                          fontSize: 13,
+                          padding: "3px 6px"
+                        }}
+                      >
+                        <option value="" disabled>
+                          선택…
+                        </option>
+                        {favoritesSorted.map((f) => (
+                          <option key={f.name} value={f.name}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <TactileButton
+                        onClick={deleteFavoriteA}
+                        disabled={!selectedFavoriteName}
+                        style={{
+                          minHeight: 44,
+                          padding: "10px 12px",
+                          borderRadius: 6,
+                          border: "1px solid #7f1d1d",
+                          background: selectedFavoriteName ? "#7f1d1d" : "var(--border-muted)",
+                          color: "white",
+                          fontSize: 13,
+                          cursor: selectedFavoriteName ? "pointer" : "default"
+                        }}
+                      >
+                        선택 삭제
+                      </TactileButton>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
             {/* 주기율표 스타일(솔더 관련 원소) 버튼 — narrow 뷰 터치 타겟은 index.css `.periodic-element-grid` */}
             <div className="periodic-element-grid-wrap">
             <div
@@ -2078,158 +2162,167 @@ export default function App() {
                 marginBottom: 10
               }}
             >
-              {elemList.map((el) => (
-                <button
-                  key={el}
-                  type="button"
-                  className="periodic-cell-btn"
-                  onClick={() => handleElemClick("A", el)}
-                  style={{
-                    minHeight: 44,
-                    padding: "8px 0",
-                    borderRadius: 6,
-                    border: comp[el]
-                      ? "1px solid rgba(96, 165, 250, 0.65)"
-                      : "1px solid var(--border-muted)",
-                    background: comp[el] ? "rgba(37, 99, 235, 0.12)" : "var(--bg-page)",
-                    color: "#e5e7eb",
-                    fontSize: 13,
-                    fontWeight: comp[el] ? 600 : 500,
-                    cursor: "pointer"
-                  }}
-                >
-                  <span className="tactile-hit-label">
-                    {el}
-                    {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-            </div>
-
-            <TactileButton
-              onClick={() => autoFillSn("A")}
-              title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
-              style={{
-                marginBottom: 8,
-                minHeight: 44,
-                padding: "10px 12px",
-                borderRadius: 6,
-                border: "1px solid #0f766e",
-                background: "#064e3b",
-                color: "white",
-                fontSize: 13,
-                cursor: "pointer"
-              }}
-            >
-              조성 A Sn 자동완성
-            </TactileButton>
-
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>조성 A</div>
-            <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
-              위 주기율표에서 원소를 클릭하거나, 아래에서 원소를 추가하면 입력란이 나타납니다.
-            </p>
-            <select
-              value={addPickA}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v) {
-                  addElemRowA(v);
-                  setAddPickA("");
-                }
-              }}
-              style={{
-                width: "100%",
-                marginBottom: 10,
-                background: "var(--bg-page)",
-                color: "#e5e7eb",
-                borderRadius: 6,
-                border: "1px solid var(--border-muted)",
-                fontSize: 13,
-                padding: "6px 8px"
-              }}
-            >
-              <option value="">원소 추가…</option>
-              {elemList
-                .filter((el) => !activeElemsA.includes(el))
-                .map((el) => (
-                  <option key={`add-a-${el}`} value={el}>
-                    {el}
-                  </option>
-                ))}
-            </select>
-            {activeElemsA.length === 0 ? (
-              <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
-            ) : (
-              activeElemsA.map((el) => (
-                <div
-                  key={el}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 8
-                  }}
-                >
-                  <label style={{ width: 44, flexShrink: 0 }}>{el}</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={comp[el] ?? ""}
-                    onChange={(e) => handleChange(el, e.target.value)}
+              {elemList.map((el) => {
+                const isActive = !!comp[el];
+                return (
+                  <button
+                    key={el}
+                    type="button"
+                    className={`periodic-cell-btn${isActive ? " is-active" : ""}`}
+                    onClick={() => handleElemClick("A", el)}
                     style={{
-                      flex: 1,
-                      background: "var(--bg-page)",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-muted)",
-                      padding: "6px 8px",
-                      color: "#e5e7eb"
-                    }}
-                  />
-                  <TactileButton
-                    onClick={() => removeElemRowA(el)}
-                    title="목록에서 제거"
-                    style={{
-                      flexShrink: 0,
                       minHeight: 44,
-                      padding: "10px 12px",
+                      padding: "8px 0",
                       borderRadius: 6,
-                      border: "1px solid #475569",
-                      background: "var(--border-default)",
+                      border: isActive
+                        ? undefined
+                        : "1px solid var(--border-muted)",
+                      background: isActive ? undefined : "var(--bg-page)",
                       color: "#e5e7eb",
                       fontSize: 13,
+                      fontWeight: isActive ? 600 : 500,
                       cursor: "pointer"
                     }}
                   >
-                    제거
-                  </TactileButton>
-                </div>
-              ))
-            )}
+                    <span className="tactile-hit-label">
+                      {el}
+                      {comp[el] ? `\n${Number(comp[el]).toFixed(1)}%` : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            </div>
 
+            <div className={mode === "compare" ? "compare-compose-sn-row" : undefined}>
+              <TactileButton
+                onClick={() => autoFillSn("A")}
+                title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
+                style={{
+                  marginBottom: 8,
+                  minHeight: 44,
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #0f766e",
+                  background: "#064e3b",
+                  color: "white",
+                  fontSize: 13,
+                  cursor: "pointer"
+                }}
+              >
+                조성 A Sn 자동완성
+              </TactileButton>
+            </div>
+
+            <div className={mode === "compare" ? "compare-compose-add-block" : undefined}>
+              {mode !== "compare" && <div style={{ fontWeight: 600, marginBottom: 4 }}>조성 A</div>}
+              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+                {mode === "compare"
+                  ? "주기율표 클릭 또는 아래에서 원소를 추가하면 조성 A 입력란이 생깁니다."
+                  : "위 주기율표에서 원소를 클릭하거나, 아래에서 원소를 추가하면 입력란이 나타납니다."}
+              </p>
+              <select
+                value={addPickA}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) {
+                    addElemRowA(v);
+                    setAddPickA("");
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  marginBottom: 10,
+                  background: "var(--bg-page)",
+                  color: "#e5e7eb",
+                  borderRadius: 6,
+                  border: "1px solid var(--border-muted)",
+                  fontSize: 13,
+                  padding: "6px 8px"
+                }}
+              >
+                <option value="">원소 추가…</option>
+                {elemList
+                  .filter((el) => !activeElemsA.includes(el))
+                  .map((el) => (
+                    <option key={`add-a-${el}`} value={el}>
+                      {el}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className={mode === "compare" ? "compare-compose-inputs" : undefined}>
+              {activeElemsA.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
+              ) : (
+                activeElemsA.map((el) => (
+                  <div
+                    key={el}
+                    className={mode === "compare" ? "compare-compose-input-row" : undefined}
+                    style={
+                      mode !== "compare"
+                        ? {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginBottom: 8
+                          }
+                        : undefined
+                    }
+                  >
+                    <label style={mode !== "compare" ? { width: 44, flexShrink: 0 } : undefined}>
+                      {el}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={comp[el] ?? ""}
+                      onChange={(e) => handleChange(el, e.target.value)}
+                      style={{
+                        flex: mode === "compare" ? undefined : 1,
+                        background: "var(--bg-page)",
+                        borderRadius: 6,
+                        border: "1px solid var(--border-muted)",
+                        padding: "6px 8px",
+                        color: "#e5e7eb",
+                        minWidth: mode === "compare" ? 0 : undefined
+                      }}
+                    />
+                    <TactileButton
+                      onClick={() => removeElemRowA(el)}
+                      title="목록에서 제거"
+                      style={{
+                        flexShrink: 0,
+                        minHeight: 44,
+                        padding: "10px 12px",
+                        borderRadius: 6,
+                        border: "1px solid #475569",
+                        background: "var(--border-default)",
+                        color: "#e5e7eb",
+                        fontSize: 13,
+                        cursor: "pointer"
+                      }}
+                    >
+                      제거
+                    </TactileButton>
+                  </div>
+                ))
+              )}
+            </div>
+
+            </div>
             {mode === "compare" && (
-              <>
-                <div
-                  style={{
-                    marginTop: 10,
-                    marginBottom: 4,
-                    borderTop: "1px solid var(--border-muted)",
-                    paddingTop: 8,
-                    fontWeight: 600
-                  }}
-                >
+              <div className="compare-compose-col compare-compose-col--b">
+                <div className="compare-compose-col-head" style={{ color: "#fb923c" }}>
                   조성 B
                 </div>
-
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 10,
-                    flexWrap: "wrap"
-                  }}
+                  className="compare-compose-col-total"
+                  style={{ color: totalColor(totalB, compositionBHasInput) }}
                 >
+                  조성 B 총합: {totalB.toFixed(2)} %
+                </div>
+                <div className="compare-compose-fav-row">
                   <TactileButton
                     onClick={saveFavoriteB}
                     style={{
@@ -2300,136 +2393,137 @@ export default function App() {
                     marginBottom: 10
                   }}
                 >
-                  {elemList.map((el) => (
-                    <button
-                      key={`B-btn-${el}`}
-                      type="button"
-                      className="periodic-cell-btn"
-                      onClick={() => handleElemClick("B", el)}
-                      style={{
-                        minHeight: 44,
-                        padding: "8px 0",
-                        borderRadius: 6,
-                        border: compB[el]
-                          ? "1px solid rgba(96, 165, 250, 0.65)"
-                          : "1px solid var(--border-muted)",
-                        background: compB[el] ? "rgba(37, 99, 235, 0.12)" : "var(--bg-page)",
-                        color: "#e5e7eb",
-                        fontSize: 13,
-                        fontWeight: compB[el] ? 600 : 500,
-                        cursor: "pointer"
-                      }}
-                    >
-                      <span className="tactile-hit-label">
-                        {el}
-                        {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                </div>
-
-                <TactileButton
-                  onClick={() => autoFillSn("B")}
-                  title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
-                  style={{
-                    marginBottom: 8,
-                    minHeight: 44,
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    border: "1px solid #0f766e",
-                    background: "#064e3b",
-                    color: "white",
-                    fontSize: 13,
-                    cursor: "pointer"
-                  }}
-                >
-                  조성 B Sn 자동완성
-                </TactileButton>
-                <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
-                  주기율표 클릭 또는 아래에서 원소를 추가하면 조성 B 입력란이 생깁니다.
-                </p>
-                <select
-                  value={addPickB}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v) {
-                      addElemRowB(v);
-                      setAddPickB("");
-                    }
-                  }}
-                  style={{
-                    width: "100%",
-                    marginBottom: 10,
-                    background: "var(--bg-page)",
-                    color: "#e5e7eb",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-muted)",
-                    fontSize: 13,
-                    padding: "6px 8px"
-                  }}
-                >
-                  <option value="">원소 추가…</option>
-                  {elemList
-                    .filter((el) => !activeElemsB.includes(el))
-                    .map((el) => (
-                      <option key={`add-b-${el}`} value={el}>
-                        {el}
-                      </option>
-                    ))}
-                </select>
-                {activeElemsB.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
-                    조성 B에 선택된 원소가 없습니다.
-                  </p>
-                ) : (
-                  activeElemsB.map((el) => (
-                    <div
-                      key={`B-${el}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 8
-                      }}
-                    >
-                      <label style={{ width: 44, flexShrink: 0 }}>{el}</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={compB[el] ?? ""}
-                        onChange={(e) => handleChangeB(el, e.target.value)}
+                  {elemList.map((el) => {
+                    const isActive = !!compB[el];
+                    return (
+                      <button
+                        key={`B-btn-${el}`}
+                        type="button"
+                        className={`periodic-cell-btn${isActive ? " is-active" : ""}`}
+                        onClick={() => handleElemClick("B", el)}
                         style={{
-                          flex: 1,
-                          background: "var(--bg-page)",
-                          borderRadius: 6,
-                          border: "1px solid var(--border-muted)",
-                          padding: "6px 8px",
-                          color: "#e5e7eb"
-                        }}
-                      />
-                      <TactileButton
-                        onClick={() => removeElemRowB(el)}
-                        title="목록에서 제거"
-                        style={{
-                          flexShrink: 0,
                           minHeight: 44,
-                          padding: "10px 12px",
+                          padding: "8px 0",
                           borderRadius: 6,
-                          border: "1px solid #475569",
-                          background: "var(--border-default)",
+                          border: isActive
+                            ? undefined
+                            : "1px solid var(--border-muted)",
+                          background: isActive ? undefined : "var(--bg-page)",
                           color: "#e5e7eb",
                           fontSize: 13,
+                          fontWeight: isActive ? 600 : 500,
                           cursor: "pointer"
                         }}
                       >
-                        제거
-                      </TactileButton>
-                    </div>
-                  ))
-                )}
-              </>
+                        <span className="tactile-hit-label">
+                          {el}
+                          {compB[el] ? `\n${Number(compB[el]).toFixed(1)}%` : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                </div>
+
+                <div className="compare-compose-sn-row">
+                  <TactileButton
+                    onClick={() => autoFillSn("B")}
+                    title="SAC(무연 솔더)에 맞춰 Sn·Ag·Cu 비율을 채웁니다. 필요 시 수동으로 조정하세요."
+                    style={{
+                      marginBottom: 8,
+                      minHeight: 44,
+                      padding: "10px 12px",
+                      borderRadius: 6,
+                      border: "1px solid #0f766e",
+                      background: "#064e3b",
+                      color: "white",
+                      fontSize: 13,
+                      cursor: "pointer"
+                    }}
+                  >
+                    조성 B Sn 자동완성
+                  </TactileButton>
+                </div>
+                <div className="compare-compose-add-block">
+                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+                    주기율표 클릭 또는 아래에서 원소를 추가하면 조성 B 입력란이 생깁니다.
+                  </p>
+                  <select
+                    value={addPickB}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) {
+                        addElemRowB(v);
+                        setAddPickB("");
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      marginBottom: 10,
+                      background: "var(--bg-page)",
+                      color: "#e5e7eb",
+                      borderRadius: 6,
+                      border: "1px solid var(--border-muted)",
+                      fontSize: 13,
+                      padding: "6px 8px"
+                    }}
+                  >
+                    <option value="">원소 추가…</option>
+                    {elemList
+                      .filter((el) => !activeElemsB.includes(el))
+                      .map((el) => (
+                        <option key={`add-b-${el}`} value={el}>
+                          {el}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="compare-compose-inputs">
+                  {activeElemsB.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+                      조성 B에 선택된 원소가 없습니다.
+                    </p>
+                  ) : (
+                    activeElemsB.map((el) => (
+                      <div key={`B-${el}`} className="compare-compose-input-row">
+                        <label>{el}</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={compB[el] ?? ""}
+                          onChange={(e) => handleChangeB(el, e.target.value)}
+                          style={{
+                            background: "var(--bg-page)",
+                            borderRadius: 6,
+                            border: "1px solid var(--border-muted)",
+                            padding: "6px 8px",
+                            color: "#e5e7eb"
+                          }}
+                        />
+                        <TactileButton
+                          onClick={() => removeElemRowB(el)}
+                          title="목록에서 제거"
+                          style={{
+                            flexShrink: 0,
+                            minHeight: 44,
+                            padding: "10px 12px",
+                            borderRadius: 6,
+                            border: "1px solid #475569",
+                            background: "var(--border-default)",
+                            color: "#e5e7eb",
+                            fontSize: 13,
+                            cursor: "pointer"
+                          }}
+                        >
+                          제거
+                        </TactileButton>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             )}
+            </div>
 
             <div style={{ marginTop: 12 }}>
               {analyzeBlockReason && !loading && (
@@ -2843,15 +2937,26 @@ export default function App() {
                 ) : null}
               </div>
             ) : null}
-            {loading && mode === "single" && !result && !compareResult && !showMeltRecommendPanel && (
-              <ResultAnalyzeSkeleton />
+            {loading && !result && !compareResult && !showMeltRecommendPanel && (
+              <ResultAnalyzeSkeleton compareMode={mode === "compare"} />
             )}
             {!result && !compareResult && !error && !showMeltRecommendPanel && !loading && (
               <div className="empty-state-guide">
-                <div style={{ fontSize: 32, opacity: 0.35 }}>⚗️</div>
+                <div className="empty-state-guide__icon" style={{ fontSize: 32, opacity: 0.8 }}>⚗️</div>
                 <p style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
-                  왼쪽에서 원소와 wt%를 입력한 뒤 <strong style={{ color: "#e5e7eb" }}>분석</strong>을 누르면
-                  융점·상·문헌·AI 요약이 여기 표시됩니다.
+                  {mode === "compare" ? (
+                    <>
+                      왼쪽에서 <strong style={{ color: "#60a5fa" }}>조성 A</strong>와{" "}
+                      <strong style={{ color: "#fb923c" }}>조성 B</strong>를 입력한 뒤{" "}
+                      <strong style={{ color: "#e5e7eb" }}>분석</strong>을 누르면 융점·물성 차이와
+                      IMC·위험도 비교가 여기 표시됩니다.
+                    </>
+                  ) : (
+                    <>
+                      왼쪽에서 원소와 wt%를 입력한 뒤 <strong style={{ color: "#e5e7eb" }}>분석</strong>을
+                      누르면 융점·상·문헌·AI 요약이 여기 표시됩니다.
+                    </>
+                  )}
                 </p>
               </div>
             )}
@@ -2861,7 +2966,9 @@ export default function App() {
               </p>
             )}
             {mode === "compare" && compareResult && !resultPanelOpen && (
-              <p style={{ color: "#64748b", marginTop: 6 }}>분석 결과가 접혀 있습니다. “분석 결과 펼치기”를 눌러 확인하세요.</p>
+              <p style={{ color: "#64748b", marginTop: 6 }}>
+                분석 결과가 접혀 있습니다. “분석 결과 펼치기”로 비교 표·IMC 요약을 확인하세요.
+              </p>
             )}
             {mode === "single" && result && !resultPanelOpen && (
               <p style={{ color: "#64748b", marginTop: 6 }}>
@@ -3106,6 +3213,37 @@ export default function App() {
                         {result.evidence.standards_refs.map((x, i) => (
                           <li key={i}>
                             {x.family} {x.id}: {x.note}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {Array.isArray(result.evidence?.strength_literature?.refs) &&
+                  result.evidence.strength_literature.refs.length > 0 ? (
+                    <div style={{ marginBottom: 14 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#94a3b8",
+                          marginBottom: 6
+                        }}
+                      >
+                        기계적 물성 문헌 참고
+                      </div>
+                      <ul
+                        style={{
+                          margin: 0,
+                          paddingLeft: 18,
+                          fontSize: 13,
+                          color: "var(--text-soft)",
+                          lineHeight: 1.5
+                        }}
+                      >
+                        {result.evidence.strength_literature.refs.map((x, i) => (
+                          <li key={i}>
+                            {x.alloy}: UTS≈{x.tensile_mpa} MPa — {x.source}
+                            {x.doi ? ` (DOI: ${x.doi})` : ""}
                           </li>
                         ))}
                       </ul>
@@ -3952,81 +4090,6 @@ function formatTensileDbMpa(props) {
 }
 
 function SummaryCard({ label, value, variant }) {
-  const gradients = {
-    solidus: {
-      background:
-        "linear-gradient(145deg, #172554 0%, #1e40af 42%, #3b82f6 100%)",
-      border: "1px solid rgba(147, 197, 253, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(37, 99, 235, 0.28)",
-      labelColor: "rgba(219, 234, 254, 0.92)",
-      valueColor: "#f8fafc"
-    },
-    liquidus: {
-      background:
-        "linear-gradient(145deg, #431407 0%, #b45309 48%, #f97316 100%)",
-      border: "1px solid rgba(253, 186, 116, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(234, 88, 12, 0.26)",
-      labelColor: "rgba(255, 237, 213, 0.95)",
-      valueColor: "#fffbeb"
-    },
-    peak: {
-      background:
-        "linear-gradient(145deg, #3b0764 0%, #7c3aed 50%, #c084fc 100%)",
-      border: "1px solid rgba(216, 180, 254, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(124, 58, 237, 0.28)",
-      labelColor: "rgba(237, 233, 254, 0.95)",
-      valueColor: "#faf5ff"
-    },
-    dbConfidence: {
-      background:
-        "linear-gradient(145deg, #064e3b 0%, #059669 52%, #34d399 100%)",
-      border: "1px solid rgba(110, 231, 183, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(16, 185, 129, 0.24)",
-      labelColor: "rgba(209, 250, 229, 0.95)",
-      valueColor: "#ecfdf5"
-    },
-    overallConfidence: {
-      background:
-        "linear-gradient(145deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)",
-      border: "1px solid rgba(94, 234, 212, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(13, 148, 136, 0.26)",
-      labelColor: "rgba(204, 251, 241, 0.95)",
-      valueColor: "#f0fdfa"
-    },
-    bestMatch: {
-      background:
-        "linear-gradient(145deg, #312e81 0%, #4f46e5 48%, #818cf8 100%)",
-      border: "1px solid rgba(165, 180, 252, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(79, 70, 229, 0.26)",
-      labelColor: "rgba(224, 231, 255, 0.95)",
-      valueColor: "#eef2ff"
-    },
-    wetting: {
-      background:
-        "linear-gradient(145deg, #0c4a6e 0%, #0369a1 48%, #38bdf8 100%)",
-      border: "1px solid rgba(125, 211, 252, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(14, 165, 233, 0.26)",
-      labelColor: "rgba(224, 242, 254, 0.95)",
-      valueColor: "#f0f9ff"
-    },
-    tensileDb: {
-      background:
-        "linear-gradient(145deg, #14532d 0%, #15803d 48%, #4ade80 100%)",
-      border: "1px solid rgba(134, 239, 172, 0.45)",
-      boxShadow:
-        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(22, 163, 74, 0.26)",
-      labelColor: "rgba(220, 252, 231, 0.95)",
-      valueColor: "#f0fdf4"
-    }
-  };
-  const g = variant && gradients[variant] ? gradients[variant] : null;
   const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
   const hintText =
     variant &&
@@ -4035,27 +4098,14 @@ function SummaryCard({ label, value, variant }) {
       ? SUMMARY_VARIANT_HINT[variant]
       : null;
   return (
-    <div
-      className="summary-card"
-      style={{
-        height: "100%",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        padding: 10,
-        borderRadius: 10,
-        border: g ? g.border : "1px solid var(--border-muted)",
-        background: g ? g.background : "var(--bg-table-head)",
-        boxShadow: g ? g.boxShadow : undefined
-      }}
-    >
+    <div className={`summary-card${variant ? ` summary-card--${variant}` : ""}`}>
       <div
         style={{
           fontSize: 13,
-          color: g ? g.labelColor : "#9ca3af",
+          color: "rgba(255, 255, 255, 0.7)",
           marginBottom: 4,
-          fontWeight: g ? 600 : 400,
-          letterSpacing: g ? 0.02 : undefined,
+          fontWeight: 600,
+          letterSpacing: 0.02,
           flexShrink: 0
         }}
       >
@@ -4074,10 +4124,10 @@ function SummaryCard({ label, value, variant }) {
           style={{
             fontSize: compactValue ? 18 : 16,
             fontWeight: 700,
-            color: g ? g.valueColor : undefined,
+            color: "#f8fafc",
             wordBreak: "break-word",
             lineHeight: compactValue ? 1.3 : 1.35,
-            textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
+            textShadow: "0 1px 2px rgba(0,0,0,0.25)",
             whiteSpace: variant === "wetting" ? "pre-line" : undefined
           }}
         >
@@ -4091,8 +4141,7 @@ function SummaryCard({ label, value, variant }) {
             marginTop: compactValue ? 6 : 8,
             lineHeight: compactValue ? 1.32 : 1.35,
             fontWeight: 400,
-            color: g ? g.labelColor : "#94a3b8",
-            opacity: compactValue ? 0.82 : g ? 0.88 : 0.95,
+            color: "rgba(255, 255, 255, 0.55)",
             flexShrink: 0
           }}
         >
@@ -4253,11 +4302,13 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
   );
 }
 
-function ResultAnalyzeSkeleton() {
+function ResultAnalyzeSkeleton({ compareMode = false }) {
   return (
     <div className="result-analyze-skeleton" role="status" aria-live="polite" aria-label="분석 중">
       <p style={{ margin: "0 0 12px 0", fontSize: 14, color: "#94a3b8" }}>
-        융점·상분석·문헌 요약을 계산하고 있습니다…
+        {compareMode
+          ? "조성 A·B 융점·물성·IMC를 비교 계산하고 있습니다…"
+          : "융점·상분석·문헌 요약을 계산하고 있습니다…"}
       </p>
       <div
         style={{
@@ -4329,6 +4380,7 @@ function ResultSummaryBlock({
       <div
         ref={kpiGridRef}
         id="results-kpi-strip"
+        className="result-fade-in"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))",
@@ -4593,6 +4645,276 @@ function buildCompareHints(a, b) {
   return hints.slice(0, 5);
 }
 
+function compareTempScale(a, b) {
+  const vals = [a?.solidus, a?.liquidus, a?.peak, b?.solidus, b?.liquidus, b?.peak]
+    .map((v) => Number(v))
+    .filter(Number.isFinite);
+  if (!vals.length) return { min: 200, max: 260 };
+  const rawMin = Math.min(...vals);
+  const rawMax = Math.max(...vals);
+  const pad = Math.max(6, (rawMax - rawMin) * 0.12);
+  const min = Math.floor(rawMin - pad);
+  const max = Math.ceil(rawMax + pad);
+  return { min, max: Math.max(min + 24, max) };
+}
+
+function compareDeltaTone(delta) {
+  if (delta == null || !Number.isFinite(delta)) return "flat";
+  if (Math.abs(delta) < 0.05) return "flat";
+  return delta > 0 ? "up" : "down";
+}
+
+function CompareTempBarChart({ a, b }) {
+  const width = 640;
+  const height = 232;
+  const padL = 54;
+  const padR = 14;
+  const padT = 18;
+  const padB = 48;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+  const { min, max } = compareTempScale(a, b);
+  const baseY = padT + plotH;
+
+  const mapY = (temp) => {
+    const n = Number(temp);
+    if (!Number.isFinite(n)) return null;
+    const span = max - min;
+    if (span <= 0) return padT;
+    return padT + plotH - ((n - min) / span) * plotH;
+  };
+
+  const categories = [
+    { id: "solidus", label: "고상선", va: a?.solidus, vb: b?.solidus },
+    { id: "liquidus", label: "액상선", va: a?.liquidus, vb: b?.liquidus },
+    { id: "peak", label: "피크", va: a?.peak, vb: b?.peak }
+  ];
+
+  const groupW = plotW / categories.length;
+  const barW = Math.min(26, groupW * 0.2);
+  const barGap = 5;
+  const yTicks = [min, min + (max - min) * 0.5, max].map((t) => Math.round(t));
+
+  const renderBar = (val, x, tone) => {
+    const yTop = mapY(val);
+    if (yTop == null) return null;
+    const h = Math.max(2, baseY - yTop);
+    const fill = tone === "a" ? "url(#compareBarGradA)" : "url(#compareBarGradB)";
+    const n = Number(val);
+    return (
+      <g key={`${tone}-${x}`}>
+        <rect
+          x={x}
+          y={yTop}
+          width={barW}
+          height={h}
+          rx={4}
+          fill={fill}
+          stroke={tone === "a" ? "rgba(96, 165, 250, 0.55)" : "rgba(251, 146, 60, 0.55)"}
+          strokeWidth={1}
+        />
+        <text
+          x={x + barW / 2}
+          y={yTop - 5}
+          textAnchor="middle"
+          fill="#e2e8f0"
+          fontSize={10}
+          fontFamily="inherit"
+          fontWeight={600}
+        >
+          {n.toFixed(1)}
+        </text>
+      </g>
+    );
+  };
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="compare-hero-chart"
+      role="img"
+      aria-label="조성 A·B 융점 막대 비교 그래프"
+    >
+      <defs>
+        <linearGradient id="compareBarGradA" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(96, 165, 250, 0.95)" />
+          <stop offset="100%" stopColor="rgba(37, 99, 235, 0.45)" />
+        </linearGradient>
+        <linearGradient id="compareBarGradB" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(251, 146, 60, 0.95)" />
+          <stop offset="100%" stopColor="rgba(234, 88, 12, 0.45)" />
+        </linearGradient>
+      </defs>
+
+      <rect
+        x={padL}
+        y={padT}
+        width={plotW}
+        height={plotH}
+        rx={6}
+        fill="rgba(2, 6, 23, 0.55)"
+        stroke="rgba(51, 65, 85, 0.75)"
+        strokeWidth={1}
+      />
+
+      {yTicks.map((tick) => {
+        const yy = mapY(tick);
+        if (yy == null) return null;
+        return (
+          <g key={tick}>
+            <line
+              x1={padL}
+              y1={yy}
+              x2={padL + plotW}
+              y2={yy}
+              stroke="rgba(51, 65, 85, 0.55)"
+              strokeWidth={1}
+              strokeDasharray={tick === min || tick === max ? undefined : "4 4"}
+            />
+            <text
+              x={padL - 8}
+              y={yy + 4}
+              textAnchor="end"
+              fill="#64748b"
+              fontSize={10}
+              fontFamily="inherit"
+            >
+              {tick}℃
+            </text>
+          </g>
+        );
+      })}
+
+      <line
+        x1={padL}
+        y1={baseY}
+        x2={padL + plotW}
+        y2={baseY}
+        stroke="#64748b"
+        strokeWidth={1.5}
+      />
+      <line x1={padL} y1={padT} x2={padL} y2={baseY} stroke="#64748b" strokeWidth={1.5} />
+
+      {categories.map((cat, i) => {
+        const cx = padL + groupW * i + groupW / 2;
+        const xA = cx - barW - barGap / 2;
+        const xB = cx + barGap / 2;
+        return (
+          <g key={cat.id}>
+            {renderBar(cat.va, xA, "a")}
+            {renderBar(cat.vb, xB, "b")}
+            <text
+              x={cx}
+              y={height - 18}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize={11}
+              fontFamily="inherit"
+              fontWeight={600}
+            >
+              {cat.label}
+            </text>
+          </g>
+        );
+      })}
+
+      <text
+        x={16}
+        y={padT + plotH / 2}
+        textAnchor="middle"
+        fill="#64748b"
+        fontSize={10}
+        fontFamily="inherit"
+        transform={`rotate(-90 16 ${padT + plotH / 2})`}
+      >
+        온도 (℃)
+      </text>
+
+      <g transform={`translate(${padL + plotW - 108}, ${padT + 6})`}>
+        <rect x={0} y={0} width={10} height={10} rx={2} fill="url(#compareBarGradA)" />
+        <text x={14} y={9} fill="#93c5fd" fontSize={10} fontFamily="inherit" fontWeight={600}>
+          A
+        </text>
+        <rect x={42} y={0} width={10} height={10} rx={2} fill="url(#compareBarGradB)" />
+        <text x={56} y={9} fill="#fdba74" fontSize={10} fontFamily="inherit" fontWeight={600}>
+          B
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+function CompareHeroPanel({ a, b, compA, compB }) {
+  const meltA =
+    Number.isFinite(Number(a?.liquidus)) && Number.isFinite(Number(a?.solidus))
+      ? Number(a.liquidus) - Number(a.solidus)
+      : null;
+  const meltB =
+    Number.isFinite(Number(b?.liquidus)) && Number.isFinite(Number(b?.solidus))
+      ? Number(b.liquidus) - Number(b.solidus)
+      : null;
+
+  const deltaSpecs = [
+    { label: "액상선", va: a?.liquidus, vb: b?.liquidus, unit: "℃" },
+    { label: "피크", va: a?.peak, vb: b?.peak, unit: "℃" },
+    { label: "용융 구간", va: meltA, vb: meltB, unit: "℃" }
+  ];
+
+  return (
+    <section className="compare-hero-panel result-fade-in" aria-label="비교 결과 시각 요약">
+      <h3 className="compare-hero-panel__title">비교 결과</h3>
+      <div className="compare-hero-chips">
+        <div className="compare-hero-chip">
+          <span className="compare-hero-chip__badge compare-hero-chip__badge--a">A</span>
+          <span className="compare-hero-chip__text" title="입력 wt%">
+            {formatCompareCompositionLabel(compA)}
+            {a?.name ? (
+              <span className="compare-hero-chip__db">DB 근접: {a.name}</span>
+            ) : null}
+          </span>
+        </div>
+        <div className="compare-hero-chip">
+          <span className="compare-hero-chip__badge compare-hero-chip__badge--b">B</span>
+          <span className="compare-hero-chip__text" title="입력 wt%">
+            {formatCompareCompositionLabel(compB)}
+            {b?.name ? (
+              <span className="compare-hero-chip__db">DB 근접: {b.name}</span>
+            ) : null}
+          </span>
+        </div>
+      </div>
+
+      <div className="compare-hero-chart-wrap">
+        <CompareTempBarChart a={a} b={b} />
+      </div>
+
+      <div className="compare-hero-deltas">
+        {deltaSpecs.map(({ label, va, vb, unit }) => {
+          const na = Number(va);
+          const nb = Number(vb);
+          const delta = Number.isFinite(na) && Number.isFinite(nb) ? nb - na : null;
+          const tone = compareDeltaTone(delta);
+          return (
+            <span
+              key={label}
+              className={`compare-hero-delta compare-hero-delta--${tone}`}
+              title="B − A (기준: 조성 A)"
+            >
+              <span className="compare-hero-delta__label">{label}</span>
+              <span>
+                {delta == null ? "—" : fmtDelta(na, nb, unit)}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      <p className="compare-hero-footnote">
+        막대 그래프는 고상선·액상선·피크(℃)를 A·B로 나란히 비교합니다. 아래 표에서 물성·젖음 수치를 확인하세요.
+      </p>
+    </section>
+  );
+}
+
 function CompareView({ data, compA, compB }) {
   const { a, b } = data;
   const sumA = compareCompSumPct(compA);
@@ -4675,52 +4997,7 @@ function CompareView({ data, compA, compB }) {
       >
         <AiSessionUsageRow usage={data?.ai_usage_snapshot} />
       </div>
-      <div style={{ marginBottom: 10 }}>
-        <div
-          style={{
-            fontSize: 15,
-            fontWeight: 600,
-            marginBottom: 8,
-            whiteSpace: "nowrap",
-            lineHeight: 1.3
-          }}
-        >
-          비교 결과
-        </div>
-        <div
-          style={{
-            fontSize: 13,
-            color: "#9ca3af",
-            lineHeight: 1.55,
-            wordBreak: "keep-all",
-            overflowWrap: "anywhere",
-            maxWidth: "100%"
-          }}
-        >
-          <div
-            title="왼쪽에 입력한 wt% (DB 최근접 합금명과 다를 수 있음)"
-            style={{ marginBottom: 4 }}
-          >
-            <span style={{ color: "#60a5fa", fontWeight: 600 }}>A</span>
-            {": "}
-            {formatCompareCompositionLabel(compA)}
-          </div>
-          <div style={{ marginBottom: 4 }}>
-            <span style={{ color: "#fb923c", fontWeight: 600 }}>B</span>
-            {": "}
-            {formatCompareCompositionLabel(compB)}
-          </div>
-          {(a?.name || b?.name) && (
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
-              DB 근접명: {a?.name || "—"} · {b?.name || "—"}
-            </div>
-          )}
-          <div style={{ fontSize: 12, color: "#64748b" }}>
-            온도·수치 차이 열은 <strong style={{ color: "#94a3b8" }}>B − A</strong> (기준: 조성{" "}
-            <strong style={{ color: "#60a5fa" }}>A</strong>)
-          </div>
-        </div>
-      </div>
+      <CompareHeroPanel a={a} b={b} compA={compA} compB={compB} />
 
       {(warnA || warnB) && (
         <div
@@ -4906,7 +5183,6 @@ function CompareView({ data, compA, compB }) {
         />
       </div>
 
-      {/* 간단한 시각적 비교 바 */}
       <PropertyBars a={a} b={b} />
     </div>
   );
@@ -4926,7 +5202,8 @@ function PropertyBars({ a, b }) {
     { key: "yield_strength", label: "항복강도 (MPa)" },
     { key: "elongation", label: "연신율 (%)" },
     { key: "wetting_fmax_pred_mn", label: "Fmax (mN)" },
-    { key: "tensile_strength_db_mpa", label: "물성 DB 인장 (MPa)" }
+    { key: "tensile_strength_db_mpa", label: "물성 DB 인장 (MPa)" },
+    { key: "tensile_strength_lit_mpa", label: "문헌 참고 인장 (MPa)" }
   ];
 
   const trackStyle = {
