@@ -664,7 +664,8 @@ summary:focus-visible,
 /* 메인 2컬럼: 좁은 화면에서 한 열로 — 열 간격 소폭 확대로 밀도 완화 */
 .app-main-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  /* min 480px: 1440px 뷰에서 3열 쪼개짐 방지 → 비교 A/B 2열 container query 동작 */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
   gap: 28px;
   align-items: start;
 }
@@ -1747,7 +1748,8 @@ summary:focus-visible,
   min-width: 0;
 }
 
-@container compose-panel (min-width: 600px) {
+/* 1440px 3열 그리드에서도 좌측 패널(~420px+)에서 A/B 나란히 */
+@container compose-panel (min-width: 400px) {
   /* 행 단위 subgrid: 헤더·총합·즐겨찾기·주기율표 등 각 줄이 A/B에서 수평 정렬 */
   .compare-dual-compose {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
