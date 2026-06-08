@@ -366,6 +366,8 @@ export default function App() {
   const [meltRecResult, setMeltRecResult] = useState(null);
   /** idle | checking | yes | no — about+OpenAPI로 POST /api/recommend_melt 지원 여부 */
   const [meltSupport, setMeltSupport] = useState("idle");
+  /** 비교 모드에서는 조성 A/B가 먼저 보이도록 기본 접음 */
+  const [meltSearchOpen, setMeltSearchOpen] = useState(true);
   const [imcSubstrate, setImcSubstrate] = useState("Cu-OSP");
   const [imcTalMode, setImcTalMode] = useState("auto");
   const [imcTalRef, setImcTalRef] = useState("liq");
@@ -419,6 +421,10 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (mode === "compare") setMeltSearchOpen(false);
+  }, [mode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1686,7 +1692,12 @@ export default function App() {
               minWidth: 0
             }}
           >
-            <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 10 }}>목표 융점 탐색 (℃)</h2>
+            <CollapsibleSection
+              title="목표 융점 탐색 (℃)"
+              open={meltSearchOpen}
+              onToggle={() => setMeltSearchOpen((v) => !v)}
+              rightHint={mode === "compare" ? "선택" : ""}
+            >
             <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
               기본은 데이터시트에 흔한 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
               <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi</strong> 격자를 스윕하고 나머지는{" "}
@@ -1823,6 +1834,7 @@ export default function App() {
                 </div>
               ) : null}
             </div>
+            </CollapsibleSection>
 
             <h2 style={{ fontSize: 18, marginBottom: 12 }}>조성 입력 (wt%)</h2>
 
@@ -1865,7 +1877,7 @@ export default function App() {
               <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
                 {mode === "single"
                   ? "조성 A만 입력 후 분석을 실행합니다."
-                  : "조성 A와 B 두 개를 입력한 뒤 비교 분석을 실행합니다."}
+                  : "조성 A·B 입력 후 분석을 실행합니다."}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
                 <span style={{ fontSize: 13, color: "#9ca3af" }}>문헌 검색:</span>
