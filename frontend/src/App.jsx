@@ -4031,11 +4031,14 @@ function SmallToggleButton({ active, onClick, label }) {
         padding: "10px 12px",
         borderRadius: 999,
         border: active ? "1px solid var(--accent)" : "1px solid var(--border-muted)",
-        background: active ? "rgba(37,99,235,0.3)" : "var(--bg-page)",
+        background: active ? "rgba(37,99,235,0.3)" : "var(--bg-elevated)",
         color: active ? "var(--text-primary)" : "var(--text-secondary)",
         fontSize: 13,
         fontWeight: active ? 600 : 500,
-        boxShadow: active ? "0 0 0 1px rgba(96, 165, 250, 0.18)" : "none",
+        boxShadow: active
+          ? "0 0 0 1px rgba(96, 165, 250, 0.18)"
+          : "inset 0 0 0 1px var(--border-muted)",
+        minWidth: 52,
         cursor: "pointer"
       }}
     >
