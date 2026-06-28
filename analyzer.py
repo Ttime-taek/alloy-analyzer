@@ -38,6 +38,27 @@ def cached_distance(a_tuple, b_tuple):
     return composition_distance(a, b)
 
 
+def _property_db_weight(best_dist):
+    """
+    물성 DB 가중치.
+
+    가까운 DB는 더 강하게 신뢰하고, 1 wt% 이내는 사실상 DB 우선으로 둔다.
+    """
+    if best_dist is None:
+        return 0.0
+    try:
+        d0 = float(best_dist)
+    except Exception:
+        return 0.0
+    if d0 <= 1.0:
+        return 1.0
+    if d0 <= 2.0:
+        return max(0.0, min(0.95, 1.0 / (1.0 + d0 / 1.4)))
+    if d0 <= 3.0:
+        return max(0.0, min(0.80, 1.0 / (1.0 + d0 / 2.4)))
+    return 0.0
+
+
 def _imc_line_to_plain_korean(s: str) -> str:
     """IMC 한 줄을 비전문가용 표현으로 통일(이미 쉬운 문장이면 유지)."""
     t = str(s).strip()
@@ -290,16 +311,10 @@ class AlloyAnalyzer:
             db_best_dist = None
         use_db = (db_best_dist is not None) and (db_best_dist <= 3.0)
         db_exact_hit = (db_best_dist is not None) and (db_best_dist <= _DB_EXACT_EPS)
-        try:
-            d0 = float(db_best_dist) if db_best_dist is not None else 9999.0
-            db_w = 1.0 / (1.0 + d0 / 2.0)
-        except Exception:
-            db_w = 0.0
+        db_w = _property_db_weight(db_best_dist)
         if db_exact_hit:
             # 실측 DB와 사실상 동일한 조성은 모델 블렌드 없이 DB 값을 그대로 우선한다.
             db_w = 1.0
-        else:
-            db_w = max(0.0, min(0.85, float(db_w))) if use_db else 0.0
 
         ps = dict(prop_sources) if isinstance(prop_sources, dict) else {}
         return {
@@ -363,9 +378,7 @@ class AlloyAnalyzer:
                     db_w = 1.0 / (1.0 + d0 / 2.0)
                 except Exception:
                     db_w = 0.0
-                db_w = max(0.0, min(0.85, float(db_w)))
-            else:
-                db_w = 0.0
+                db_w = _property_db_weight(db_best_dist)
         else:
             db_pred = predict_from_db(norm)
             if not db_pred:
@@ -775,14 +788,12 @@ class AlloyAnalyzer:
 
         # Only trust properties DB when it's truly close.
         # (Loose thresholds tend to over-fit/over-match across alloy families, especially Bi / Cu-free cases.)
-        use_db = (db_best_dist is not None) and (db_best_dist <= 3.0)
         try:
-            d0 = float(db_best_dist) if db_best_dist is not None else 9999.0
-            db_w = 1.0 / (1.0 + d0 / 2.0)
+            db_w = _property_db_weight(db_best_dist)
         except Exception:
             db_w = 0.0
-        db_w = max(0.0, min(0.85, float(db_w))) if use_db else 0.0
         mdl_w = 1.0 - db_w
+        db_exact_hit = (db_best_dist is not None) and (float(db_best_dist) <= _DB_EXACT_EPS)
 
         if db_pred and db_w > 0.0:
             def _blend(key_out, key_db):
@@ -858,7 +869,7 @@ class AlloyAnalyzer:
             shear_idw = None
             if isinstance(shear_idw_detail, dict):
                 shear_idw = shear_idw_detail.get("value")
-            if shear_idw is not None:
+            if shear_idw is not None and db_w > 0.0:
                 try:
                     props["shear_strength"] = float(shear_idw)
                     d_s = shear_idw_detail.get("best_dist")
@@ -869,11 +880,11 @@ class AlloyAnalyzer:
                     )
                     props["shear_strength_basis"] = "db_idw"
                 except Exception:
-                    props.pop("shear_strength", None)
-            else:
-                props.pop("shear_strength", None)
+                    pass
         elif prop_sources.get("shear_strength", "").startswith("DB(blend"):
             props["shear_strength_basis"] = "db_blend"
+        if str(prop_sources.get("yield_strength", "")).startswith("DB(blend"):
+            props["yield_strength_basis"] = "db_blend"
 
         # 인장: 근접 블렌드·문헌 소폭 보정 없으면 MODEL 대신 BD IDW(또는 문헌) 표시
         if prop_sources.get("tensile_strength") == "MODEL":
@@ -885,7 +896,7 @@ class AlloyAnalyzer:
                 pass
             tv = props.get("tensile_strength_db_mpa")
             lv = props.get("tensile_strength_lit_mpa")
-            if tv is not None:
+            if tv is not None and db_w > 0.0:
                 try:
                     props["tensile_strength"] = float(tv)
                     props["tensile_strength_basis"] = "db_idw"
@@ -906,6 +917,21 @@ class AlloyAnalyzer:
             props["tensile_strength_basis"] = "db_blend"
         elif str(prop_sources.get("tensile_strength", "")).startswith("LIT"):
             props["tensile_strength_basis"] = "lit_blend"
+
+        # 최종 물리 제약: 항복강도는 인장강도를 넘지 않도록 정렬.
+        try:
+            tensile_val = props.get("tensile_strength")
+            yield_val = props.get("yield_strength")
+            if tensile_val is not None and yield_val is not None:
+                tensile_f = float(tensile_val)
+                yield_f = float(yield_val)
+                if yield_f > tensile_f:
+                    props["yield_strength"] = max(0.0, tensile_f * 0.98)
+                    props["yield_strength_basis"] = "clamped_to_tensile"
+                    if prop_sources.get("yield_strength", "MODEL") == "MODEL":
+                        prop_sources["yield_strength"] = "CLAMP(tensile)"
+        except Exception:
+            pass
 
         # Evidence/provenance for transparency in UI
         md = melting_detail if isinstance(melting_detail, dict) else {}

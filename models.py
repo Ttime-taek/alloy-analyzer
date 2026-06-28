@@ -70,7 +70,12 @@ class PropertyModels:
                 # Sn-rich SAC+Bi(12–35%): Sn57Bi 저Sn 곡선(A=80)과 분리 — Sn1Ag25Bi0.7Cu 등
                 comp_factor += self._sat(max(0.0, bi - 8.0), A=36, tau=11)
             elif bi >= 20.0:
-                comp_factor += self._sat(bi, A=80, tau=20)
+                # Ag가 거의 없는 순수 Sn-Bi는 내부 DB 평균이 더 낮아
+                # 고Bi(Ag-rich)와 같은 강한 A=80 곡선을 쓰면 과대가 된다.
+                if ag >= 0.3:
+                    comp_factor += self._sat(bi, A=80, tau=20)
+                else:
+                    comp_factor += self._sat(bi, A=52, tau=16)
             elif ag >= 0.5 and 0.0 < bi < 12.0:
                 comp_factor += self._sat(bi, A=42, tau=2.5)
             elif bi > 0.0:

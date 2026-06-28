@@ -178,6 +178,24 @@ def predict_shear_from_db(input_comp, max_dist=_SHEAR_IDW_MAX_DIST):
     if not by_name:
         return None
 
+    exact = [v for v in by_name.values() if float(v["dist"]) <= 1e-4]
+    if exact:
+        weighted_values = []
+        weights = []
+        for item in exact:
+            stats = get_statistics(item["alloy"])
+            if not stats or not stats.get("shear"):
+                continue
+            mean = float(stats["shear"]["mean"])
+            n = int(stats["shear"]["n"] or 1)
+            w = _shear_family_weight(input_comp, item["comp"], 0.0) * n
+            if w <= 0.0:
+                continue
+            weighted_values.append(mean * w)
+            weights.append(w)
+        if weights:
+            return sum(weighted_values) / sum(weights)
+
     best_dist = min(v["dist"] for v in by_name.values())
     if best_dist > float(max_dist):
         return None
@@ -268,12 +286,14 @@ def predict_from_db(input_comp):
 
     predictions = {}
     props = ["tensile", "yield_strength", "elongation", "shear"]
+    exact = [item for item in candidates if item[1] <= 1e-4]
+    effective_top = exact[:5] if exact else top
 
     for p in props:
         weighted_values = []
         weights = []
 
-        for alloy_name, dist in top:
+        for alloy_name, dist in effective_top:
             stats = get_statistics(alloy_name)
             if not stats or not stats[p]:
                 continue
