@@ -82,7 +82,11 @@ function Test-ApiReady {
         $spec = (Invoke-WebRequest -Uri "http://127.0.0.1:8000/openapi.json" -UseBasicParsing -TimeoutSec 4).Content | ConvertFrom-Json
         if ($spec.paths.PSObject.Properties.Name -notcontains "/api/recommend_melt") { return $false }
         $about = (Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/about" -UseBasicParsing -TimeoutSec 4).Content | ConvertFrom-Json
-        return ($about.api_features.recommend_melt -eq $true)
+        $feat = $about.api_features
+        return (
+            $feat.recommend_melt -eq $true -and
+            $feat.compare_shared_wetting -eq $true
+        )
     } catch { return $false }
 }
 

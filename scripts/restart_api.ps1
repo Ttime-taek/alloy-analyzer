@@ -14,7 +14,11 @@ function Test-ApiReady {
         $paths = $spec.paths.PSObject.Properties.Name
         if ($paths -notcontains "/api/recommend_melt") { return $false }
         $about = (Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/about" -UseBasicParsing -TimeoutSec 4).Content | ConvertFrom-Json
-        return ($about.api_features.recommend_melt -eq $true)
+        $feat = $about.api_features
+        return (
+            $feat.recommend_melt -eq $true -and
+            $feat.compare_shared_wetting -eq $true
+        )
     } catch { return $false }
 }
 
@@ -51,7 +55,7 @@ for ($i = 0; $i -lt 40; $i++) {
         exit 1
     }
     if (Test-ApiReady) {
-        Write-Host "[restart_api] OK — http://127.0.0.1:8000/ (recommend_melt registered)"
+        Write-Host "[restart_api] OK — http://127.0.0.1:8000/ (compare_shared_wetting registered)"
         Write-Host "Refresh http://localhost:8000/"
         exit 0
     }

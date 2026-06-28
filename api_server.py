@@ -341,7 +341,7 @@ class CompareRequest(BaseModel):
     comp_b: Dict[str, float]
     wetting_temp_c: float | None = Field(
         default=None,
-        description="젖음 대표 온도(℃). 생략 시 액상선+30℃ 기반 측정 DB 온도에 맞춤.",
+        description="젖음 대표 온도(℃). 생략 시 A·B 공통: 각 액상선+30℃ 스냅값 중 더 높은 BD 격자 온도.",
     )
     include_wetting_grid: bool = Field(
         default=False,
@@ -1093,18 +1093,23 @@ async def compare(req: CompareRequest) -> CompareResponse:
         raise HTTPException(status_code=422, detail=str(e)) from e
     try:
         lm = req.literature_mode or "fast"
+        wet_t, wet_basis = _analyzer.compare_wetting_temp_c(
+            req.comp_a, req.comp_b, req.wetting_temp_c
+        )
         ra = _analyzer.analyze_all(
             req.comp_a,
             mode="eng",
             literature_mode=lm,
-            wetting_temp_c=req.wetting_temp_c,
+            wetting_temp_c=wet_t,
+            wetting_temp_basis=wet_basis,
             include_wetting_grid=bool(req.include_wetting_grid),
         )
         rb = _analyzer.analyze_all(
             req.comp_b,
             mode="eng",
             literature_mode=lm,
-            wetting_temp_c=req.wetting_temp_c,
+            wetting_temp_c=wet_t,
+            wetting_temp_basis=wet_basis,
             include_wetting_grid=bool(req.include_wetting_grid),
         )
     except ValueError as e:

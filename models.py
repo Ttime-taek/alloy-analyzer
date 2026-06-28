@@ -21,6 +21,12 @@ def default_wetting_temp_c(liquidus: float) -> float:
     """기본: 액상선+30℃를 측정 DB 온도 축(250–290℃)에 맞춤."""
     return snap_wetting_temp_to_bd_grid(float(liquidus or 0.0) + 30.0)
 
+
+def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> float:
+    """비교 모드 자동: 더 높은 액상선+30℃ 목표를 BD 격자(250–290℃)에 한 번 스냅해 A·B 공통 온도로 사용."""
+    hi_liq = max(float(liquidus_a or 0.0), float(liquidus_b or 0.0))
+    return snap_wetting_temp_to_bd_grid(hi_liq + 30.0)
+
 class PropertyModels:
 
     def __init__(self):
@@ -54,15 +60,19 @@ class PropertyModels:
 
             ag = float(comp.get("Ag", 0) or 0.0)
             bi = float(comp.get("Bi", 0) or 0.0)
+            sn = float(comp.get("Sn", 0) or 0.0)
 
             comp_factor = 0.0
             comp_factor += self._sat(ag, A=15, tau=3.5)
             comp_factor += self._sat(comp.get("Cu", 0), A=10, tau=2)
             # SAC+Bi 저함량: Bi 1–3%에서 UTS 급상승 (실측·MDPI metals-12-01245)
-            if ag >= 0.5 and 0.0 < bi < 20.0:
-                comp_factor += self._sat(bi, A=42, tau=2.5)
+            if sn >= 50.0 and bi >= 12.0:
+                # Sn-rich SAC+Bi(12–35%): Sn57Bi 저Sn 곡선(A=80)과 분리 — Sn1Ag25Bi0.7Cu 등
+                comp_factor += self._sat(max(0.0, bi - 8.0), A=36, tau=11)
             elif bi >= 20.0:
                 comp_factor += self._sat(bi, A=80, tau=20)
+            elif ag >= 0.5 and 0.0 < bi < 12.0:
+                comp_factor += self._sat(bi, A=42, tau=2.5)
             elif bi > 0.0:
                 comp_factor += self._sat(bi, A=50, tau=15)
             comp_factor += self._sat(comp.get("Sb", 0),  A=35, tau=8)
@@ -298,7 +308,9 @@ class PropertyModels:
                 continue
         return rows
 
-    def _predict_wetting_details(self, comp, solidus, liquidus, peak=None, wetting_temp_c=None):
+    def _predict_wetting_details(
+        self, comp, solidus, liquidus, peak=None, wetting_temp_c=None, wetting_temp_basis=None
+    ):
         """
         대표 젖음 행( fMAX / T0 / 점수 ).
         - wetting_temp_c 가 있으면: 해당 값을 측정 DB 온도(250–290℃)에 맞춤.
@@ -309,7 +321,7 @@ class PropertyModels:
         liq = float(liquidus or 0.0)
         if wetting_temp_c is not None:
             t_test = snap_wetting_temp_to_bd_grid(float(wetting_temp_c))
-            basis = "user"
+            basis = wetting_temp_basis or "user"
             target_for_ui = float(wetting_temp_c)
         else:
             t_test = default_wetting_temp_c(liq)
@@ -346,6 +358,7 @@ class PropertyModels:
         liquidus=None,
         peak=None,
         wetting_temp_c=None,
+        wetting_temp_basis=None,
         include_wetting_grid=False,
     ):
         s = solidus  if solidus  is not None else 0
@@ -366,7 +379,9 @@ class PropertyModels:
         wet_details = None
         wetting_by_temp = []
         try:
-            wet_details = self._predict_wetting_details(comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c)
+            wet_details = self._predict_wetting_details(
+                comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c, wetting_temp_basis=wetting_temp_basis
+            )
             wet = float(wet_details.get("wetting_score", 0.0) or 0.0)
             if include_wetting_grid:
                 try:

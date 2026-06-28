@@ -3,6 +3,7 @@ $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Fe = Join-Path $Root "frontend"
 $Esbuild = Join-Path $Fe "node_modules\@esbuild\win32-x64\esbuild.exe"
+$VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 
 Write-Host "========== Alloy stack diagnostic =========="
 Write-Host "Root: $Root"
@@ -40,15 +41,70 @@ Write-Host "`n--- HTTP ---"
     "http://localhost:8000/"
 ) | ForEach-Object { Write-Host "  $_ -> $(Test-Http $_)" }
 
+Write-Host "`n--- API features ---"
+try {
+    $about = (Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/about" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
+    $feat = $about.api_features
+    Write-Host "  recommend_melt: $($feat.recommend_melt)"
+    Write-Host "  compare_shared_wetting: $($feat.compare_shared_wetting)"
+    if ($feat.compare_shared_wetting -ne $true) {
+        Write-Host "  WARN: stale API — restart start_all.bat (compare wetting uses old per-alloy logic)"
+    }
+} catch {
+    Write-Host "  FAIL: cannot read /api/about"
+}
+
+Write-Host "`n--- Python test env ---"
+try {
+    $pyVer = & py -3 -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>&1
+    Write-Host "  py -3: $($pyVer -join ' | ')"
+} catch {
+    Write-Host "  py -3: FAIL $($_.Exception.Message)"
+}
+try {
+    $pytestVer = & py -3 -c "import pytest; print(pytest.__version__)" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  py -3 pytest: OK $pytestVer"
+    } else {
+        Write-Host "  py -3 pytest: MISSING/blocked ($($pytestVer -join ' '))"
+    }
+} catch {
+    Write-Host "  py -3 pytest: FAIL $($_.Exception.Message)"
+}
+if (Test-Path $VenvPython) {
+    try {
+        $venvPytest = & $VenvPython -c "import sys, pytest; print(sys.executable); print(pytest.__version__)" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  .venv pytest: OK $($venvPytest -join ' | ')"
+        } else {
+            Write-Host "  .venv pytest: MISSING/blocked ($($venvPytest -join ' '))"
+        }
+    } catch {
+        Write-Host "  .venv pytest: FAIL $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "  .venv: missing (run scripts\setup_dev_env.ps1)"
+}
+
 Write-Host "`n--- frontend build deps ---"
 @(
     "vite\dist\node\cli.js",
     "caniuse-lite\dist\lib\supported.js",
     "@esbuild\win32-x64\esbuild.exe",
-    "@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node"
+    "@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node",
+    ".bin\vitest.cmd"
 ) | ForEach-Object {
     $ok = Test-Path (Join-Path $Fe "node_modules\$_")
     Write-Host "  $_ : $(if($ok){'OK'}else{'MISSING'})"
+}
+
+Write-Host "`n--- npm cache ---"
+try {
+    $npmCache = & npm config get cache 2>&1
+    Write-Host "  npm cache: $npmCache"
+    Write-Host "  repo cache: $(Join-Path $Root '.cache\npm')"
+} catch {
+    Write-Host "  npm cache: FAIL $($_.Exception.Message)"
 }
 
 Write-Host "`n--- esbuild ---"
@@ -78,4 +134,6 @@ if ($listen8000) {
 if (-not (Test-Path $dist)) {
     Write-Host "  Build UI: scripts\fix_frontend_deps.cmd  (or: cd frontend && npm run build)"
 }
+Write-Host "  Company-safe setup: powershell -File scripts\setup_dev_env.ps1"
+Write-Host "  Python tests via venv: .\.venv\Scripts\python -m pytest tests -q"
 Write-Host "==========================================="

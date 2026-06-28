@@ -2414,6 +2414,10 @@ class AlloyGUI:
                                 f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→측정 DB "
                                 f"{self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
+                        elif props.get("wetting_temp_basis") == "compare_shared":
+                            _wt_basis = (
+                                f"   |   기준: 비교 공통 {self._fmt_num(props.get('wetting_temp_c'),0)}℃"
+                            )
                         elif props.get("wetting_temp_basis") == "user":
                             _wt_basis = "   |   기준: 선택 온도(측정 DB 맞춤)"
                         _row(
@@ -2503,8 +2507,7 @@ class AlloyGUI:
         try:
             if self.last_result and self.compare_result and self.comp and self.compare_comp:
                 # apply wetting override for display (no full re-analysis)
-                self._apply_wetting_override_to_result(self.last_result)
-                self._apply_wetting_override_to_result(self.compare_result)
+                self._apply_compare_shared_wetting(self.last_result, self.compare_result)
                 output = self._build_compare_report(self.comp, self.compare_comp, self.last_result, self.compare_result)
                 summary = {
                     "type": "compare",
@@ -2547,6 +2550,60 @@ class AlloyGUI:
         except Exception:
             self._rerender_last_result()
 
+    def _wetting_temp_user_override(self):
+        mode = (self.wetting_temp_mode.get() or "AUTO(Liq+30)").strip()
+        if mode == "AUTO(peak)":
+            mode = "AUTO(Liq+30)"
+        if mode.startswith("AUTO"):
+            return None
+        try:
+            return float(int(mode))
+        except Exception:
+            return None
+
+    def _apply_wetting_props_from_details(self, r, details):
+        if not isinstance(r, dict) or not isinstance(details, dict):
+            return
+        props = r.get("props") if isinstance(r.get("props"), dict) else {}
+        props["wetting_temp_c"] = float(details.get("wetting_temp_c", 0.0) or 0.0)
+        props["wetting_fmax_pred_mn"] = float(details.get("fmax_pred_mn", 0.0) or 0.0)
+        props["wetting_t0_pred_s"] = float(details.get("t0_pred_s", 0.0) or 0.0)
+        if isinstance(details.get("neighbors"), list):
+            props["wetting_neighbors"] = details.get("neighbors")
+        if details.get("wetting_temp_basis"):
+            props["wetting_temp_basis"] = details.get("wetting_temp_basis")
+        if details.get("wetting_temp_target_c") is not None:
+            props["wetting_temp_target_c"] = float(details.get("wetting_temp_target_c"))
+        r["props"] = props
+
+    def _apply_compare_shared_wetting(self, r_a, r_b):
+        """비교 모드: A·B 동일 젖음 온도로 props만 갱신 (단일 조성별 auto 금지)."""
+        if not isinstance(r_a, dict) or not isinstance(r_b, dict):
+            return
+        comp_a = dict(self.comp) if self.comp else (r_a.get("norm") or {})
+        comp_b = dict(self.compare_comp) if self.compare_comp else (r_b.get("norm") or {})
+        try:
+            wet_t, wet_basis = self.analyzer.compare_wetting_temp_c(
+                comp_a, comp_b, self._wetting_temp_user_override()
+            )
+        except Exception:
+            return
+        for r in (r_a, r_b):
+            norm = r.get("norm") if isinstance(r.get("norm"), dict) else {}
+            solidus = float(r.get("solidus", 0.0) or 0.0)
+            liquidus = float(r.get("liquidus", 0.0) or 0.0)
+            try:
+                details = self.analyzer.models._predict_wetting_details(
+                    norm,
+                    solidus,
+                    liquidus,
+                    wetting_temp_c=wet_t,
+                    wetting_temp_basis=wet_basis,
+                )
+                self._apply_wetting_props_from_details(r, details)
+            except Exception:
+                pass
+
     def _apply_wetting_override_to_result(self, r):
         """
         Recompute only wetting-related fields in r['props'] based on selected temperature.
@@ -2557,36 +2614,16 @@ class AlloyGUI:
         norm = r.get("norm") if isinstance(r.get("norm"), dict) else {}
         solidus = float(r.get("solidus", 0.0) or 0.0)
         liquidus = float(r.get("liquidus", 0.0) or 0.0)
-        props = r.get("props") if isinstance(r.get("props"), dict) else {}
-        mode = (self.wetting_temp_mode.get() or "AUTO(Liq+30)").strip()
-        if mode == "AUTO(peak)":
-            mode = "AUTO(Liq+30)"
-        wet_arg = None
-        if not mode.startswith("AUTO"):
-            try:
-                wet_arg = float(int(mode))
-            except Exception:
-                wet_arg = None
+        wet_arg = self._wetting_temp_user_override()
 
         try:
             details = self.analyzer.models._predict_wetting_details(
                 norm, solidus, liquidus, wetting_temp_c=wet_arg
             )
-            # 젖음은 Fmax(mN) 등 실측형 지표만 표시 (10–100 젖음지수는 혼동 방지로 props에 넣지 않음)
-            props["wetting_temp_c"] = float(details.get("wetting_temp_c", 0.0) or 0.0)
-            props["wetting_fmax_pred_mn"] = float(details.get("fmax_pred_mn", 0.0) or 0.0)
-            props["wetting_t0_pred_s"] = float(details.get("t0_pred_s", 0.0) or 0.0)
-            if isinstance(details.get("neighbors"), list):
-                props["wetting_neighbors"] = details.get("neighbors")
-            if details.get("wetting_temp_basis"):
-                props["wetting_temp_basis"] = details.get("wetting_temp_basis")
-            if details.get("wetting_temp_target_c") is not None:
-                props["wetting_temp_target_c"] = float(details.get("wetting_temp_target_c"))
+            self._apply_wetting_props_from_details(r, details)
         except Exception:
             # leave existing values
             pass
-
-        r["props"] = props
 
     # ─────────────────────────────────────────────────────────────────────────
     # 조성 입력
@@ -2874,9 +2911,7 @@ class AlloyGUI:
         self._refresh_ai_usage_ui()
         self._refresh_imc_tal_ui()
 
-        # wetting temp override for display
-        self._apply_wetting_override_to_result(self.last_result)
-        self._apply_wetting_override_to_result(self.compare_result)
+        self._apply_compare_shared_wetting(self.last_result, self.compare_result)
 
         self.set_progress(90, "비교 보고서 생성 중...")
         output = self._build_compare_report(self.comp, comp_b, r_a, r_b)
@@ -3090,12 +3125,32 @@ class AlloyGUI:
         o += _trow_num("권장 피크 (℃)", pk_a, pk_b, " ℃", "low")
 
         o += f"\n  {sep}\n  [물성 비교]  ▲ = 해당 항목 우위\n  {sep}\n"
-        o += _trow_num("인장강도 (MPa)", pa.get("tensile_strength", 0), pb.get("tensile_strength", 0), " MPa")
+        def _tensile_row_label(props):
+            basis = (props or {}).get("tensile_strength_basis")
+            if basis == "db_idw":
+                return "인장 (BD유사) (MPa)"
+            if basis == "lit_ref":
+                return "인장 (문헌) (MPa)"
+            if basis == "lit_blend":
+                return "인장 (문헌보정) (MPa)"
+            return "인장강도 (MPa)"
+
+        def _shear_row_label(props):
+            basis = (props or {}).get("shear_strength_basis")
+            return "전단 (BD유사) (MPa)" if basis == "db_idw" else "전단강도 (MPa)"
+
+        o += _trow_num(_tensile_row_label(pa), pa.get("tensile_strength", 0), pb.get("tensile_strength", 0), " MPa")
         o += _trow_num("항복강도 (MPa)", pa.get("yield_strength", 0), pb.get("yield_strength", 0), " MPa")
         o += _trow_num("연신율 (%)", pa.get("elongation", 0), pb.get("elongation", 0), "%")
-        o += _trow_num("전단강도 (MPa)", pa.get("shear_strength", 0), pb.get("shear_strength", 0), " MPa")
+        o += _trow_num(_shear_row_label(pa), pa.get("shear_strength"), pb.get("shear_strength"), " MPa")
         o += _trow_num("젖음 Fmax (mN)", pa.get("wetting_fmax_pred_mn", 0), pb.get("wetting_fmax_pred_mn", 0), " mN")
-        o += _trow_num("물성 DB 인장 (MPa)", pa.get("tensile_strength_db_mpa"), pb.get("tensile_strength_db_mpa"), " MPa")
+        if pa.get("tensile_strength_basis") != "db_idw" or pb.get("tensile_strength_basis") != "db_idw":
+            o += _trow_num(
+                "물성 DB 인장 (MPa)",
+                None if pa.get("tensile_strength_basis") == "db_idw" else pa.get("tensile_strength_db_mpa"),
+                None if pb.get("tensile_strength_basis") == "db_idw" else pb.get("tensile_strength_db_mpa"),
+                " MPa",
+            )
 
         # ── 비교 기반 도펀트 추천 ───────────────────────────────────────────
         def _normalize_to_100(comp):

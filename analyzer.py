@@ -289,12 +289,17 @@ class AlloyAnalyzer:
         except Exception:
             db_best_dist = None
         use_db = (db_best_dist is not None) and (db_best_dist <= 3.0)
+        db_exact_hit = (db_best_dist is not None) and (db_best_dist <= _DB_EXACT_EPS)
         try:
             d0 = float(db_best_dist) if db_best_dist is not None else 9999.0
             db_w = 1.0 / (1.0 + d0 / 2.0)
         except Exception:
             db_w = 0.0
-        db_w = max(0.0, min(0.85, float(db_w))) if use_db else 0.0
+        if db_exact_hit:
+            # 실측 DB와 사실상 동일한 조성은 모델 블렌드 없이 DB 값을 그대로 우선한다.
+            db_w = 1.0
+        else:
+            db_w = max(0.0, min(0.85, float(db_w))) if use_db else 0.0
 
         ps = dict(prop_sources) if isinstance(prop_sources, dict) else {}
         return {
@@ -643,6 +648,7 @@ class AlloyAnalyzer:
         liquidus,
         peak=None,
         wetting_temp_c=None,
+        wetting_temp_basis=None,
         include_wetting_grid=False,
     ):
         return self.models.predict_all(
@@ -651,8 +657,30 @@ class AlloyAnalyzer:
             liquidus,
             peak=peak,
             wetting_temp_c=wetting_temp_c,
+            wetting_temp_basis=wetting_temp_basis,
             include_wetting_grid=include_wetting_grid,
         )
+
+    def liquidus_for_comp(self, comp) -> float:
+        """비교용 공통 젖음 온도 산출 전 액상선만 빠르게 계산."""
+        self.validate_input_comp(comp)
+        norm = self.normalize(comp)
+        best, _, _ = self.find_best_match(norm)
+        _, liquidus, _, _, _ = self.calc_melting_with_detail(best, norm)
+        return float(liquidus or 0.0)
+
+    def compare_wetting_temp_c(self, comp_a, comp_b, user_wetting_temp_c=None):
+        """
+        비교 모드 젖음 온도: 사용자 지정이 없으면 A·B 자동 스냅값 중 max(공통 온도).
+        Returns (snapped_temp_c, basis).
+        """
+        from .models import compare_default_wetting_temp_c, snap_wetting_temp_to_bd_grid
+
+        if user_wetting_temp_c is not None:
+            return snap_wetting_temp_to_bd_grid(float(user_wetting_temp_c)), "user"
+        la = self.liquidus_for_comp(comp_a)
+        lb = self.liquidus_for_comp(comp_b)
+        return compare_default_wetting_temp_c(la, lb), "compare_shared"
 
     def wetting_grid_for_comp(self, comp):
         """250–290℃ 온도별 Fmax/T0 (IDW). 별도 API·지연 로드용."""
@@ -671,6 +699,7 @@ class AlloyAnalyzer:
         progress_cb=None,
         literature_mode: str = "fast",
         wetting_temp_c=None,
+        wetting_temp_basis=None,
         include_wetting_grid=False,
     ):
         def _p(v, msg):
@@ -719,6 +748,7 @@ class AlloyAnalyzer:
             liquidus,
             peak=peak,
             wetting_temp_c=wetting_temp_c,
+            wetting_temp_basis=wetting_temp_basis,
             include_wetting_grid=include_wetting_grid,
         )
 
@@ -761,7 +791,7 @@ class AlloyAnalyzer:
                 if dv is None or mv is None:
                     return
                 try:
-                    props[key_out] = float(mv) * mdl_w + float(dv) * db_w
+                    props[key_out] = float(dv) if db_exact_hit else (float(mv) * mdl_w + float(dv) * db_w)
                     prop_sources[key_out] = f"DB(blend,w={db_w:.2f})"
                 except Exception:
                     return
@@ -776,6 +806,20 @@ class AlloyAnalyzer:
                 props["tensile_strength_db_mpa"] = float(db_pred["tensile"])
             except Exception:
                 pass
+
+        # 전단: 합금족 정렬 IDW (근접 블렌드와 별도 — Bi계 등 원거리 조성용)
+        shear_idw_detail = None
+        try:
+            from .db_regression import predict_shear_from_db_with_detail
+
+            shear_idw_detail = predict_shear_from_db_with_detail(norm)
+            if isinstance(shear_idw_detail, dict) and shear_idw_detail.get("value") is not None:
+                props["shear_strength_db_mpa"] = float(shear_idw_detail["value"])
+                top_sh = shear_idw_detail.get("top")
+                if isinstance(top_sh, list) and top_sh:
+                    props["shear_neighbors"] = top_sh
+        except Exception:
+            shear_idw_detail = None
 
         # 문헌·업계 참고 인장 (비교 모드·근거 표시용)
         strength_lit = None
@@ -808,6 +852,60 @@ class AlloyAnalyzer:
         # Fill defaults
         for k in ("tensile_strength", "yield_strength", "elongation", "shear_strength", "wetting_score"):
             prop_sources.setdefault(k, "MODEL")
+
+        # 전단: 근접 블렌드 없으면 MODEL 대신 합금족 IDW(BD 유사)로 표시
+        if prop_sources.get("shear_strength") == "MODEL":
+            shear_idw = None
+            if isinstance(shear_idw_detail, dict):
+                shear_idw = shear_idw_detail.get("value")
+            if shear_idw is not None:
+                try:
+                    props["shear_strength"] = float(shear_idw)
+                    d_s = shear_idw_detail.get("best_dist")
+                    if d_s is None:
+                        d_s = db_best_dist
+                    prop_sources["shear_strength"] = (
+                        f"DB(IDW,d={float(d_s):.1f})" if d_s is not None else "DB(IDW)"
+                    )
+                    props["shear_strength_basis"] = "db_idw"
+                except Exception:
+                    props.pop("shear_strength", None)
+            else:
+                props.pop("shear_strength", None)
+        elif prop_sources.get("shear_strength", "").startswith("DB(blend"):
+            props["shear_strength_basis"] = "db_blend"
+
+        # 인장: 근접 블렌드·문헌 소폭 보정 없으면 MODEL 대신 BD IDW(또는 문헌) 표시
+        if prop_sources.get("tensile_strength") == "MODEL":
+            try:
+                mdl_t = props.get("tensile_strength")
+                if mdl_t is not None:
+                    props["tensile_strength_model_mpa"] = float(mdl_t)
+            except Exception:
+                pass
+            tv = props.get("tensile_strength_db_mpa")
+            lv = props.get("tensile_strength_lit_mpa")
+            if tv is not None:
+                try:
+                    props["tensile_strength"] = float(tv)
+                    props["tensile_strength_basis"] = "db_idw"
+                    d_t = db_best_dist
+                    prop_sources["tensile_strength"] = (
+                        f"DB(IDW,d={float(d_t):.1f})" if d_t is not None else "DB(IDW)"
+                    )
+                except Exception:
+                    pass
+            elif lv is not None:
+                try:
+                    props["tensile_strength"] = float(lv)
+                    props["tensile_strength_basis"] = "lit_ref"
+                    prop_sources["tensile_strength"] = "LIT(ref)"
+                except Exception:
+                    pass
+        elif str(prop_sources.get("tensile_strength", "")).startswith("DB(blend"):
+            props["tensile_strength_basis"] = "db_blend"
+        elif str(prop_sources.get("tensile_strength", "")).startswith("LIT"):
+            props["tensile_strength_basis"] = "lit_blend"
 
         # Evidence/provenance for transparency in UI
         md = melting_detail if isinstance(melting_detail, dict) else {}

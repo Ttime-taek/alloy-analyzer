@@ -75,6 +75,15 @@ STRENGTH_LITERATURE_ANCHORS: list[dict] = [
         "url": "https://doi.org/10.3390/met12081245",
     },
     {
+        "alloy": "Sn1Ag25Bi0.7Cu",
+        "comp": {"Sn": 73.3, "Ag": 1.0, "Cu": 0.7, "Bi": 25.0},
+        "tensile_mpa": 65.0,
+        "tensile_range": (55.0, 75.0),
+        "elongation_pct": 8.0,
+        "source": "Sn-rich SAC+Bi 25% (내부 3%Bi 실측·저Sn 고Bi 문헌 사이 외삽)",
+        "citation": "Sn1Ag25Bi0.7Cu — Sn3Ag0.5Cu3Bi 내부 DB(UTS≈78) 대비 고Bi 연신↓·인장 완화",
+    },
+    {
         "alloy": "Sn57.6Bi0.4Ag",
         "comp": {"Sn": 42.0, "Bi": 57.6, "Ag": 0.4},
         "tensile_mpa": 110.0,

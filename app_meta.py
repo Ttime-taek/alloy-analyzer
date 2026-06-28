@@ -189,5 +189,7 @@ def about_api_payload() -> dict:
         # 웹 UI가 구버전 백엔드(목표 융점 POST 없음)와 붙었는지 판별
         "api_features": {
             "recommend_melt": True,
+            # 비교 /api/compare — A·B 공통 젖음 온도(compare_shared). 없으면 구버전 API.
+            "compare_shared_wetting": True,
         },
     }

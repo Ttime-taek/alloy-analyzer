@@ -32,7 +32,7 @@ def test_unique_alloy_names_sorted_distinct_matches_db():
     names = unique_alloy_names()
     assert names == sorted(names)
     assert len(names) == len(set(names))
-    assert len(names) == 11
+    assert len(names) == 26
     assert "Sn3.0Ag0.5Cu" in names
     for alloy in names:
         assert len(rows_for_alloy(alloy)) >= 1

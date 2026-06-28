@@ -28,6 +28,7 @@ class ApiStaticSmokeTest(unittest.TestCase):
         data = r.json()
         self.assertIn("api_features", data)
         self.assertTrue(data["api_features"].get("recommend_melt"))
+        self.assertTrue(data["api_features"].get("compare_shared_wetting"))
 
     def test_openapi_lists_recommend_melt(self) -> None:
         r = self.client.get("/openapi.json")
@@ -72,3 +73,21 @@ class ApiStaticSmokeTest(unittest.TestCase):
             json={"comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}},
         )
         self.assertNotEqual(r.status_code, 422, r.text[:500])
+
+    def test_compare_uses_shared_wetting_temp(self) -> None:
+        r = self.client.post(
+            "/api/compare",
+            json={
+                "comp_a": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5},
+                "comp_b": {"Sn": 96.2, "Ag": 0.3, "Cu": 0.5, "Bi": 3.0},
+                "literature_mode": "fast",
+            },
+        )
+        self.assertEqual(r.status_code, 200, r.text[:800])
+        data = r.json()
+        ta = data["a"]["props"].get("wetting_temp_c")
+        tb = data["b"]["props"].get("wetting_temp_c")
+        self.assertEqual(ta, tb)
+        self.assertEqual(ta, 260.0)
+        self.assertEqual(data["a"]["props"].get("wetting_temp_basis"), "compare_shared")
+        self.assertEqual(data["b"]["props"].get("wetting_temp_basis"), "compare_shared")

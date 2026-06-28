@@ -130,6 +130,7 @@ function shortWettingBasis(basis) {
   const b = String(basis || "").trim();
   if (!b) return "";
   if (b === "auto_liq_plus_30") return "+30℃(Liq)";
+  if (b === "compare_shared") return "비교 공통";
   if (b === "auto") return "auto";
   return b.replace(/_/g, " ");
 }
@@ -151,14 +152,26 @@ function buildPropsKpis(result) {
     kpis.push({ label: "젖음", value: `Fmax ${fmax} mN`, hint: hint || undefined });
   }
 
-  const tdb = fmtMaybe(props?.tensile_strength_db_mpa, 1);
-  if (tdb) kpis.push({ label: "물성 DB 인장", value: `${tdb} MPa` });
-
+  const tensileBasis = props?.tensile_strength_basis;
   const tensile = fmtMaybe(props?.tensile_strength, 1);
-  if (tensile) kpis.push({ label: "예측 인장", value: `${tensile} MPa` });
+  if (tensile) {
+    let tLabel = "인장";
+    if (tensileBasis === "db_idw") tLabel = "인장 (BD유사)";
+    else if (tensileBasis === "lit_ref") tLabel = "인장 (문헌)";
+    else if (tensileBasis === "lit_blend") tLabel = "인장 (문헌보정)";
+    else if (tensileBasis === "db_blend") tLabel = "인장 (BD블렌드)";
+    kpis.push({ label: tLabel, value: `${tensile} MPa` });
+  } else {
+    const tdb = fmtMaybe(props?.tensile_strength_db_mpa, 1);
+    if (tdb) kpis.push({ label: "물성 DB 인장", value: `${tdb} MPa` });
+  }
 
+  const shearBasis = props?.shear_strength_basis;
   const shear = fmtMaybe(props?.shear_strength, 1);
-  if (shear) kpis.push({ label: "예측 전단", value: `${shear} MPa` });
+  if (shear) {
+    const sLabel = shearBasis === "db_idw" ? "전단 (BD유사)" : "전단";
+    kpis.push({ label: sLabel, value: `${shear} MPa` });
+  }
 
   const ys = fmtMaybe(props?.yield_strength, 1);
   if (ys) kpis.push({ label: "예측 항복", value: `${ys} MPa` });

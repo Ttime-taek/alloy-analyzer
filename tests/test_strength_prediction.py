@@ -22,8 +22,9 @@ def _blend_props(norm, mdl_props, db_out):
     db_pred = (db_out.get("pred") if isinstance(db_out, dict) else None) or {}
     db_top = (db_out.get("top") if isinstance(db_out, dict) else None) or []
     db_best_dist = float((db_top[0] or {}).get("dist", 999)) if db_top else 999.0
+    db_exact_hit = db_best_dist <= 1e-4
     use_db = db_best_dist <= 3.0
-    db_w = min(0.85, 1.0 / (1.0 + db_best_dist / 2.0)) if use_db else 0.0
+    db_w = 1.0 if db_exact_hit else (min(0.85, 1.0 / (1.0 + db_best_dist / 2.0)) if use_db else 0.0)
     mdl_w = 1.0 - db_w
     out = dict(mdl_props)
     for ko, kd in [
@@ -34,7 +35,7 @@ def _blend_props(norm, mdl_props, db_out):
     ]:
         dv, mv = db_pred.get(kd), out.get(ko)
         if dv is not None and mv is not None and db_w > 0:
-            out[ko] = float(mv) * mdl_w + float(dv) * db_w
+            out[ko] = float(dv) if db_exact_hit else (float(mv) * mdl_w + float(dv) * db_w)
     return out
 
 
@@ -56,6 +57,13 @@ class StrengthPredictionTest(unittest.TestCase):
         blend, _, _, _, _ = self._predict(comp)
         self.assertAlmostEqual(blend["tensile_strength"], 48.0, delta=2.0)
         self.assertAlmostEqual(blend["shear_strength"], 82.0, delta=5.0)
+
+    def test_exact_db_match_uses_db_values_without_blending(self):
+        """DB 정확 일치 조성은 물성도 모델 혼합 없이 DB 값이 그대로 나와야 한다."""
+        comp = parse_alloy("Sn3.0Ag0.5Cu")
+        r = self.analyzer.analyze_all(comp)
+        self.assertIn(r["props"].get("tensile_strength_basis"), {"db_idw", "db_blend", "db_exact"})
+        self.assertAlmostEqual(r["props"].get("tensile_strength_db_mpa", 0), r["props"].get("tensile_strength", 0), delta=1e-6)
 
     def test_sac_bi3_shear_not_overestimated(self):
         """SAC+3Bi 전단: 이전 MODEL은 인장×1.55로 ~110 MPa 과대."""
@@ -101,6 +109,42 @@ class StrengthPredictionTest(unittest.TestCase):
         self.assertLess(mdl["tensile_strength"], 42.0)
         lit = nearest_strength_literature(norm)
         self.assertIsNotNone(lit)
+
+    def test_sn1ag25bi0p7cu_tensile_not_sn57bi_curve(self):
+        """Sn1Ag25Bi0.7Cu: Bi≥20 저Sn 곡선(A=80) 오적용 시 UTS ~95 MPa 과대."""
+        comp = parse_alloy("Sn1Ag25Bi0.7Cu")
+        blend, mdl, norm, _, _ = self._predict(comp)
+        self.assertGreater(mdl["tensile_strength"], 52.0)
+        self.assertLess(mdl["tensile_strength"], 82.0)
+        self.assertLess(blend["tensile_strength"], 82.0)
+        lit = nearest_strength_literature(norm)
+        self.assertIsNotNone(lit)
+        self.assertAlmostEqual(lit["tensile_mpa"], 65.0, delta=2.0)
+
+    def test_shear_idw_when_properties_db_far(self):
+        """물성 DB 거리>3이면 합금족 IDW 전단·BD IDW 인장을 표시(MODEL 단독·SAC 혼입 방지)."""
+        comp = {"Sn": 96.1, "Ag": 1.1, "Cu": 0.7, "Bi": 1.8, "Ni": 0.3}
+        r = self.analyzer.analyze_all(comp)
+        sh = r["props"].get("shear_strength")
+        self.assertIsNotNone(sh)
+        self.assertGreater(sh, 22.0)
+        self.assertLess(sh, 36.0)
+        self.assertEqual(r["props"].get("shear_strength_basis"), "db_idw")
+        tens = r["props"].get("tensile_strength")
+        self.assertIsNotNone(tens)
+        self.assertGreater(tens, 45.0)
+        self.assertLess(tens, 52.0)
+        self.assertEqual(r["props"].get("tensile_strength_basis"), "db_idw")
+        self.assertGreater(r["props"].get("tensile_strength_model_mpa", 0), 65.0)
+        self.assertIn("DB(IDW", r.get("evidence", {}).get("props", {}).get("tensile_strength", ""))
+        neighbors = r["props"].get("shear_neighbors") or []
+        self.assertTrue(any("Bi" in str(n.get("alloy", "")) for n in neighbors))
+
+    def test_sac305_shear_uses_db_blend(self):
+        comp = parse_alloy("Sn3.0Ag0.5Cu")
+        r = self.analyzer.analyze_all(comp)
+        self.assertAlmostEqual(r["props"]["shear_strength"], 82.0, delta=5.0)
+        self.assertIn(r["props"].get("shear_strength_basis"), {"db_blend", "db_idw", "db_exact"})
 
     def test_ni_micro_addition_smooth(self):
         """Ni 미량 첨가는 인장·전단이 연속 증가(계단 없음)."""

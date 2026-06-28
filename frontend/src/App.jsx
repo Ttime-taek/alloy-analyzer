@@ -1296,6 +1296,27 @@ export default function App() {
     [favorites]
   );
 
+  /** 비교 모드: 한쪽이라도 입력 중인 원소만 elemList 순 — 0%·미입력 placeholder 행 없음 */
+  const compareElemVisible = (el, side) => {
+    const active = side === "A" ? activeElemsA : activeElemsB;
+    const composition = side === "A" ? comp : compB;
+    if (!active.includes(el)) return false;
+    const v = composition[el];
+    if (v === "" || v === undefined) return true;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0;
+  };
+
+  /** 비교 모드: 열마다 보이는 원소만 elemList 순 — 빈 칸·줄 맞춤 없이 아래로 붙임 */
+  const compareVisibleElemsA = useMemo(
+    () => elemList.filter((el) => compareElemVisible(el, "A")),
+    [activeElemsA, comp, elemList]
+  );
+  const compareVisibleElemsB = useMemo(
+    () => elemList.filter((el) => compareElemVisible(el, "B")),
+    [activeElemsB, compB, elemList]
+  );
+
   const panelWtA = useMemo(() => compositionWtForPanel(comp, activeElemsA), [comp, activeElemsA]);
   const panelWtB = useMemo(() => compositionWtForPanel(compB, activeElemsB), [compB, activeElemsB]);
   const totalA = compositionTotalPct(panelWtA);
@@ -1308,6 +1329,48 @@ export default function App() {
     () => Object.values(panelWtB).some((v) => Number(v) > 0),
     [panelWtB]
   );
+
+  const renderCompareComposeInputRow = (el, side) => {
+    const composition = side === "A" ? comp : compB;
+    const onChange = side === "A" ? handleChange : handleChangeB;
+    const onRemove = side === "A" ? removeElemRowA : removeElemRowB;
+    return (
+      <div className="compare-compose-input-row">
+        <label>{el}</label>
+        <input
+          type="number"
+          step="0.01"
+          value={composition[el] ?? ""}
+          onChange={(e) => onChange(el, e.target.value)}
+          style={{
+            background: "var(--bg-page)",
+            borderRadius: 6,
+            border: "1px solid var(--border-muted)",
+            padding: "6px 8px",
+            color: "#e5e7eb"
+          }}
+        />
+        <TactileButton
+          onClick={() => onRemove(el)}
+          title="목록에서 제거"
+          aria-label={`${el} 제거`}
+          style={{
+            flexShrink: 0,
+            minHeight: 44,
+            padding: "10px 12px",
+            borderRadius: 6,
+            border: "1px solid #475569",
+            background: "var(--border-default)",
+            color: "#e5e7eb",
+            fontSize: 13,
+            cursor: "pointer"
+          }}
+        >
+          ×
+        </TactileButton>
+      </div>
+    );
+  };
 
   const totalColor = (t, hasInput) => {
     if (!hasInput && Number(t) < 0.01) return "#64748b";
@@ -1353,7 +1416,12 @@ export default function App() {
     const c = fav.comp || {};
     setSelectedFavoriteName(name);
     setComp(c);
-    setActiveElemsA(Object.keys(c));
+    setActiveElemsA(
+      Object.keys(c).filter((k) => {
+        const v = Number(c[k]);
+        return Number.isFinite(v) && v > 0;
+      })
+    );
   };
 
   const deleteFavoriteA = async () => {
@@ -1396,7 +1464,12 @@ export default function App() {
     const c = fav.comp || {};
     setSelectedFavoriteNameB(name);
     setCompB(c);
-    setActiveElemsB(Object.keys(c));
+    setActiveElemsB(
+      Object.keys(c).filter((k) => {
+        const v = Number(c[k]);
+        return Number.isFinite(v) && v > 0;
+      })
+    );
   };
 
   const deleteFavoriteB = async () => {
@@ -1680,7 +1753,7 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="app-main-grid">
+        <div className={`app-main-grid${mode === "compare" ? " app-main-grid--compare" : ""}`}>
           {/* 입력 패널 */}
           <div
             className="compose-input-panel"
@@ -1924,7 +1997,9 @@ export default function App() {
                     minWidth: 200
                   }}
                 >
-                  <option value="auto">자동 (액상선+30℃)</option>
+                  <option value="auto">
+                    {mode === "compare" ? "자동 (A·B 공통 온도)" : "자동 (액상선+30℃)"}
+                  </option>
                   <option value="250">250 ℃</option>
                   <option value="260">260 ℃</option>
                   <option value="270">270 ℃</option>
@@ -1932,8 +2007,9 @@ export default function App() {
                   <option value="290">290 ℃</option>
                 </select>
                 <span style={{ fontSize: 12, color: "#64748b", maxWidth: 420, lineHeight: 1.45 }}>
-                  기본은 액상선보다 약 +30℃를 목표로 하고, 젖음 DB와 동일한 250–290℃ 중 가장 가까운 값으로
-                  맞춥니다. 필요하면 위에서 고정 온도를 고르세요.
+                  {mode === "compare"
+                    ? "비교 시 A·B 모두 동일 온도에서 젖음을 봅니다. 자동이면 각 액상선+30℃ 스냅값 중 더 높은 BD 격자(250–290℃)를 씁니다."
+                    : "기본은 액상선보다 약 +30℃를 목표로 하고, 젖음 DB와 동일한 250–290℃ 중 가장 가까운 값으로 맞춥니다. 필요하면 위에서 고정 온도를 고르세요."}
                 </span>
               </div>
             </div>
@@ -2116,11 +2192,11 @@ export default function App() {
                       cursor: "pointer"
                     }}
                   >
-                    조성 A 즐겨찾기 저장
+                    A 즐겨찾기
                   </TactileButton>
                   {favorites.length > 0 && (
                     <>
-                      <span style={{ fontSize: 13, color: "#9ca3af" }}>A 합금 불러오기</span>
+                      <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
                         onChange={(e) => loadFavoriteToA(e.target.value)}
                         value={selectedFavoriteName}
@@ -2156,7 +2232,7 @@ export default function App() {
                           cursor: selectedFavoriteName ? "pointer" : "default"
                         }}
                       >
-                        선택 삭제
+                        삭제
                       </TactileButton>
                     </>
                   )}
@@ -2164,14 +2240,20 @@ export default function App() {
               </>
             )}
             {/* 주기율표 스타일(솔더 관련 원소) 버튼 — narrow 뷰 터치 타겟은 index.css `.periodic-element-grid` */}
-            <div className="periodic-element-grid-wrap">
+            <div
+              className={
+                mode === "compare"
+                  ? "periodic-element-grid-wrap compare-periodic-scroll"
+                  : "periodic-element-grid-wrap"
+              }
+            >
             <div
               className="periodic-element-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
                 gap: 6,
-                marginBottom: 10
+                marginBottom: mode === "compare" ? 0 : 10
               }}
             >
               {elemList.map((el) => {
@@ -2222,7 +2304,7 @@ export default function App() {
                   cursor: "pointer"
                 }}
               >
-                조성 A Sn 자동완성
+                A Sn 자동완성
               </TactileButton>
             </div>
 
@@ -2230,7 +2312,7 @@ export default function App() {
               {mode !== "compare" && <div style={{ fontWeight: 600, marginBottom: 4 }}>조성 A</div>}
               <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
                 {mode === "compare"
-                  ? "주기율표 클릭 또는 아래에서 원소를 추가하면 조성 A 입력란이 생깁니다."
+                  ? "주기율표·원소 추가로 입력란을 만듭니다."
                   : "위 주기율표에서 원소를 클릭하거나, 아래에서 원소를 추가하면 입력란이 나타납니다."}
               </p>
               <select
@@ -2263,46 +2345,48 @@ export default function App() {
                   ))}
               </select>
             </div>
-            <div className={mode === "compare" ? "compare-compose-inputs" : undefined}>
+            {mode === "compare" ? (
+              <div className="compare-compose-inputs">
+                {compareVisibleElemsA.length === 0 ? (
+                  <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
+                ) : (
+                  compareVisibleElemsA.map((el) => renderCompareComposeInputRow(el, "A"))
+                )}
+              </div>
+            ) : (
+            <div>
               {activeElemsA.length === 0 ? (
                 <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
               ) : (
                 activeElemsA.map((el) => (
                   <div
                     key={el}
-                    className={mode === "compare" ? "compare-compose-input-row" : undefined}
-                    style={
-                      mode !== "compare"
-                        ? {
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            marginBottom: 8
-                          }
-                        : undefined
-                    }
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 8
+                    }}
                   >
-                    <label style={mode !== "compare" ? { width: 44, flexShrink: 0 } : undefined}>
-                      {el}
-                    </label>
+                    <label style={{ width: 44, flexShrink: 0 }}>{el}</label>
                     <input
                       type="number"
                       step="0.01"
                       value={comp[el] ?? ""}
                       onChange={(e) => handleChange(el, e.target.value)}
                       style={{
-                        flex: mode === "compare" ? undefined : 1,
+                        flex: 1,
                         background: "var(--bg-page)",
                         borderRadius: 6,
                         border: "1px solid var(--border-muted)",
                         padding: "6px 8px",
-                        color: "#e5e7eb",
-                        minWidth: mode === "compare" ? 0 : undefined
+                        color: "#e5e7eb"
                       }}
                     />
                     <TactileButton
                       onClick={() => removeElemRowA(el)}
                       title="목록에서 제거"
+                      aria-label={`${el} 제거`}
                       style={{
                         flexShrink: 0,
                         minHeight: 44,
@@ -2315,12 +2399,13 @@ export default function App() {
                         cursor: "pointer"
                       }}
                     >
-                      제거
+                      ×
                     </TactileButton>
                   </div>
                 ))
               )}
             </div>
+            )}
 
             </div>
             {mode === "compare" && (
@@ -2348,11 +2433,11 @@ export default function App() {
                       cursor: "pointer"
                     }}
                   >
-                    조성 B 즐겨찾기 저장
+                    B 즐겨찾기
                   </TactileButton>
                   {favorites.length > 0 && (
                     <>
-                      <span style={{ fontSize: 13, color: "#9ca3af" }}>B 합금 불러오기</span>
+                      <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
                         onChange={(e) => loadFavoriteToB(e.target.value)}
                         value={selectedFavoriteNameB}
@@ -2388,21 +2473,21 @@ export default function App() {
                           cursor: selectedFavoriteNameB ? "pointer" : "default"
                         }}
                       >
-                        선택 삭제
+                        삭제
                       </TactileButton>
                     </>
                   )}
                 </div>
 
                 {/* 조성 B용 주기율표 버튼 */}
-                <div className="periodic-element-grid-wrap">
+                <div className="periodic-element-grid-wrap compare-periodic-scroll">
                 <div
                   className="periodic-element-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
                     gap: 6,
-                    marginBottom: 10
+                    marginBottom: 0
                   }}
                 >
                   {elemList.map((el) => {
@@ -2453,12 +2538,12 @@ export default function App() {
                       cursor: "pointer"
                     }}
                   >
-                    조성 B Sn 자동완성
+                    B Sn 자동완성
                   </TactileButton>
                 </div>
                 <div className="compare-compose-add-block">
                   <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
-                    주기율표 클릭 또는 아래에서 원소를 추가하면 조성 B 입력란이 생깁니다.
+                    주기율표·원소 추가로 입력란을 만듭니다.
                   </p>
                   <select
                     value={addPickB}
@@ -2491,46 +2576,10 @@ export default function App() {
                   </select>
                 </div>
                 <div className="compare-compose-inputs">
-                  {activeElemsB.length === 0 ? (
-                    <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
-                      조성 B에 선택된 원소가 없습니다.
-                    </p>
+                  {compareVisibleElemsB.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
                   ) : (
-                    activeElemsB.map((el) => (
-                      <div key={`B-${el}`} className="compare-compose-input-row">
-                        <label>{el}</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={compB[el] ?? ""}
-                          onChange={(e) => handleChangeB(el, e.target.value)}
-                          style={{
-                            background: "var(--bg-page)",
-                            borderRadius: 6,
-                            border: "1px solid var(--border-muted)",
-                            padding: "6px 8px",
-                            color: "#e5e7eb"
-                          }}
-                        />
-                        <TactileButton
-                          onClick={() => removeElemRowB(el)}
-                          title="목록에서 제거"
-                          style={{
-                            flexShrink: 0,
-                            minHeight: 44,
-                            padding: "10px 12px",
-                            borderRadius: 6,
-                            border: "1px solid #475569",
-                            background: "var(--border-default)",
-                            color: "#e5e7eb",
-                            fontSize: 13,
-                            cursor: "pointer"
-                          }}
-                        >
-                          제거
-                        </TactileButton>
-                      </div>
-                    ))
+                    compareVisibleElemsB.map((el) => renderCompareComposeInputRow(el, "B"))
                   )}
                 </div>
               </div>
@@ -2673,6 +2722,7 @@ export default function App() {
 
           {/* 결과 패널 */}
           <div
+            className={mode === "compare" ? "result-panel--compare" : undefined}
             style={{
               background: "var(--bg-page)",
               borderRadius: 12,
@@ -4065,7 +4115,7 @@ const SUMMARY_VARIANT_HINT = {
   peak: "DSC/DTA 등 주요 열역학 신호(추정)",
   wetting:
     "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 예측 온도(자동 또는 250–290℃) 선택 후 분석",
-  tensileDb: "물성 DB 최근접 합금의 인장강도(MPa)"
+  tensileDb: "물성 DB 유사 합금 IDW 인장(MPa). BD 근접(≤3)이면 MODEL과 블렌드, 멀면 MODEL 대신 IDW·문헌만 표시"
 };
 
 /** 하단 폰트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
@@ -4104,7 +4154,113 @@ function formatTensileDbMpa(props) {
   return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : "—";
 }
 
+function formatTensilePrimary(props) {
+  const v = Number(props?.tensile_strength);
+  return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : formatTensileDbMpa(props);
+}
+
+function tensileSummaryLabel(props) {
+  const basis = props?.tensile_strength_basis;
+  if (basis === "db_idw") return "인장 (BD유사 IDW)";
+  if (basis === "lit_ref") return "인장 (문헌 참고)";
+  if (basis === "lit_blend") return "인장 (문헌 보정)";
+  if (basis === "db_blend") return "인장 (BD 블렌드)";
+  return "물성 DB 인장";
+}
+
+function tensileCompareLabel(a, b) {
+  const bases = [a?.props?.tensile_strength_basis, b?.props?.tensile_strength_basis];
+  if (bases.some((x) => x === "db_idw")) return "인장 (BD유사)";
+  if (bases.some((x) => x === "lit_ref")) return "인장 (문헌)";
+  if (bases.some((x) => x === "lit_blend")) return "인장 (문헌보정)";
+  return "인장";
+}
+
+function showCompareDbTensileRow(a, b) {
+  const hideA = a?.props?.tensile_strength_basis === "db_idw";
+  const hideB = b?.props?.tensile_strength_basis === "db_idw";
+  if (hideA && hideB) return false;
+  const hasA = !hideA && Number.isFinite(Number(a?.props?.tensile_strength_db_mpa));
+  const hasB = !hideB && Number.isFinite(Number(b?.props?.tensile_strength_db_mpa));
+  return hasA || hasB;
+}
+
 function SummaryCard({ label, value, variant }) {
+  const gradients = {
+    solidus: {
+      background:
+        "linear-gradient(145deg, #172554 0%, #1e40af 42%, #3b82f6 100%)",
+      border: "1px solid rgba(147, 197, 253, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(37, 99, 235, 0.28)",
+      labelColor: "rgba(219, 234, 254, 0.92)",
+      valueColor: "#f8fafc"
+    },
+    liquidus: {
+      background:
+        "linear-gradient(145deg, #431407 0%, #b45309 48%, #f97316 100%)",
+      border: "1px solid rgba(253, 186, 116, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(234, 88, 12, 0.26)",
+      labelColor: "rgba(255, 237, 213, 0.95)",
+      valueColor: "#fffbeb"
+    },
+    peak: {
+      background:
+        "linear-gradient(145deg, #3b0764 0%, #7c3aed 50%, #c084fc 100%)",
+      border: "1px solid rgba(216, 180, 254, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(124, 58, 237, 0.28)",
+      labelColor: "rgba(237, 233, 254, 0.95)",
+      valueColor: "#faf5ff"
+    },
+    dbConfidence: {
+      background:
+        "linear-gradient(145deg, #064e3b 0%, #059669 52%, #34d399 100%)",
+      border: "1px solid rgba(110, 231, 183, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(16, 185, 129, 0.24)",
+      labelColor: "rgba(209, 250, 229, 0.95)",
+      valueColor: "#ecfdf5"
+    },
+    overallConfidence: {
+      background:
+        "linear-gradient(145deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)",
+      border: "1px solid rgba(94, 234, 212, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(13, 148, 136, 0.26)",
+      labelColor: "rgba(204, 251, 241, 0.95)",
+      valueColor: "#f0fdfa"
+    },
+    bestMatch: {
+      background:
+        "linear-gradient(145deg, #312e81 0%, #4f46e5 48%, #818cf8 100%)",
+      border: "1px solid rgba(165, 180, 252, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(79, 70, 229, 0.26)",
+      labelColor: "rgba(224, 231, 255, 0.95)",
+      valueColor: "#eef2ff"
+    },
+    wetting: {
+      background:
+        "linear-gradient(145deg, #0c4a6e 0%, #0369a1 48%, #38bdf8 100%)",
+      border: "1px solid rgba(125, 211, 252, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(14, 165, 233, 0.26)",
+      labelColor: "rgba(224, 242, 254, 0.95)",
+      valueColor: "#f0f9ff"
+    },
+    tensileDb: {
+      background:
+        "linear-gradient(145deg, #14532d 0%, #15803d 48%, #4ade80 100%)",
+      border: "1px solid rgba(134, 239, 172, 0.45)",
+      boxShadow:
+        "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 18px rgba(22, 163, 74, 0.26)",
+      labelColor: "rgba(220, 252, 231, 0.95)",
+      valueColor: "#f0fdf4"
+    }
+  };
+  const g = variant && gradients[variant] ? gradients[variant] : null;
   const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
   const hintText =
     variant &&
@@ -4113,14 +4269,27 @@ function SummaryCard({ label, value, variant }) {
       ? SUMMARY_VARIANT_HINT[variant]
       : null;
   return (
-    <div className={`summary-card${variant ? ` summary-card--${variant}` : ""}`}>
+    <div
+      className="summary-card"
+      style={{
+        height: "100%",
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        padding: 10,
+        borderRadius: 10,
+        border: g ? g.border : "1px solid var(--border-muted)",
+        background: g ? g.background : "var(--bg-table-head)",
+        boxShadow: g ? g.boxShadow : undefined
+      }}
+    >
       <div
         style={{
           fontSize: 13,
-          color: "rgba(255, 255, 255, 0.7)",
+          color: g ? g.labelColor : "#9ca3af",
           marginBottom: 4,
-          fontWeight: 600,
-          letterSpacing: 0.02,
+          fontWeight: g ? 600 : 400,
+          letterSpacing: g ? 0.02 : undefined,
           flexShrink: 0
         }}
       >
@@ -4139,10 +4308,10 @@ function SummaryCard({ label, value, variant }) {
           style={{
             fontSize: compactValue ? 18 : 16,
             fontWeight: 700,
-            color: "#f8fafc",
+            color: g ? g.valueColor : undefined,
             wordBreak: "break-word",
             lineHeight: compactValue ? 1.3 : 1.35,
-            textShadow: "0 1px 2px rgba(0,0,0,0.25)",
+            textShadow: g ? "0 1px 2px rgba(0,0,0,0.25)" : undefined,
             whiteSpace: variant === "wetting" ? "pre-line" : undefined
           }}
         >
@@ -4156,7 +4325,8 @@ function SummaryCard({ label, value, variant }) {
             marginTop: compactValue ? 6 : 8,
             lineHeight: compactValue ? 1.32 : 1.35,
             fontWeight: 400,
-            color: "rgba(255, 255, 255, 0.55)",
+            color: g ? g.labelColor : "#94a3b8",
+            opacity: compactValue ? 0.82 : g ? 0.88 : 0.95,
             flexShrink: 0
           }}
         >
@@ -4238,13 +4408,15 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
           젖음 예측 (IDW)
         {Number.isFinite(Number(proxyTemp)) ? (
           <span style={{ fontWeight: 500, color: "#94a3b8", marginLeft: 8 }}>
-            {basis === "user" && Number.isFinite(Number(targetC))
-              ? `대표 행: 선택 ${Number(targetC).toFixed(0)}℃ · ${Number(proxyTemp).toFixed(0)}℃`
-              : basis === "auto_liq_plus_30" &&
-                  Number.isFinite(Number(liquidus)) &&
-                  Number.isFinite(Number(targetC))
-                ? `대표 행: 액상선 ${Number(liquidus).toFixed(1)}℃ +30°(목표≈${Number(targetC).toFixed(1)}℃) · ${Number(proxyTemp).toFixed(0)}℃`
-                : `대표 행: ${Number(proxyTemp).toFixed(0)}℃`}
+            {basis === "compare_shared"
+              ? `대표 행: 비교 공통 ${Number(proxyTemp).toFixed(0)}℃`
+              : basis === "user" && Number.isFinite(Number(targetC))
+                ? `대표 행: 선택 ${Number(targetC).toFixed(0)}℃ · ${Number(proxyTemp).toFixed(0)}℃`
+                : basis === "auto_liq_plus_30" &&
+                    Number.isFinite(Number(liquidus)) &&
+                    Number.isFinite(Number(targetC))
+                  ? `대표 행: 액상선 ${Number(liquidus).toFixed(1)}℃ +30°(목표≈${Number(targetC).toFixed(1)}℃) · ${Number(proxyTemp).toFixed(0)}℃`
+                  : `대표 행: ${Number(proxyTemp).toFixed(0)}℃`}
           </span>
         ) : null}
         </div>
@@ -4423,7 +4595,11 @@ function ResultSummaryBlock({
           value={formatWettingFmaxPrimary(result.props)}
           variant="wetting"
         />
-        <SummaryCard label="물성 DB 인장" value={formatTensileDbMpa(result.props)} variant="tensileDb" />
+        <SummaryCard
+          label={tensileSummaryLabel(result.props)}
+          value={formatTensilePrimary(result.props)}
+          variant="tensileDb"
+        />
       </div>
       <SummaryWettingTensileFootnotes />
       {result.alloy_inference &&
@@ -4545,29 +4721,29 @@ function splitCompareParagraphs(v) {
 }
 
 /** 비교 모드: IMC·위험도는 수치 표 밖 2열 카드로 표시 (가독성) */
-function CompareSummaryPair({ title, textA, textB, isLast }) {
+function CompareSummaryPair({ title, textA, textB, isLast, compact = false }) {
   const partsA = splitCompareParagraphs(textA);
   const partsB = splitCompareParagraphs(textB);
   const pStyle = (first) => ({
-    margin: first ? 0 : "12px 0 0 0",
-    fontSize: 13,
-    lineHeight: 1.65,
+    margin: first ? 0 : compact ? "6px 0 0 0" : "12px 0 0 0",
+    fontSize: compact ? 11 : 13,
+    lineHeight: compact ? 1.45 : 1.65,
     color: "var(--text-soft)",
     whiteSpace: "pre-line",
     wordBreak: "keep-all",
     overflowWrap: "anywhere"
   });
   const card = (accent) => ({
-    padding: "12px 14px",
-    borderRadius: 10,
+    padding: compact ? "8px 10px" : "12px 14px",
+    borderRadius: compact ? 8 : 10,
     border: "1px solid var(--border-default)",
     background: "#0b1220",
     borderLeft: `3px solid ${accent}`,
     minWidth: 0
   });
   return (
-    <div style={{ marginBottom: isLast ? 0 : 18 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 10 }}>{title}</div>
+    <div className={compact ? "compare-summary-pair compare-summary-pair--compact" : undefined} style={{ marginBottom: isLast ? 0 : compact ? 8 : 18 }}>
+      <div style={{ fontSize: compact ? 12 : 13, fontWeight: 600, color: "#e2e8f0", marginBottom: compact ? 6 : 10 }}>{title}</div>
       <div
         style={{
           display: "grid",
@@ -4589,15 +4765,15 @@ function CompareSummaryPair({ title, textA, textB, isLast }) {
             A (기준)
           </div>
           {partsA.map((p, i) => (
-            <p key={`a-${i}`} style={pStyle(i === 0)}>
+            <p key={`a-${i}`} className={compact ? "compare-summary-pair__text" : undefined} style={pStyle(i === 0)} title={compact ? p : undefined}>
               {p}
             </p>
           ))}
         </div>
         <div style={card("#fb923c")}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#fb923c", marginBottom: 8 }}>B</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#fb923c", marginBottom: compact ? 4 : 8 }}>B</div>
           {partsB.map((p, i) => (
-            <p key={`b-${i}`} style={pStyle(i === 0)}>
+            <p key={`b-${i}`} className={compact ? "compare-summary-pair__text" : undefined} style={pStyle(i === 0)} title={compact ? p : undefined}>
               {p}
             </p>
           ))}
@@ -4644,20 +4820,31 @@ function buildCompareHints(a, b) {
   if (Number.isFinite(shA) && Number.isFinite(shB) && Math.abs(shA - shB) > 3) {
     hints.push(
       shA > shB
-        ? `DB/모델 기준 전단강도는 A가 약 ${(shA - shB).toFixed(1)} MPa 더 높게 나왔습니다.`
-        : `DB/모델 기준 전단강도는 B가 약 ${(shB - shA).toFixed(1)} MPa 더 높게 나왔습니다.`
+        ? `물성 DB 유사 합금 기준 전단강도는 A가 약 ${(shA - shB).toFixed(1)} MPa 더 높게 나왔습니다.`
+        : `물성 DB 유사 합금 기준 전단강도는 B가 약 ${(shB - shA).toFixed(1)} MPa 더 높게 나왔습니다.`
     );
   }
   const fmaxA = Number(a?.props?.wetting_fmax_pred_mn);
   const fmaxB = Number(b?.props?.wetting_fmax_pred_mn);
+  const wetT = Number(a?.props?.wetting_temp_c);
+  const wetTempNote = Number.isFinite(wetT) ? `${wetT.toFixed(0)}℃ 공통 온도에서 ` : "";
   if (Number.isFinite(fmaxA) && Number.isFinite(fmaxB) && Math.abs(fmaxB - fmaxA) > 0.05) {
     hints.push(
       fmaxB > fmaxA
-        ? `동일 예측 온도 기준 예측 Fmax는 B가 약 ${(fmaxB - fmaxA).toFixed(2)} mN 더 큽니다.`
-        : `동일 예측 온도 기준 예측 Fmax는 A가 약 ${(fmaxA - fmaxB).toFixed(2)} mN 더 큽니다.`
+        ? `${wetTempNote}예측 Fmax는 B가 약 ${(fmaxB - fmaxA).toFixed(2)} mN 더 큽니다.`
+        : `${wetTempNote}예측 Fmax는 A가 약 ${(fmaxA - fmaxB).toFixed(2)} mN 더 큽니다.`
     );
   }
-  return hints.slice(0, 5);
+  const t0A = Number(a?.props?.wetting_t0_pred_s);
+  const t0B = Number(b?.props?.wetting_t0_pred_s);
+  if (Number.isFinite(t0A) && Number.isFinite(t0B) && Math.abs(t0B - t0A) > 0.03) {
+    hints.push(
+      t0B < t0A
+        ? `${wetTempNote}예측 T₀는 B가 약 ${(t0A - t0B).toFixed(2)} s 더 짧습니다(젖음 속도 유리).`
+        : `${wetTempNote}예측 T₀는 A가 약 ${(t0B - t0A).toFixed(2)} s 더 짧습니다(젖음 속도 유리).`
+    );
+  }
+  return hints.slice(0, 6);
 }
 
 function compareTempScale(a, b) {
@@ -4681,11 +4868,12 @@ function compareDeltaTone(delta) {
 
 function CompareTempBarChart({ a, b }) {
   const width = 640;
-  const height = 232;
-  const padL = 54;
-  const padR = 14;
-  const padT = 18;
-  const padB = 48;
+  const height = 176;
+  const padL = 48;
+  const padR = 28;
+  const padT = 14;
+  const padB = 36;
+  const groupInset = 20;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
   const { min, max } = compareTempScale(a, b);
@@ -4705,7 +4893,7 @@ function CompareTempBarChart({ a, b }) {
     { id: "peak", label: "피크", va: a?.peak, vb: b?.peak }
   ];
 
-  const groupW = plotW / categories.length;
+  const groupW = (plotW - groupInset * 2) / categories.length;
   const barW = Math.min(26, groupW * 0.2);
   const barGap = 5;
   const yTicks = [min, min + (max - min) * 0.5, max].map((t) => Math.round(t));
@@ -4746,6 +4934,7 @@ function CompareTempBarChart({ a, b }) {
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
       className="compare-hero-chart"
       role="img"
       aria-label="조성 A·B 융점 막대 비교 그래프"
@@ -4811,7 +5000,7 @@ function CompareTempBarChart({ a, b }) {
       <line x1={padL} y1={padT} x2={padL} y2={baseY} stroke="#64748b" strokeWidth={1.5} />
 
       {categories.map((cat, i) => {
-        const cx = padL + groupW * i + groupW / 2;
+        const cx = padL + groupInset + groupW * i + groupW / 2;
         const xA = cx - barW - barGap / 2;
         const xB = cx + barGap / 2;
         return (
@@ -4845,16 +5034,6 @@ function CompareTempBarChart({ a, b }) {
         온도 (℃)
       </text>
 
-      <g transform={`translate(${padL + plotW - 108}, ${padT + 6})`}>
-        <rect x={0} y={0} width={10} height={10} rx={2} fill="url(#compareBarGradA)" />
-        <text x={14} y={9} fill="#93c5fd" fontSize={10} fontFamily="inherit" fontWeight={600}>
-          A
-        </text>
-        <rect x={42} y={0} width={10} height={10} rx={2} fill="url(#compareBarGradB)" />
-        <text x={56} y={9} fill="#fdba74" fontSize={10} fontFamily="inherit" fontWeight={600}>
-          B
-        </text>
-      </g>
     </svg>
   );
 }
@@ -4899,6 +5078,10 @@ function CompareHeroPanel({ a, b, compA, compB }) {
         </div>
       </div>
 
+      <div className="compare-hero-legend" role="presentation" aria-hidden="true">
+        <span className="compare-hero-legend__item compare-hero-legend__item--a">A</span>
+        <span className="compare-hero-legend__item compare-hero-legend__item--b">B</span>
+      </div>
       <div className="compare-hero-chart-wrap">
         <CompareTempBarChart a={a} b={b} />
       </div>
@@ -4923,9 +5106,6 @@ function CompareHeroPanel({ a, b, compA, compB }) {
           );
         })}
       </div>
-      <p className="compare-hero-footnote">
-        막대 그래프는 고상선·액상선·피크(℃)를 A·B로 나란히 비교합니다. 아래 표에서 물성·젖음 수치를 확인하세요.
-      </p>
     </section>
   );
 }
@@ -4939,20 +5119,20 @@ function CompareView({ data, compA, compB }) {
   const hints = buildCompareHints(a, b);
 
   const compareLabelTd = {
-    padding: "6px 8px 6px 2px",
+    padding: "8px 10px 8px 0",
     borderBottom: "1px solid var(--bg-table-head)",
     whiteSpace: "nowrap",
     verticalAlign: "middle",
     color: "#e2e8f0",
     fontWeight: 500,
-    width: "1%",
-    maxWidth: "11rem"
+    fontSize: 13
   };
   const compareNumTd = {
-    padding: "6px 6px",
+    padding: "8px 10px",
     borderBottom: "1px solid var(--bg-table-head)",
     fontVariantNumeric: "tabular-nums",
-    verticalAlign: "middle"
+    verticalAlign: "middle",
+    fontSize: 13
   };
   const compareNumTdRight = {
     ...compareNumTd,
@@ -4972,7 +5152,6 @@ function CompareView({ data, compA, compB }) {
         <td
           style={{
             ...compareNumTdRight,
-            fontSize: 13,
             color:
               dNum == null
                 ? "#64748b"
@@ -4998,204 +5177,96 @@ function CompareView({ data, compA, compB }) {
     Number.isFinite(Number(b?.liquidus)) && Number.isFinite(Number(b?.solidus))
       ? Number(b.liquidus) - Number(b.solidus)
       : NaN;
+  const compareWetT = Number(a?.props?.wetting_temp_c);
+  const wetAtLabel = Number.isFinite(compareWetT) ? `(@${compareWetT.toFixed(0)}℃)` : "";
+  const wetFmaxLabel = wetAtLabel ? `젖음Fmax ${wetAtLabel}` : "젖음Fmax";
+  const shearLabel =
+    a?.props?.shear_strength_basis === "db_idw" || b?.props?.shear_strength_basis === "db_idw"
+      ? "전단 (BD유사)"
+      : "전단";
+  const tensileLabel = tensileCompareLabel(a, b);
+  const showDbTensile = showCompareDbTensileRow(a, b);
+  const wetT0Label = wetAtLabel ? `젖음T₀ ${wetAtLabel}` : "젖음T₀";
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 10
-        }}
-      >
-        <AiSessionUsageRow usage={data?.ai_usage_snapshot} />
-      </div>
-      <CompareHeroPanel a={a} b={b} compA={compA} compB={compB} />
+    <div className="compare-view">
+      <AiSessionUsageRow usage={data?.ai_usage_snapshot} />
 
       {(warnA || warnB) && (
-        <div
-          style={{
-            marginBottom: 10,
-            padding: "8px 10px",
-            borderRadius: 8,
-            border: "1px solid #b45309",
-            background: "rgba(180, 83, 9, 0.12)",
-            fontSize: 13,
-            color: "#fed7aa",
-            lineHeight: 1.45
-          }}
-        >
-          <strong style={{ color: "#fdba74" }}>조성 합계 확인</strong>
-          {warnA ? (
-            <div>
-              A 합계 {sumA.toFixed(2)}% - 일반적으로 100%에 맞추는 것이 비교에 유리합니다.
-            </div>
-          ) : null}
-          {warnB ? (
-            <div>
-              B 합계 {sumB.toFixed(2)}% - 일반적으로 100%에 맞추는 것이 비교에 유리합니다.
-            </div>
-          ) : null}
+        <div className="compare-view__warn">
+          <strong>조성 합계</strong>
+          {warnA ? <span>A {sumA.toFixed(2)}%</span> : null}
+          {warnB ? <span>B {sumB.toFixed(2)}%</span> : null}
         </div>
       )}
 
-      {hints.length > 0 && (
-        <div
-          style={{
-            marginBottom: 10,
-            padding: "8px 10px",
-            borderRadius: 8,
-            border: "1px solid #334155",
-            background: "#0b1220",
-            fontSize: 13,
-            color: "var(--text-soft)",
-            lineHeight: 1.5
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4, color: "#e2e8f0" }}>
-            해석 힌트 (모델·DB 기준)
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {hints.map((h, i) => (
-              <li key={i} style={{ marginBottom: 2 }}>
-                {h}
-              </li>
-            ))}
-          </ul>
+      <div className="compare-view__grid">
+        <div className="compare-view__primary">
+          <CompareHeroPanel a={a} b={b} compA={compA} compB={compB} />
+
+          <table className="compare-metrics-table">
+            <colgroup>
+              <col className="compare-metrics-col-label" />
+              <col className="compare-metrics-col-num" />
+              <col className="compare-metrics-col-num" />
+              <col className="compare-metrics-col-diff" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="compare-metrics-th compare-metrics-th--label" />
+                <th className="compare-metrics-th compare-metrics-th--a">A</th>
+                <th className="compare-metrics-th compare-metrics-th--b">B</th>
+                <th className="compare-metrics-th compare-metrics-th--diff" title="B − A (기준: 조성 A)">
+                  B−A
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rowD("고상선", a?.solidus, b?.solidus, "℃")}
+              {rowD("액상선", a?.liquidus, b?.liquidus, "℃")}
+              {rowD(
+                "용융구간",
+                Number.isFinite(meltA) ? meltA : null,
+                Number.isFinite(meltB) ? meltB : null,
+                "℃"
+              )}
+              {rowD("피크", a?.peak, b?.peak, "℃")}
+              {rowD("신뢰도", a?.confidence, b?.confidence, "%")}
+              {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa")}
+              {rowD(tensileLabel, a?.props?.tensile_strength, b?.props?.tensile_strength, " MPa")}
+              {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN")}
+              {rowD(wetT0Label, a?.props?.wetting_t0_pred_s, b?.props?.wetting_t0_pred_s, " s")}
+              {showDbTensile
+                ? rowD(
+                    "DB인장",
+                    a?.props?.tensile_strength_basis === "db_idw"
+                      ? null
+                      : a?.props?.tensile_strength_db_mpa,
+                    b?.props?.tensile_strength_basis === "db_idw"
+                      ? null
+                      : b?.props?.tensile_strength_db_mpa,
+                    " MPa"
+                  )
+                : null}
+            </tbody>
+          </table>
         </div>
-      )}
 
-      {/* 수치 비교 표: 항목 열은 rem 고정 → 레이블·숫자 간 빈 공간 최소화, 본문 열은 나머지 폭 */}
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "min(100%, 900px)",
-          overflowX: "auto",
-          marginBottom: 10,
-          WebkitOverflowScrolling: "touch"
-        }}
-      >
-        <table
-          style={{
-            width: "100%",
-            minWidth: 520,
-            tableLayout: "fixed",
-            borderCollapse: "collapse",
-            fontSize: 13
-          }}
-        >
-          <colgroup>
-            <col style={{ width: "9.25rem" }} />
-            <col />
-            <col />
-            <col style={{ width: "5.75rem" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  padding: "6px 6px 6px 2px",
-                  whiteSpace: "nowrap",
-                  verticalAlign: "bottom",
-                  width: "1%"
-                }}
-              />
-              <th
-                style={{
-                  textAlign: "right",
-                  padding: "6px 6px",
-                  color: "#60a5fa",
-                  whiteSpace: "nowrap",
-                  verticalAlign: "bottom"
-                }}
-              >
-                A (기준)
-              </th>
-              <th
-                style={{
-                  textAlign: "right",
-                  padding: "6px 6px",
-                  color: "#fb923c",
-                  whiteSpace: "nowrap",
-                  verticalAlign: "bottom"
-                }}
-              >
-                B
-              </th>
-              <th
-                style={{
-                  textAlign: "right",
-                  padding: "6px 6px",
-                  color: "#94a3b8",
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                  verticalAlign: "bottom"
-                }}
-                title="B − A (기준: 조성 A)"
-              >
-                B − A
-              </th>
-            </tr>
-          </thead>
-        <tbody>
-          {rowD("고상선", a?.solidus, b?.solidus, "℃")}
-          {rowD("액상선", a?.liquidus, b?.liquidus, "℃")}
-          {rowD(
-            "용융 구간",
-            Number.isFinite(meltA) ? meltA : null,
-            Number.isFinite(meltB) ? meltB : null,
-            "℃"
+        <div className="compare-view__secondary">
+          {hints.length > 0 && (
+            <details className="compare-hints">
+              <summary>해석 힌트 ({hints.length})</summary>
+              <ul>
+                {hints.map((h, i) => (
+                  <li key={i}>{h}</li>
+                ))}
+              </ul>
+            </details>
           )}
-          {rowD("피크", a?.peak, b?.peak, "℃")}
-          {rowD("신뢰도", a?.confidence, b?.confidence, "%")}
-          {rowD(
-            "전단강도",
-            a?.props?.shear_strength,
-            b?.props?.shear_strength,
-            " MPa"
-          )}
-          {rowD(
-            "인장강도",
-            a?.props?.tensile_strength,
-            b?.props?.tensile_strength,
-            " MPa"
-          )}
-          {rowD(
-            "젖음 Fmax (mN)",
-            a?.props?.wetting_fmax_pred_mn,
-            b?.props?.wetting_fmax_pred_mn,
-            ""
-          )}
-          {rowD(
-            "물성 DB 인장",
-            a?.props?.tensile_strength_db_mpa,
-            b?.props?.tensile_strength_db_mpa,
-            " MPa"
-          )}
-        </tbody>
-        </table>
-      </div>
 
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "min(100%, 960px)",
-          marginTop: 8,
-          marginBottom: 4,
-          paddingTop: 12,
-          borderTop: "1px solid var(--border-default)"
-        }}
-      >
-        <CompareSummaryPair title="IMC 요약" textA={a?.imc_line} textB={b?.imc_line} />
-        <CompareSummaryPair
-          title="위험도 요약"
-          textA={a?.risk_line}
-          textB={b?.risk_line}
-          isLast
-        />
+          <CompareSummaryPair title="IMC" textA={a?.imc_line} textB={b?.imc_line} />
+          <CompareSummaryPair title="위험도" textA={a?.risk_line} textB={b?.risk_line} isLast />
+        </div>
       </div>
 
       <PropertyBars a={a} b={b} />
@@ -5217,6 +5288,7 @@ function PropertyBars({ a, b }) {
     { key: "yield_strength", label: "항복강도 (MPa)" },
     { key: "elongation", label: "연신율 (%)" },
     { key: "wetting_fmax_pred_mn", label: "Fmax (mN)" },
+    { key: "wetting_t0_pred_s", label: "T₀ (s)" },
     { key: "tensile_strength_db_mpa", label: "물성 DB 인장 (MPa)" },
     { key: "tensile_strength_lit_mpa", label: "문헌 참고 인장 (MPa)" }
   ];
@@ -5250,9 +5322,13 @@ function PropertyBars({ a, b }) {
         물성 시각 비교
       </div>
       {metrics.map((mtr) => {
-        const av = Number(a?.props?.[mtr.key] || 0);
-        const bv = Number(b?.props?.[mtr.key] || 0);
-        if (!av && !bv) return null;
+        const rawA = a?.props?.[mtr.key];
+        const rawB = b?.props?.[mtr.key];
+        const hasA = rawA !== null && rawA !== undefined && rawA !== "";
+        const hasB = rawB !== null && rawB !== undefined && rawB !== "";
+        if (!hasA && !hasB) return null;
+        const av = hasA ? Number(rawA) : 0;
+        const bv = hasB ? Number(rawB) : 0;
         /* 항목마다 스케일 분리: MPa·%·지수를 한 max로 나누면 왜곡됨 */
         const denom = Math.max(av, bv, 1e-9);
         const awPct = av > 0 ? (av / denom) * 100 : 0;

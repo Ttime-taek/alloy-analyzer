@@ -4,8 +4,14 @@
 from .SOLDER_PROPERTIES_DB import SOLDER_PROPERTIES_DB
 from .solder_properties import rows_for_alloy
 from .utils import composition_distance
+import math
 import re
 import statistics
+
+# 전단 IDW: 근접 블렌드 불가 시에도 유사 BD로 추정 (합금족 정렬)
+_SHEAR_IDW_MAX_DIST = 12.0
+_SHEAR_IDW_DIST_FLOOR = 0.35
+_SHEAR_IDW_DIST_POWER = 1.6
 
 
 # ------------------------------------------------
@@ -125,6 +131,128 @@ def get_statistics(alloy_name):
 # ------------------------------------------------
 # ③ 조성 유사도 기반 가중 예측
 # ------------------------------------------------
+def _unique_alloy_candidates(input_comp):
+    """SOLDER_PROPERTIES_DB 합금별 최소 거리·조성."""
+    by_name: dict = {}
+    for row in SOLDER_PROPERTIES_DB:
+        db_comp = parse_alloy(row["alloy"])
+        if not db_comp:
+            continue
+        dist = float(composition_distance(input_comp, db_comp))
+        name = row["alloy"]
+        if name not in by_name or dist < by_name[name]["dist"]:
+            by_name[name] = {"dist": dist, "comp": db_comp}
+    return by_name
+
+
+def _shear_family_weight(input_comp, db_comp, dist):
+    """Bi·Ag 정렬로 SAC vs SAC+Bi 전단 혼입을 줄임."""
+    bi_in = float(input_comp.get("Bi", 0) or 0.0)
+    bi_db = float(db_comp.get("Bi", 0) or 0.0)
+    ag_in = float(input_comp.get("Ag", 0) or 0.0)
+    ag_db = float(db_comp.get("Ag", 0) or 0.0)
+
+    w_dist = 1.0 / (float(dist) + _SHEAR_IDW_DIST_FLOOR) ** _SHEAR_IDW_DIST_POWER
+
+    if bi_in >= 0.3:
+        if bi_db < 0.3:
+            w_family = 0.08
+        else:
+            w_family = 2.8 * math.exp(-abs(bi_in - bi_db) / 1.8)
+            w_family *= math.exp(-abs(ag_in - ag_db) / 2.5)
+    else:
+        if bi_db >= 1.0:
+            w_family = 0.15
+        else:
+            w_family = 1.0 * math.exp(-abs(ag_in - ag_db) / 3.5)
+
+    return w_dist * w_family
+
+
+def predict_shear_from_db(input_comp, max_dist=_SHEAR_IDW_MAX_DIST):
+    """
+    전단 전용 IDW — 합금족(Bi 유무·함량, Ag 근접) 가중.
+    근접 물성 DB 블렌드(dist≤3)가 없을 때 표시·비교용.
+    """
+    by_name = _unique_alloy_candidates(input_comp)
+    if not by_name:
+        return None
+
+    best_dist = min(v["dist"] for v in by_name.values())
+    if best_dist > float(max_dist):
+        return None
+
+    weighted_values = []
+    weights = []
+
+    for name, item in by_name.items():
+        dist = float(item["dist"])
+        if dist > float(max_dist):
+            continue
+        stats = get_statistics(name)
+        if not stats or not stats.get("shear"):
+            continue
+        mean = float(stats["shear"]["mean"])
+        n = int(stats["shear"]["n"] or 1)
+        w = _shear_family_weight(input_comp, item["comp"], dist) * n
+        if w <= 0.0:
+            continue
+        weighted_values.append(mean * w)
+        weights.append(w)
+
+    if not weights:
+        return None
+    return sum(weighted_values) / sum(weights)
+
+
+def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, top_k=3):
+    """전단 IDW 값 + 상위 기여 합금(근거 표시용)."""
+    by_name = _unique_alloy_candidates(input_comp)
+    if not by_name:
+        return {"value": None, "best_dist": None, "top": []}
+
+    best_dist = min(v["dist"] for v in by_name.values())
+    contributors = []
+    for name, item in sorted(by_name.items(), key=lambda x: x[1]["dist"]):
+        dist = float(item["dist"])
+        if dist > float(max_dist):
+            continue
+        stats = get_statistics(name)
+        if not stats or not stats.get("shear"):
+            continue
+        mean = float(stats["shear"]["mean"])
+        n = int(stats["shear"]["n"] or 1)
+        w = _shear_family_weight(input_comp, item["comp"], dist) * n
+        if w <= 0.0:
+            continue
+        contributors.append(
+            {
+                "alloy": name,
+                "dist": dist,
+                "shear_mpa": mean,
+                "weight": w,
+            }
+        )
+
+    if not contributors:
+        return {"value": None, "best_dist": float(best_dist), "top": []}
+
+    total_w = sum(c["weight"] for c in contributors)
+    value = sum(c["shear_mpa"] * c["weight"] for c in contributors) / total_w
+    contributors.sort(key=lambda x: x["weight"], reverse=True)
+    top = []
+    for c in contributors[:top_k]:
+        top.append(
+            {
+                "alloy": c["alloy"],
+                "dist": c["dist"],
+                "shear_mpa": c["shear_mpa"],
+                "weight_share": float(c["weight"] / total_w) if total_w > 0 else 0.0,
+            }
+        )
+    return {"value": float(value), "best_dist": float(best_dist), "top": top}
+
+
 def predict_from_db(input_comp):
     candidates = []
 
