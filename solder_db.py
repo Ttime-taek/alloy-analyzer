@@ -69,6 +69,17 @@ def fingerprint_solder_db(db) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def comp_signature(comp):
+    """조성 dict 중복 판정용 시그니처."""
+    return tuple(
+        sorted(
+            (str(k), round(float(v), 6))
+            for k, v in (comp or {}).items()
+            if abs(float(v)) > 1e-12
+        )
+    )
+
+
 # ================================================================
 # 주요 합금군 Tag (상변태/IMC/리플로우 구간 분석용)
 # ================================================================
@@ -120,6 +131,23 @@ def classify_eutectic(comp):
     return "non-eutectic"
 
 
+def _make_source_entry(name, elements, solidus, liquidus, density=None):
+    """Sn 잔량 보정 포함 소스 행 빌더."""
+    comp = {str(k): float(v) for k, v in (elements or {}).items()}
+    if "Sn" not in comp:
+        comp["Sn"] = round(100.0 - sum(comp.values()), 4)
+    row = {
+        "name": str(name),
+        "comp": comp,
+        "solidus": float(solidus),
+        "liquidus": float(liquidus),
+        "source": "Heesung summary 2013-06-28",
+    }
+    if density is not None:
+        row["density"] = float(density)
+    return row
+
+
 # ================================================================
 # 원본 DB + 정규화 + 메타데이터 자동 추가
 # ================================================================
@@ -163,19 +191,58 @@ _raw_db = [
     {"name": "Sn1Ag0.8Cu8In10Bi", "comp": {"Ag": 1.0, "Bi": 10.0, "Cu": 0.8, "In": 8.0, "Sn": 80.2}, "solidus": 159.0, "liquidus": 200.0},
 ]
 
+# Heesung summary sheet ("종합") rows with explicit solidus/liquidus.
+# Existing DB 조성과 완전히 같은 조성은 아래 합류 단계에서 자동 스킵한다.
+_HEESUNG_SUMMARY_20130628 = [
+    _make_source_entry("Sn-0.5Cu-0.03Ni-0.015P", {"Cu": 0.5, "Ni": 0.03, "P": 0.015}, 227, 231, 7.3),
+    _make_source_entry("Sn-0.3Cu-0.03Ni-0.015P", {"Cu": 0.3, "Ni": 0.03, "P": 0.015}, 227, 231, 7.3),
+    _make_source_entry("Sn-3.0Ag-0.5Cu-0.015P", {"Ag": 3.0, "Cu": 0.5, "P": 0.015}, 217, 220, 7.4),
+    _make_source_entry("Sn-3.0Ag-0.5Cu-0.013Bi-0.01Sb", {"Ag": 3.0, "Cu": 0.5, "Bi": 0.013, "Sb": 0.01}, 217, 220, 7.4),
+    _make_source_entry("Sn-0.7Cu-0.015P", {"Cu": 0.7, "P": 0.015}, 227, 227, 7.3),
+    _make_source_entry("Sn-4.0Cu-0.05Ni-0.01P-0.015Ga", {"Cu": 4.0, "Ni": 0.05, "P": 0.01, "Ga": 0.015}, 228, 355, 7.4),
+    _make_source_entry("Sn-3.0Cu-0.5Ni-0.01P-0.015Ga", {"Cu": 3.0, "Ni": 0.5, "P": 0.01, "Ga": 0.015}, 217, 395, 7.4),
+    _make_source_entry("Sn-0.3Ag-0.7Cu-0.015P", {"Ag": 0.3, "Cu": 0.7, "P": 0.015}, 217, 227, 7.3),
+    _make_source_entry("Sn-0.3Ag-0.015P", {"Ag": 0.3, "P": 0.015}, 217, 227, 7.3),
+    _make_source_entry("Sn-0.03Ni-0.015P", {"Ni": 0.03, "P": 0.015}, 227, 231, 7.3),
+    _make_source_entry("Sn-3.0Ag-0.15P", {"Ag": 3.0, "P": 0.15}, 217, 221, 7.36),
+    _make_source_entry("Sn-3.0Ag-0.5Cu-0.003Ni-0.0075Ge", {"Ag": 3.0, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075}, 217, 219),
+    _make_source_entry("Sn-3.0Ag-0.5Cu-0.003Ni-0.0035P", {"Ag": 3.0, "Cu": 0.5, "Ni": 0.003, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-3.0Ag-0.5Cu-0.003Ni-0.0075Ge-0.0035P", {"Ag": 3.0, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-4.0Ag-0.5Cu-0.003Ni-0.0075Ge", {"Ag": 4.0, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075}, 217, 219),
+    _make_source_entry("Sn-4.0Ag-0.5Cu-0.003Ni-0.0075Ge-0.0035P", {"Ag": 4.0, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-2.7Ag-0.5Cu-0.003Ni-0.0075Ge-0.0035P", {"Ag": 2.7, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-2.5Ag-0.5Cu-0.003Ni-0.0075Ge-0.0035P", {"Ag": 2.5, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-0.015P", {"P": 0.015}, 230, 232),
+    _make_source_entry("Sn-3.5Cu-0.006P", {"Cu": 3.5, "P": 0.006}, 228, 320, 7.3),
+    _make_source_entry("Sn-1.0Ag-0.5Cu-0.015P", {"Ag": 1.0, "Cu": 0.5, "P": 0.015}, 217, 219),
+    _make_source_entry("Sn-1.0Ag-0.015P", {"Ag": 1.0, "P": 0.015}, 217, 219),
+    _make_source_entry("Sn-3.4Ag-0.017Ni-0.0075Ge-0.0035P", {"Ag": 3.4, "Ni": 0.017, "Ge": 0.0075, "P": 0.0035}, 218, 223),
+    _make_source_entry("Sn-1.0Ag-0.5Cu-0.003Ni-0.0075Ge", {"Ag": 1.0, "Cu": 0.5, "Ni": 0.003, "Ge": 0.0075}, 217, 219),
+    _make_source_entry("Sn-3.0Ag-0.2Cu-0.003Ni-0.0075Ge", {"Ag": 3.0, "Cu": 0.2, "Ni": 0.003, "Ge": 0.0075}, 217, 219),
+    _make_source_entry("Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge", {"Ag": 1.2, "Cu": 0.5, "Ni": 0.05, "Ge": 0.0075}, 217, 219),
+    _make_source_entry("Sn-1.2Ag-0.5Cu-0.05Ni-0.0035Ge-0.01P", {"Ag": 1.2, "Cu": 0.5, "Ni": 0.05, "Ge": 0.0035, "P": 0.01}, 217, 219),
+    _make_source_entry("Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge-0.0035P", {"Ag": 1.2, "Cu": 0.5, "Ni": 0.05, "Ge": 0.0075, "P": 0.0035}, 217, 219),
+    _make_source_entry("Sn-1.2Ag-0.5Cu-0.02Ni-0.0085Ge-0.0035P", {"Ag": 1.2, "Cu": 0.5, "Ni": 0.02, "Ge": 0.0085, "P": 0.0035}, 217, 219),
+]
+
 
 # ================================================================
 # 최종 DB 구성 (정규화 + 메타데이터 추가)
 # ================================================================
 SOLDER_DB = []
+_seen_comp_signatures = set()
 
-for entry in _raw_db:
+for entry in [*_raw_db, *_HEESUNG_SUMMARY_20130628]:
     entry["comp"] = normalize_comp(entry["comp"])
     validate_alloy(entry)
+    sig = comp_signature(entry["comp"])
+    if sig in _seen_comp_signatures:
+        continue
 
     entry["family"] = classify_family(entry["comp"])
     entry["eutectic_type"] = classify_eutectic(entry["comp"])
 
     SOLDER_DB.append(entry)
+    _seen_comp_signatures.add(sig)
 
 SOLDER_DB_FINGERPRINT = fingerprint_solder_db(SOLDER_DB)

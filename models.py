@@ -14,7 +14,7 @@ def snap_wetting_temp_to_bd_grid(target_c: float) -> float:
     """250–290℃ 범위로 클램프한 뒤, 측정 DB와 동일한 입력 온도 목록에 가장 가깝게 스냅."""
     lo, hi = min(WETTING_TEMPS_C), max(WETTING_TEMPS_C)
     t = max(min(float(target_c), hi), lo)
-    return float(min(WETTING_TEMPS_C, key=lambda x: abs(x - t)))
+    return float(min(WETTING_TEMPS_C, key=lambda x: (abs(x - t), -x)))
 
 
 def default_wetting_temp_c(liquidus: float) -> float:
@@ -24,8 +24,9 @@ def default_wetting_temp_c(liquidus: float) -> float:
 
 def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> float:
     """비교 모드 자동: 더 높은 액상선+30℃ 목표를 BD 격자(250–290℃)에 한 번 스냅해 A·B 공통 온도로 사용."""
-    hi_liq = max(float(liquidus_a or 0.0), float(liquidus_b or 0.0))
-    return snap_wetting_temp_to_bd_grid(hi_liq + 30.0)
+    ta = default_wetting_temp_c(float(liquidus_a or 0.0))
+    tb = default_wetting_temp_c(float(liquidus_b or 0.0))
+    return float(max(ta, tb))
 
 class PropertyModels:
 

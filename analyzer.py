@@ -99,7 +99,7 @@ class AlloyAnalyzer:
         KNOWN_CORE_ELEMENTS
         | {
             "Ge", "Co", "Ga", "Au", "Pd", "Pt", "Al",
-            "Cd", "Cr", "Hg", "Tl", "Se", "Te",
+            "Cd", "Cr", "Hg", "Tl", "Se", "Te", "P",
         }
     )
 
@@ -173,6 +173,7 @@ class AlloyAnalyzer:
                 "comp_tuple": tuple(sorted(item["comp"].items())),
                 "solidus": item["solidus"],
                 "liquidus": item["liquidus"],
+                "density": item.get("density"),
             }
             for item in self.db
         ]
@@ -287,6 +288,45 @@ class AlloyAnalyzer:
         unknown.sort()
         return unknown, float(total)
 
+    def _db_sample_support_factor(self, alloy_name):
+        """
+        Return a conservative 0..1 support factor based on DB sample count.
+
+        The composition match can be exact, but if the property database only
+        has one or two measurements, the result should not be shown as fully
+        certain.
+        """
+        if not alloy_name:
+            return 1.0, 0
+        try:
+            from .db_regression import get_statistics
+        except Exception:
+            return 1.0, 0
+
+        stats = get_statistics(alloy_name)
+        if not isinstance(stats, dict):
+            return 1.0, 0
+
+        counts = []
+        for key in ("tensile", "yield_strength", "elongation", "shear"):
+            stat = stats.get(key)
+            if isinstance(stat, dict):
+                try:
+                    n = int(stat.get("n") or 0)
+                except Exception:
+                    n = 0
+                if n > 0:
+                    counts.append(n)
+
+        if not counts:
+            return 0.75, 0
+
+        n = min(counts)
+        import math
+
+        support = 0.75 + 0.25 * (1.0 - math.exp(-max(0, n - 1) / 3.0))
+        return max(0.75, min(1.0, float(support))), int(n)
+
     def build_evidence(self, norm, melting_detail, score, conf, props, prop_sources, db_out):
         """
         UI/리포트용 근거 블록. analyze_all 경로와 GUI _run_single 경로에서 공통 사용.
@@ -316,6 +356,15 @@ class AlloyAnalyzer:
             # 실측 DB와 사실상 동일한 조성은 모델 블렌드 없이 DB 값을 그대로 우선한다.
             db_w = 1.0
 
+        db_support_n = None
+        db_support_factor = None
+        if isinstance(db_top, list) and db_top:
+            db_best_name = (db_top[0] or {}).get("alloy")
+            try:
+                db_support_factor, db_support_n = self._db_sample_support_factor(db_best_name)
+            except Exception:
+                db_support_factor, db_support_n = None, None
+
         ps = dict(prop_sources) if isinstance(prop_sources, dict) else {}
         return {
             "melting": {
@@ -332,6 +381,8 @@ class AlloyAnalyzer:
                 "best_dist": db_best_dist,
                 "use_db": bool(use_db),
                 "db_w": float(db_w),
+                "support_n": db_support_n,
+                "support_factor": float(db_support_factor) if db_support_factor is not None else None,
                 "top": db_top[:5] if isinstance(db_top, list) else [],
             },
             "ai": {
@@ -438,6 +489,11 @@ class AlloyAnalyzer:
                 score = d
 
         confidence = self.calc_confidence(score)
+        try:
+            support_factor, _ = self._db_sample_support_factor(best["name"] if best else None)
+            confidence *= float(support_factor)
+        except Exception:
+            pass
         return best, score, confidence
 
     # ============================================================
@@ -764,6 +820,12 @@ class AlloyAnalyzer:
             wetting_temp_basis=wetting_temp_basis,
             include_wetting_grid=include_wetting_grid,
         )
+        try:
+            best_density = (best or {}).get("density")
+            if best_density is not None:
+                props["density"] = float(best_density)
+        except Exception:
+            pass
 
         # DB 기반 물성 보정 (properties DB)
         # - 기존: DB 예측값을 항상 덮어쓰기 → Bi계(또는 Cu-free)에서 과매칭 가능
@@ -887,34 +949,31 @@ class AlloyAnalyzer:
             props["yield_strength_basis"] = "db_blend"
 
         # 인장: 근접 블렌드·문헌 소폭 보정 없으면 MODEL 대신 BD IDW(또는 문헌) 표시
-        if prop_sources.get("tensile_strength") == "MODEL":
+        try:
+            mdl_t = props.get("tensile_strength")
+            if mdl_t is not None:
+                props["tensile_strength_model_mpa"] = float(mdl_t)
+        except Exception:
+            pass
+        tv = props.get("tensile_strength_db_mpa")
+        lv = props.get("tensile_strength_lit_mpa")
+        if tv is not None:
             try:
-                mdl_t = props.get("tensile_strength")
-                if mdl_t is not None:
-                    props["tensile_strength_model_mpa"] = float(mdl_t)
+                props["tensile_strength"] = float(tv)
+                props["tensile_strength_basis"] = "db_priority"
+                d_t = db_best_dist
+                prop_sources["tensile_strength"] = (
+                    f"DB(priority,d={float(d_t):.1f})" if d_t is not None else "DB(priority)"
+                )
             except Exception:
                 pass
-            tv = props.get("tensile_strength_db_mpa")
-            lv = props.get("tensile_strength_lit_mpa")
-            if tv is not None and db_w > 0.0:
-                try:
-                    props["tensile_strength"] = float(tv)
-                    props["tensile_strength_basis"] = "db_idw"
-                    d_t = db_best_dist
-                    prop_sources["tensile_strength"] = (
-                        f"DB(IDW,d={float(d_t):.1f})" if d_t is not None else "DB(IDW)"
-                    )
-                except Exception:
-                    pass
-            elif lv is not None:
-                try:
-                    props["tensile_strength"] = float(lv)
-                    props["tensile_strength_basis"] = "lit_ref"
-                    prop_sources["tensile_strength"] = "LIT(ref)"
-                except Exception:
-                    pass
-        elif str(prop_sources.get("tensile_strength", "")).startswith("DB(blend"):
-            props["tensile_strength_basis"] = "db_blend"
+        elif lv is not None and prop_sources.get("tensile_strength") == "MODEL":
+            try:
+                props["tensile_strength"] = float(lv)
+                props["tensile_strength_basis"] = "lit_ref"
+                prop_sources["tensile_strength"] = "LIT(ref)"
+            except Exception:
+                pass
         elif str(prop_sources.get("tensile_strength", "")).startswith("LIT"):
             props["tensile_strength_basis"] = "lit_blend"
 

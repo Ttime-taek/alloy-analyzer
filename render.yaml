@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: alloy-analyzer-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/about
+    envVars:
+      - key: ALLOY_SERVE_STATIC
+        value: "0"
+      - key: ALLOY_API_CORS
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -8,6 +8,7 @@ import {
   reflowChartData
 } from "./analysisChartReport.js";
 import { useChartInstance } from "./useChartInstance.js";
+import { apiUrl } from "./api.js";
 
 const chartGrid = { color: "#334155" };
 const chartTicks = { color: "#94a3b8", font: { size: 11 } };
@@ -219,7 +220,7 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/wetting_grid", {
+        const res = await fetch(apiUrl("/api/wetting_grid"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comp: payload.result.norm })

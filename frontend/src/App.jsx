@@ -9,6 +9,7 @@ import {
   readReflowTuningGoalInitial as _readReflowTuningGoalInitial
 } from "./reflow_tune_engine.js";
 import AnalysisReportSlideshow from "./AnalysisReportSlideshow.jsx";
+import { apiUrl } from "./api.js";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -389,8 +390,8 @@ export default function App() {
     const check = async () => {
       try {
         const [aboutRes, openApiRes] = await Promise.all([
-          fetch(`/api/about?_=${Date.now()}`),
-          fetch(`/openapi.json?_=${Date.now()}`)
+          fetch(apiUrl(`/api/about?_=${Date.now()}`)),
+          fetch(apiUrl(`/openapi.json?_=${Date.now()}`))
         ]);
         if (cancelled) return;
         let aboutOk = false;
@@ -515,7 +516,7 @@ export default function App() {
     const putAc = new AbortController();
     const putT = window.setTimeout(() => putAc.abort(), FAVORITES_PUT_TIMEOUT_MS);
     try {
-      const res = await fetch("/api/favorites", {
+      const res = await fetch(apiUrl("/api/favorites"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ favorites: nextFavorites }),
@@ -656,7 +657,7 @@ export default function App() {
       const getAc = new AbortController();
       const getT = window.setTimeout(() => getAc.abort(), FAVORITES_FETCH_TIMEOUT_MS);
       try {
-        const res = await fetch("/api/favorites", { signal: getAc.signal });
+        const res = await fetch(apiUrl("/api/favorites"), { signal: getAc.signal });
         window.clearTimeout(loadingTimer);
         loadingTimer = null;
         if (res.ok) {
@@ -705,7 +706,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/about")
+    fetch(apiUrl("/api/about"))
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!cancelled && j && typeof j === "object" && j.product) setAboutInfo(j);
@@ -909,7 +910,7 @@ export default function App() {
         if (wettingTempSelect !== "auto") {
           payload.wetting_temp_c = Number(wettingTempSelect);
         }
-        res = await fetch("/api/analyze", {
+        res = await fetch(apiUrl("/api/analyze"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -920,7 +921,7 @@ export default function App() {
         if (wettingTempSelect !== "auto") {
           payload.wetting_temp_c = Number(wettingTempSelect);
         }
-        res = await fetch("/api/compare", {
+        res = await fetch(apiUrl("/api/compare"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -1001,7 +1002,7 @@ export default function App() {
     setWettingGridLoading(true);
     setWettingGridError("");
     try {
-      const res = await fetch("/api/wetting_grid", {
+      const res = await fetch(apiUrl("/api/wetting_grid"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ comp: result.norm })
@@ -1070,7 +1071,7 @@ export default function App() {
     }
     setMeltRecLoading(true);
     try {
-      const res = await fetch("/api/recommend_melt", {
+      const res = await fetch(apiUrl("/api/recommend_melt"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1245,6 +1246,7 @@ export default function App() {
     "In",
     "Sb",
     "Ni",
+    "P",
     "Zn",
     "Pb",
     "Au",
@@ -4159,8 +4161,14 @@ function formatTensilePrimary(props) {
   return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : formatTensileDbMpa(props);
 }
 
+function formatDensityPrimary(props) {
+  const v = Number(props?.density);
+  return Number.isFinite(v) ? `${v.toFixed(2)} g/cm³` : "N/A";
+}
+
 function tensileSummaryLabel(props) {
   const basis = props?.tensile_strength_basis;
+  if (basis === "db_priority") return "인장 (DB우선)";
   if (basis === "db_idw") return "인장 (BD유사 IDW)";
   if (basis === "lit_ref") return "인장 (문헌 참고)";
   if (basis === "lit_blend") return "인장 (문헌 보정)";
@@ -4170,6 +4178,7 @@ function tensileSummaryLabel(props) {
 
 function tensileCompareLabel(a, b) {
   const bases = [a?.props?.tensile_strength_basis, b?.props?.tensile_strength_basis];
+  if (bases.some((x) => x === "db_priority")) return "인장 (DB우선)";
   if (bases.some((x) => x === "db_idw")) return "인장 (BD유사)";
   if (bases.some((x) => x === "lit_ref")) return "인장 (문헌)";
   if (bases.some((x) => x === "lit_blend")) return "인장 (문헌보정)";
@@ -4177,8 +4186,8 @@ function tensileCompareLabel(a, b) {
 }
 
 function showCompareDbTensileRow(a, b) {
-  const hideA = a?.props?.tensile_strength_basis === "db_idw";
-  const hideB = b?.props?.tensile_strength_basis === "db_idw";
+  const hideA = ["db_priority", "db_idw"].includes(a?.props?.tensile_strength_basis);
+  const hideB = ["db_priority", "db_idw"].includes(b?.props?.tensile_strength_basis);
   if (hideA && hideB) return false;
   const hasA = !hideA && Number.isFinite(Number(a?.props?.tensile_strength_db_mpa));
   const hasB = !hideB && Number.isFinite(Number(b?.props?.tensile_strength_db_mpa));
@@ -4595,11 +4604,13 @@ function ResultSummaryBlock({
           value={formatWettingFmaxPrimary(result.props)}
           variant="wetting"
         />
-        <SummaryCard
-          label={tensileSummaryLabel(result.props)}
-          value={formatTensilePrimary(result.props)}
-          variant="tensileDb"
-        />
+        {Number.isFinite(Number(result.props?.density)) ? (
+          <SummaryCard
+            label="비중"
+            value={formatDensityPrimary(result.props)}
+            variant="overallConfidence"
+          />
+        ) : null}
       </div>
       <SummaryWettingTensileFootnotes />
       {result.alloy_inference &&
@@ -5184,7 +5195,6 @@ function CompareView({ data, compA, compB }) {
     a?.props?.shear_strength_basis === "db_idw" || b?.props?.shear_strength_basis === "db_idw"
       ? "전단 (BD유사)"
       : "전단";
-  const tensileLabel = tensileCompareLabel(a, b);
   const showDbTensile = showCompareDbTensileRow(a, b);
   const wetT0Label = wetAtLabel ? `젖음T₀ ${wetAtLabel}` : "젖음T₀";
 
@@ -5233,16 +5243,16 @@ function CompareView({ data, compA, compB }) {
               {rowD("피크", a?.peak, b?.peak, "℃")}
               {rowD("신뢰도", a?.confidence, b?.confidence, "%")}
               {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa")}
-              {rowD(tensileLabel, a?.props?.tensile_strength, b?.props?.tensile_strength, " MPa")}
               {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN")}
               {rowD(wetT0Label, a?.props?.wetting_t0_pred_s, b?.props?.wetting_t0_pred_s, " s")}
+              {rowD("비중", a?.props?.density, b?.props?.density, " g/cm³")}
               {showDbTensile
                 ? rowD(
                     "DB인장",
-                    a?.props?.tensile_strength_basis === "db_idw"
+                    ["db_priority", "db_idw"].includes(a?.props?.tensile_strength_basis)
                       ? null
                       : a?.props?.tensile_strength_db_mpa,
-                    b?.props?.tensile_strength_basis === "db_idw"
+                    ["db_priority", "db_idw"].includes(b?.props?.tensile_strength_basis)
                       ? null
                       : b?.props?.tensile_strength_db_mpa,
                     " MPa"
@@ -5284,7 +5294,6 @@ function fmt(v, unit = "") {
 function PropertyBars({ a, b }) {
   const metrics = [
     { key: "shear_strength", label: "전단강도 (MPa)" },
-    { key: "tensile_strength", label: "인장강도 (MPa)" },
     { key: "yield_strength", label: "항복강도 (MPa)" },
     { key: "elongation", label: "연신율 (%)" },
     { key: "wetting_fmax_pred_mn", label: "Fmax (mN)" },
@@ -7282,7 +7291,3 @@ function openReflowChartInNewWindow(payload) {
     window.alert(`새 창 렌더링 실패: ${msg}`);
   }
 }
-
-
-
-

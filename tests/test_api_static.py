@@ -74,6 +74,16 @@ class ApiStaticSmokeTest(unittest.TestCase):
         )
         self.assertNotEqual(r.status_code, 422, r.text[:500])
 
+    def test_analyze_accepts_p_alloy_and_returns_density(self) -> None:
+        r = self.client.post(
+            "/api/analyze",
+            json={"comp": {"Sn": 99.455, "Cu": 0.5, "Ni": 0.03, "P": 0.015}},
+        )
+        self.assertEqual(r.status_code, 200, r.text[:500])
+        data = r.json()
+        self.assertEqual(data["best_name"], "Sn-0.5Cu-0.03Ni-0.015P")
+        self.assertAlmostEqual(float(data["props"]["density"]), 7.3, places=3)
+
     def test_compare_uses_shared_wetting_temp(self) -> None:
         r = self.client.post(
             "/api/compare",
