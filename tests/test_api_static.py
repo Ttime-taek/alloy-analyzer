@@ -101,3 +101,11 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertEqual(ta, 260.0)
         self.assertEqual(data["a"]["props"].get("wetting_temp_basis"), "compare_shared")
         self.assertEqual(data["b"]["props"].get("wetting_temp_basis"), "compare_shared")
+
+    def test_docker_frontend_stage_copies_shared_rules_before_build(self) -> None:
+        dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        shared_copy = "COPY shared/ /src/test7/shared/"
+        build_command = "RUN npm run build"
+
+        self.assertIn(shared_copy, dockerfile)
+        self.assertLess(dockerfile.index(shared_copy), dockerfile.index(build_command))

@@ -10,6 +10,7 @@ WORKDIR /src/test7/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+COPY shared/ /src/test7/shared/
 RUN npm run build
 
 # ── 2) API + 정적 UI ────────────────────────────────────────────
