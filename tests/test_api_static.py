@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -109,3 +110,51 @@ class ApiStaticSmokeTest(unittest.TestCase):
 
         self.assertIn(shared_copy, dockerfile)
         self.assertLess(dockerfile.index(shared_copy), dockerfile.index(build_command))
+
+    def test_favorites_reads_from_supabase_when_configured(self) -> None:
+        stored = [{"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}]
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(
+                api_mod,
+                "read_supabase_favorites",
+                new=AsyncMock(return_value=stored),
+            ),
+        ):
+            response = self.client.get("/api/favorites")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["storage"], "supabase")
+        self.assertEqual(response.json()["favorites"], stored)
+
+    def test_favorites_writes_to_supabase_when_configured(self) -> None:
+        payload = {
+            "favorites": [
+                {"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}
+            ]
+        }
+        writer = AsyncMock()
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(api_mod, "write_supabase_favorites", new=writer),
+        ):
+            response = self.client.put("/api/favorites", json=payload)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["storage"], "supabase")
+        writer.assert_awaited_once_with(payload["favorites"])
+
+    def test_favorites_returns_503_when_supabase_is_unavailable(self) -> None:
+        failure = api_mod.FavoritesStoreError("Supabase unavailable")
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(
+                api_mod,
+                "read_supabase_favorites",
+                new=AsyncMock(side_effect=failure),
+            ),
+        ):
+            response = self.client.get("/api/favorites")
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn("Supabase unavailable", response.text)

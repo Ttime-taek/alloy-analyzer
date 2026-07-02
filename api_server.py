@@ -97,6 +97,21 @@ except Exception:
     except Exception:
         load_env_keys = None  # type: ignore
 
+try:
+    from .favorites_store import (  # type: ignore
+        FavoritesStoreError,
+        read_supabase_favorites,
+        supabase_configured,
+        write_supabase_favorites,
+    )
+except ImportError:
+    from test7.favorites_store import (  # type: ignore
+        FavoritesStoreError,
+        read_supabase_favorites,
+        supabase_configured,
+        write_supabase_favorites,
+    )
+
 
 def _load_gemini_key_from_file() -> None:
     """
@@ -610,6 +625,7 @@ class WebFavoriteItem(BaseModel):
 
 class WebFavoritesPayload(BaseModel):
     favorites: List[WebFavoriteItem] = Field(default_factory=list)
+    storage: str = "local"
 
     @field_validator("favorites")
     @classmethod
@@ -786,6 +802,16 @@ async def get_favorites() -> WebFavoritesPayload:
     web이 비어 있으면 GUI용 favorites.json을 읽어 자동 이관합니다
     (localhost vs 192.168 접속 시 localStorage가 달라 비던 경우 대비).
     """
+    if supabase_configured():
+        try:
+            items = await read_supabase_favorites()
+        except FavoritesStoreError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        return WebFavoritesPayload(
+            favorites=[WebFavoriteItem(**x) for x in items],
+            storage="supabase",
+        )
+
     items = _read_web_favorites_file()
     if not items:
         items = _read_gui_favorites_as_list()
@@ -794,18 +820,28 @@ async def get_favorites() -> WebFavoritesPayload:
                 _write_web_favorites_file(items)
             except Exception:
                 pass
-    return WebFavoritesPayload(favorites=[WebFavoriteItem(**x) for x in items])
+    return WebFavoritesPayload(
+        favorites=[WebFavoriteItem(**x) for x in items],
+        storage="local",
+    )
 
 
 @app.put("/api/favorites", response_model=WebFavoritesPayload)
 async def put_favorites(body: WebFavoritesPayload) -> WebFavoritesPayload:
     """웹 즐겨찾기 전체 교체(최대 20개)."""
     items = [{"name": x.name, "comp": dict(x.comp)} for x in body.favorites]
+    if supabase_configured():
+        try:
+            await write_supabase_favorites(items)
+        except FavoritesStoreError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        return WebFavoritesPayload(favorites=body.favorites, storage="supabase")
+
     try:
         _write_web_favorites_file(items)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"즐겨찾기 저장 실패: {e}") from e
-    return WebFavoritesPayload(favorites=body.favorites)
+    return WebFavoritesPayload(favorites=body.favorites, storage="local")
 
 
 @app.post("/api/analyze", response_model=AnalysisResponse)
@@ -1208,4 +1244,3 @@ if __name__ == "__main__":
     # reload=True는 import-string 형태가 아니면 경고가 뜨고,
     # (이 프로젝트는) 실제로는 수동 재시작으로 충분합니다.
     uvicorn.run(app, host=_host, port=_port, reload=False)
-

@@ -33,6 +33,12 @@ Add secrets in the Render dashboard, never in Git:
 
 - `GEMINI_API_KEY` when Gemini features are required
 - `CEREBRAS_API_KEY` when Cerebras features are required
+- `SUPABASE_URL` for persistent shared favorites
+- `SUPABASE_SERVICE_ROLE_KEY` for server-only Supabase access
+
+Create the Supabase table by running `supabase/schema.sql` in the Supabase SQL
+editor. The service-role key must only be configured on the Render backend;
+never expose it through a `VITE_` environment variable.
 
 The health endpoint is `/api/about`.
 
