@@ -51,8 +51,8 @@ const DEFAULT_REFLOW_TUNE = {
 };
 
 /** 즐겨찾기 API가 응답 없을 때 UI가 영구히 "불러오는 중..."에 머물지 않도록 */
-const FAVORITES_FETCH_TIMEOUT_MS = 12000;
-const FAVORITES_PUT_TIMEOUT_MS = 15000;
+const FAVORITES_FETCH_TIMEOUT_MS = 70000;
+const FAVORITES_PUT_TIMEOUT_MS = 70000;
 
 /** /api/about 실패 시에도 데모·보고용 신뢰 문구 표시 */
 const TRUST_FALLBACK = {
@@ -508,7 +508,10 @@ export default function App() {
     }
   };
 
-  const syncFavoritesToServer = async (nextFavorites, { silent = false } = {}) => {
+  const syncFavoritesToServer = async (
+    nextFavorites,
+    { silent = false, allowEmpty = false } = {}
+  ) => {
     if (!silent) {
       setFavSyncStatus("syncing");
       setFavSyncMessage("즐겨찾기 서버 동기화 중...");
@@ -519,7 +522,10 @@ export default function App() {
       const res = await fetch(apiUrl("/api/favorites"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ favorites: nextFavorites }),
+        body: JSON.stringify({
+          favorites: nextFavorites,
+          allow_empty: allowEmpty
+        }),
         signal: putAc.signal
       });
       if (!res.ok) {
@@ -1434,7 +1440,7 @@ export default function App() {
     setSelectedFavoriteName("");
     if (selectedFavoriteNameB === removed) setSelectedFavoriteNameB("");
     saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false });
+    await syncFavoritesToServer(next, { silent: false, allowEmpty: true });
   };
 
   const saveFavoriteB = async () => {
@@ -1482,7 +1488,7 @@ export default function App() {
     setSelectedFavoriteNameB("");
     if (selectedFavoriteName === removed) setSelectedFavoriteName("");
     saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false });
+    await syncFavoritesToServer(next, { silent: false, allowEmpty: true });
   };
 
   const toggleSection = (key) => {

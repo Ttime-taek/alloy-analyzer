@@ -626,6 +626,7 @@ class WebFavoriteItem(BaseModel):
 class WebFavoritesPayload(BaseModel):
     favorites: List[WebFavoriteItem] = Field(default_factory=list)
     storage: str = "local"
+    allow_empty: bool = False
 
     @field_validator("favorites")
     @classmethod
@@ -832,6 +833,16 @@ async def put_favorites(body: WebFavoritesPayload) -> WebFavoritesPayload:
     items = [{"name": x.name, "comp": dict(x.comp)} for x in body.favorites]
     if supabase_configured():
         try:
+            if not items and not body.allow_empty:
+                existing = await read_supabase_favorites()
+                if existing:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Refusing to replace existing favorites with an empty "
+                            "list without allow_empty=true."
+                        ),
+                    )
             await write_supabase_favorites(items)
         except FavoritesStoreError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e

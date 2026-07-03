@@ -158,3 +158,34 @@ class ApiStaticSmokeTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503, response.text)
         self.assertIn("Supabase unavailable", response.text)
+
+    def test_favorites_rejects_accidental_empty_supabase_overwrite(self) -> None:
+        stored = [{"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}]
+        writer = AsyncMock()
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(
+                api_mod,
+                "read_supabase_favorites",
+                new=AsyncMock(return_value=stored),
+            ),
+            patch.object(api_mod, "write_supabase_favorites", new=writer),
+        ):
+            response = self.client.put("/api/favorites", json={"favorites": []})
+
+        self.assertEqual(response.status_code, 409, response.text)
+        writer.assert_not_awaited()
+
+    def test_favorites_allows_explicit_empty_supabase_overwrite(self) -> None:
+        writer = AsyncMock()
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(api_mod, "write_supabase_favorites", new=writer),
+        ):
+            response = self.client.put(
+                "/api/favorites",
+                json={"favorites": [], "allow_empty": True},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        writer.assert_awaited_once_with([])
