@@ -36,8 +36,8 @@ _SYSTEM_PROMPT = (
 class CerebrasChatEngine:
     """Minimal Cerebras chat completion wrapper used as an AIEngine fallback."""
 
-    def __init__(self, *, model: str = "llama3.1-8b") -> None:
-        self.model = model
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = (model or load_env_key("CEREBRAS_MODEL") or "gpt-oss-120b").strip()
         self.api_key = load_env_key("CEREBRAS_API_KEY").strip()
         self.available = False
         self._client = None
@@ -61,7 +61,7 @@ class CerebrasChatEngine:
             self.available = False
             self.last_error = f"Cerebras 초기화 실패: {e}"
 
-    def ask(self, prompt: str, *, max_tokens: int = 600, temperature: float = 0.2) -> str:
+    def ask(self, prompt: str, *, max_tokens: int = 1000, temperature: float = 0.2) -> str:
         """
         Return plain text from Cerebras chat completion.
         On failure, returns an empty string so the caller can keep its own fallback path.
@@ -70,17 +70,25 @@ class CerebrasChatEngine:
             return ""
 
         try:
-            resp: Any = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": str(prompt or "")},
                 ],
-                temperature=float(temperature),
-                max_tokens=int(max_tokens),
-            )
+                "temperature": float(temperature),
+                "max_completion_tokens": int(max_tokens),
+            }
+            if self.model.startswith("gpt-oss"):
+                kwargs["reasoning_effort"] = "low"
+            resp: Any = self._client.chat.completions.create(**kwargs)
             try:
-                return resp.choices[0].message.content  # type: ignore[attr-defined]
+                msg = resp.choices[0].message  # type: ignore[attr-defined]
+                text = getattr(msg, "content", None)
+                if text:
+                    return str(text)
+                self.last_error = "Cerebras returned no message content."
+                return ""
             except Exception:
                 return str(resp)
         except Exception as e:
