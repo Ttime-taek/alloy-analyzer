@@ -111,6 +111,11 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertIn(shared_copy, dockerfile)
         self.assertLess(dockerfile.index(shared_copy), dockerfile.index(build_command))
 
+    def test_render_runtime_requirements_include_cloud_ai_sdks(self) -> None:
+        requirements = (_ROOT / "requirements-fastapi.txt").read_text(encoding="utf-8")
+        self.assertIn("google-generativeai", requirements)
+        self.assertIn("cerebras-cloud-sdk", requirements)
+
     def test_favorites_reads_from_supabase_when_configured(self) -> None:
         stored = [{"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}]
         with (
