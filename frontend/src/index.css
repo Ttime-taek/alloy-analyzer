@@ -975,6 +975,18 @@ summary:focus-visible,
     box-sizing: border-box;
   }
 
+  .compare-compose-fav-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .compare-compose-fav-row > span,
+  .compare-compose-fav-row > select,
+  .compare-compose-fav-row > .tactile-hit {
+    width: 100%;
+  }
+
   .result-imc-chip {
     min-height: 44px;
     padding: 10px 14px;
