@@ -31,6 +31,22 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertTrue(data["api_features"].get("recommend_melt"))
         self.assertTrue(data["api_features"].get("compare_shared_wetting"))
 
+    def test_light_routes_do_not_initialize_analysis_runtime(self) -> None:
+        # Regression: keep cold-start lighter for /api/about and /api/favorites.
+        api_mod._AlloyAnalyzerClass = None
+        api_mod._AIEngineClass = None
+        api_mod._SOLDER_DB = None
+        api_mod._ai_engine = None
+        api_mod._analyzer = None
+
+        about = self.client.get("/api/about")
+        favorites = self.client.get("/api/favorites")
+
+        self.assertEqual(about.status_code, 200, about.text)
+        self.assertEqual(favorites.status_code, 200, favorites.text)
+        self.assertIsNone(api_mod._ai_engine)
+        self.assertIsNone(api_mod._analyzer)
+
     def test_openapi_lists_recommend_melt(self) -> None:
         r = self.client.get("/openapi.json")
         self.assertEqual(r.status_code, 200, r.text)

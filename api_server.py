@@ -31,20 +31,21 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+if TYPE_CHECKING:
+    from .ai_engine import AIEngine  # type: ignore
+    from .analyzer import AlloyAnalyzer  # type: ignore
+
 # 패키지/직접 실행 모두 지원:
 # - python -m test7.api_server
 # - python -m api_server  (상위 경로를 PYTHONPATH에 추가한 경우)
 try:
-    from .analyzer import AlloyAnalyzer  # type: ignore
-    from .solder_db import SOLDER_DB  # type: ignore
-    from .ai_engine import AIEngine  # type: ignore
     from .app_meta import about_api_payload, API_VERSION_SEMVER, PRODUCT_NAME  # type: ignore
 except ImportError:
     # package context가 아닐 때는 상위 디렉터리를 sys.path에 추가
@@ -52,9 +53,6 @@ except ImportError:
 
     root = Path(__file__).resolve().parent
     sys.path.insert(0, str(root.parent))
-    from test7.analyzer import AlloyAnalyzer  # type: ignore
-    from test7.solder_db import SOLDER_DB  # type: ignore
-    from test7.ai_engine import AIEngine  # type: ignore
     from test7.app_meta import about_api_payload, API_VERSION_SEMVER, PRODUCT_NAME  # type: ignore
 
 try:
@@ -156,10 +154,65 @@ def _coerce_response_str(v: Any) -> str:
     return str(v)
 
 
+_AlloyAnalyzerClass = None
+_AIEngineClass = None
+_SOLDER_DB = None
+
+
+def _load_analysis_runtime() -> tuple[Any, Any, Any]:
+    global _AlloyAnalyzerClass, _AIEngineClass, _SOLDER_DB
+    if _AlloyAnalyzerClass is not None and _AIEngineClass is not None and _SOLDER_DB is not None:
+        return _AlloyAnalyzerClass, _AIEngineClass, _SOLDER_DB
+    try:
+        from .ai_engine import AIEngine as _RuntimeAIEngine  # type: ignore
+        from .analyzer import AlloyAnalyzer as _RuntimeAlloyAnalyzer  # type: ignore
+        from .solder_db import SOLDER_DB as _RuntimeSolderDB  # type: ignore
+    except ImportError:
+        from test7.ai_engine import AIEngine as _RuntimeAIEngine  # type: ignore
+        from test7.analyzer import AlloyAnalyzer as _RuntimeAlloyAnalyzer  # type: ignore
+        from test7.solder_db import SOLDER_DB as _RuntimeSolderDB  # type: ignore
+    _AlloyAnalyzerClass = _RuntimeAlloyAnalyzer
+    _AIEngineClass = _RuntimeAIEngine
+    _SOLDER_DB = _RuntimeSolderDB
+    return _AlloyAnalyzerClass, _AIEngineClass, _SOLDER_DB
+
+
+def _alloy_analyzer_cls() -> Any:
+    analyzer_cls, _, _ = _load_analysis_runtime()
+    return analyzer_cls
+
+
+class _LazyRuntimeSymbol:
+    def __init__(self, symbol_name: str):
+        self.symbol_name = symbol_name
+
+    def _resolve(self) -> Any:
+        analyzer_cls, ai_engine_cls, solder_db = _load_analysis_runtime()
+        if self.symbol_name == "AlloyAnalyzer":
+            return analyzer_cls
+        if self.symbol_name == "AIEngine":
+            return ai_engine_cls
+        if self.symbol_name == "SOLDER_DB":
+            return solder_db
+        raise AttributeError(self.symbol_name)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._resolve()(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+
+AlloyAnalyzer = _LazyRuntimeSymbol("AlloyAnalyzer")
+AIEngine = _LazyRuntimeSymbol("AIEngine")
+SOLDER_DB = _LazyRuntimeSymbol("SOLDER_DB")
+
+
 def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
     """CompositionRequest / CompareRequest 공통: wt% 조성 dict 검증."""
     if not isinstance(v, dict) or not v:
         raise ValueError(f"{label}는 최소 1개 이상의 원소를 포함해야 합니다.")
+    analyzer_cls = _alloy_analyzer_cls()
     clean: Dict[str, float] = {}
     for k, val in v.items():
         if not isinstance(k, str) or not k.strip():
@@ -172,10 +225,10 @@ def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
             raise ValueError(f"{k} 값은 0 이상이어야 합니다.")
         sk = k.strip()
         try:
-            canon = AlloyAnalyzer.canonical_element_symbol(sk)
+            canon = analyzer_cls.canonical_element_symbol(sk)
         except ValueError as e:
             raise ValueError(f"{label}: {e}") from e
-        if canon not in AlloyAnalyzer.KNOWN_PERIODIC_METALS:
+        if canon not in analyzer_cls.KNOWN_PERIODIC_METALS:
             raise ValueError(f"{label}: 지원하지 않는 원소 기호: {sk}")
         clean[canon] = float(clean.get(canon, 0.0)) + f
     total_wt = float(sum(clean.values()))
@@ -772,12 +825,12 @@ if (os.getenv("ALLOY_API_CORS") or "").strip().lower() not in ("0", "false", "no
         allow_headers=["*"],
     )
 
-_ai_engine: AIEngine | None = None
-_analyzer: AlloyAnalyzer | None = None
+_ai_engine: Any | None = None
+_analyzer: Any | None = None
 _analyzer_lock = threading.Lock()
 
 
-def _get_engine_bundle() -> tuple[AIEngine, AlloyAnalyzer]:
+def _get_engine_bundle() -> tuple[Any, Any]:
     """무거운 AI/Gemini 초기화를 첫 요청까지 지연해 `/openapi.json` 등 가벼운 엔드포인트 응답을 빠르게 합니다."""
     global _ai_engine, _analyzer
     if _analyzer is not None and _ai_engine is not None:
@@ -785,7 +838,8 @@ def _get_engine_bundle() -> tuple[AIEngine, AlloyAnalyzer]:
     with _analyzer_lock:
         if _analyzer is None or _ai_engine is None:
             _ai_engine = AIEngine()  # GEMINI_API_KEY가 없으면 자동으로 로컬 폴백
-            _analyzer = AlloyAnalyzer(SOLDER_DB, ai_engine=_ai_engine)
+            _, _, runtime_solder_db = _load_analysis_runtime()
+            _analyzer = AlloyAnalyzer(runtime_solder_db, ai_engine=_ai_engine)
     return _ai_engine, _analyzer
 
 
