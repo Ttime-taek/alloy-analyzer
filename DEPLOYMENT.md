@@ -63,6 +63,27 @@ start_all.bat
 The local build leaves `VITE_API_BASE_URL` empty, so API calls remain on
 `http://localhost:8000`.
 
+## 5. QA smoke check
+
+Run the shared browser + API smoke after local changes or deployment updates.
+
+Local:
+
+```bash
+py -3 scripts\qa_reverify_playwright.py --label local
+```
+
+Deploy:
+
+```bash
+py -3 scripts\qa_reverify_playwright.py --label deploy ^
+  --base-url https://alloy-analyzer.vercel.app/ ^
+  --api-url https://alloy-analyzer.onrender.com
+```
+
+Reports are written to `.gstack/qa-reports/qa-smoke-*.json` and screenshots to
+`.gstack/qa-reports/screenshots/`.
+
 ## Data synchronization
 
 The current alloy database is source-controlled Python data. Company PC and
