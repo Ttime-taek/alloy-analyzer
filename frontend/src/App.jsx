@@ -644,6 +644,7 @@ export default function App() {
     let cancelled = false;
     (async () => {
       /** 빠른 응답이면 "불러오는 중" 문구를 잠깐도 보이지 않게 해 첫 로드 불안 완화 */
+      let hasLocalSeed = false;
       let loadingTimer = window.setTimeout(() => {
         if (!cancelled) {
           setFavSyncStatus("syncing");
@@ -658,6 +659,18 @@ export default function App() {
         }
       } catch {
         // ignore
+      }
+
+      if (fromLocal.length > 0 && !cancelled) {
+        hasLocalSeed = true;
+        setFavorites(fromLocal);
+        setFavSyncStatus("syncing");
+        setFavSyncMessage("저장된 즐겨찾기를 먼저 표시하고 서버와 동기화 중...");
+      }
+
+      if (hasLocalSeed && loadingTimer) {
+        window.clearTimeout(loadingTimer);
+        loadingTimer = null;
       }
 
       const getAc = new AbortController();
@@ -678,7 +691,6 @@ export default function App() {
             return;
           }
           if (fromLocal.length > 0) {
-            setFavorites(fromLocal);
             await syncFavoritesToServer(fromLocal, { silent: false });
             return;
           }
