@@ -661,12 +661,43 @@ summary:focus-visible,
   line-height: 1.55;
 }
 
+.app-intro-copy {
+  font-size: 15px;
+  color: var(--text-soft);
+}
+
+.app-section-note {
+  font-size: 14px;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.app-helper-copy {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.58;
+}
+
+.app-helper-copy strong {
+  color: var(--text-dim);
+}
+
+.app-helper-copy--compact {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.52;
+}
+
+.app-inline-note {
+  color: var(--text-dim);
+}
+
 /* 메인 2컬럼: 좁은 화면에서 한 열로 — 열 간격 소폭 확대로 밀도 완화 */
 .app-main-grid {
   display: grid;
   /* min 480px: 1440px 뷰에서 3열 쪼개짐 방지 → 비교 A/B 2열 container query 동작 */
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
-  gap: 28px;
+  gap: 24px;
   align-items: start;
 }
 
@@ -951,17 +982,39 @@ summary:focus-visible,
 @media (max-width: 768px) {
   .app-main-grid {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 14px;
   }
 
   /* 노치·홈 인디케이터와 겹침 방지 */
   .app-shell {
-    padding: 16px !important;
-    padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
-    padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
-    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)) !important;
+    padding: 14px !important;
+    padding-left: max(14px, env(safe-area-inset-left, 0px)) !important;
+    padding-right: max(14px, env(safe-area-inset-right, 0px)) !important;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px)) !important;
     font-size: 15px;
     line-height: 1.55;
+  }
+
+  .app-intro-copy {
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+
+  .app-section-note {
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .app-helper-copy {
+    font-size: 12.5px;
+    line-height: 1.56;
+  }
+
+  .app-helper-copy--compact,
+  .app-inline-note {
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   /* 터치 권장 최소 44×44 (버튼·폼 컨트롤) */
@@ -978,7 +1031,7 @@ summary:focus-visible,
   .compare-compose-fav-row {
     flex-direction: column;
     align-items: stretch;
-    gap: 6px;
+    gap: 5px;
   }
 
   .compare-compose-fav-row > span,
@@ -1006,6 +1059,17 @@ summary:focus-visible,
 
   .result-prose-head {
     font-size: 13px;
+  }
+
+  .empty-state-guide {
+    padding: 28px 20px !important;
+    gap: 12px;
+    margin-top: 6px;
+  }
+
+  .empty-state-guide__copy {
+    max-width: 22rem;
+    line-height: 1.55;
   }
 
   /* 주기율표 7열 그리드: 뷰포트가 좁으면 셀 너비가 44px 미만이 됨 → 최소 폭 보장 + 가로 스크롤 (감사 FINDING-002) */
@@ -2342,6 +2406,12 @@ summary:focus-visible,
     0 10px 35px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   margin-top: 10px;
+}
+
+.empty-state-guide__copy {
+  max-width: 30rem;
+  line-height: 1.6;
+  color: var(--text-soft) !important;
 }
 
 .empty-state-guide__icon {

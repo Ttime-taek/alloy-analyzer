@@ -1637,15 +1637,16 @@ export default function App() {
           </span>
         </div>
         <p
+          className="app-intro-copy"
           style={{
-            color: "#9ca3af",
-            marginBottom: 10,
+            color: "var(--text-soft)",
+            marginBottom: 12,
             lineHeight: 1.55,
             maxWidth: 820
           }}
         >
           {aboutInfo?.tagline ||
-            "합금 조성을 입력하면 융점·상·IMC·리플로우 추천을 한 번에 제공합니다."}
+            "합금 조성을 입력하면 융점·상·IMC·리플로우 추천을 바로 확인할 수 있습니다."}
         </p>
         {(favSyncStatus === "offline" || favSyncStatus === "error") && (
           <div
@@ -1719,7 +1720,7 @@ export default function App() {
         >
           {trustOpen
             ? "▼ 처리 방식·출처·면책 접기"
-            : "▸ 처리 방식·데이터 출처·면책 보기 (발표·보고용)"}
+            : "▸ 처리 방식·데이터 출처·면책 보기"}
         </TactileButton>
         {trustOpen ? (
           <div
@@ -1849,21 +1850,20 @@ export default function App() {
               onToggle={() => setMeltSearchOpen((v) => !v)}
               rightHint={mode === "compare" ? "선택" : ""}
             >
-            <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
-              기본은 데이터시트에 흔한 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
+            <p className="app-helper-copy" style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+              기본은 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
               <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi</strong> 격자를 스윕하고 나머지는{" "}
-              <strong style={{ color: "#94a3b8" }}>Sn</strong>으로 맞춥니다. 표에는 격자 후보와 목표 온도에 맞는{" "}
-              <strong style={{ color: "#94a3b8" }}>DB 등록 합금</strong>이 함께 나옵니다. 결과는 오른쪽 분석 패널
-              상단에 붙습니다.
+              <strong style={{ color: "#94a3b8" }}>Sn</strong>으로 맞춥니다. 표에는 후보와{" "}
+              <strong style={{ color: "#94a3b8" }}>DB 등록 합금</strong>이 함께 나오고, 결과는 오른쪽 상단에 붙습니다.
             </p>
             {meltSupport === "checking" ? (
               <p role="status" style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
                 API 확인 중…
               </p>
             ) : null}
-            <p style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
-              실행 시 약 <strong style={{ color: "#94a3b8" }}>10~20초</strong> 걸릴 수 있습니다. 끝날 때까지 이
-              페이지를 두세요.
+            <p className="app-helper-copy app-helper-copy--compact" style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
+              실행은 약 <strong style={{ color: "#94a3b8" }}>10~20초</strong> 걸릴 수 있습니다. 끝날 때까지 이 페이지를
+              유지하세요.
             </p>
             {meltSupport === "no" ? (
               <div
@@ -2025,10 +2025,10 @@ export default function App() {
                 </ModeButton>
               </div>
 
-              <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
+              <div className="app-section-note" style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
                 {mode === "single"
-                  ? "조성 A만 입력 후 분석을 실행합니다."
-                  : "조성 A·B 입력 후 분석을 실행합니다."}
+                  ? "조성 A만 입력해 분석합니다."
+                  : "조성 A·B를 함께 분석합니다."}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
                 <span style={{ fontSize: 13, color: "#9ca3af" }}>문헌 검색:</span>
@@ -2042,8 +2042,8 @@ export default function App() {
                   onClick={() => setLiteratureMode("deep")}
                   label="정밀"
                 />
-                <span style={{ fontSize: 13, color: "#64748b" }}>
-                  {literatureMode === "deep" ? "출처를 더 깊게 검색(느릴 수 있음)" : "속도 우선"}
+                <span className="app-inline-note" style={{ fontSize: 13, color: "#64748b" }}>
+                  {literatureMode === "deep" ? "출처를 더 깊게 검색합니다." : "속도 우선"}
                 </span>
               </div>
               <div
@@ -2084,10 +2084,10 @@ export default function App() {
                   <option value="280">280 ℃</option>
                   <option value="290">290 ℃</option>
                 </select>
-                <span style={{ fontSize: 12, color: "#64748b", maxWidth: 420, lineHeight: 1.45 }}>
+                <span className="app-helper-copy app-helper-copy--compact" style={{ fontSize: 12, color: "#64748b", maxWidth: 420, lineHeight: 1.45 }}>
                   {mode === "compare"
-                    ? "비교 시 A·B 모두 동일 온도에서 젖음을 봅니다. 자동이면 각 액상선+30℃ 스냅값 중 더 높은 BD 격자(250–290℃)를 씁니다."
-                    : "기본은 액상선보다 약 +30℃를 목표로 하고, 젖음 DB와 동일한 250–290℃ 중 가장 가까운 값으로 맞춥니다. 필요하면 위에서 고정 온도를 고르세요."}
+                    ? "비교 시 A·B 모두 같은 온도에서 젖음을 봅니다. 자동이면 더 높은 기준 온도를 씁니다."
+                    : "기본은 액상선보다 약 +30℃를 목표로 하고, DB 기준과 가장 가까운 250–290℃ 값으로 맞춥니다."}
                 </span>
               </div>
             </div>
@@ -2725,6 +2725,7 @@ export default function App() {
             </div>
             {!loading && (
               <p
+                className="app-inline-note"
                 style={{
                   margin: "10px 0 0",
                   fontSize: 12,
@@ -2732,8 +2733,7 @@ export default function App() {
                   lineHeight: 1.45
                 }}
               >
-                융점·상분석·문헌 요약은 오른쪽 <span style={{ color: "#94a3b8", fontWeight: 600 }}>분석 결과</span>{" "}
-                카드에서 확인합니다.
+                결과는 오른쪽 <span style={{ color: "#94a3b8", fontWeight: 600 }}>분석 결과</span> 카드에서 확인합니다.
               </p>
             )}
             {loading && (
@@ -3083,18 +3083,17 @@ export default function App() {
             {!result && !compareResult && !error && !showMeltRecommendPanel && !loading && (
               <div className="empty-state-guide">
                 <div className="empty-state-guide__icon" style={{ fontSize: 32, opacity: 0.8 }}>⚗️</div>
-                <p style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
+                <p className="empty-state-guide__copy" style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
                   {mode === "compare" ? (
                     <>
                       왼쪽에서 <strong style={{ color: "#60a5fa" }}>조성 A</strong>와{" "}
                       <strong style={{ color: "#fb923c" }}>조성 B</strong>를 입력한 뒤{" "}
-                      <strong style={{ color: "#e5e7eb" }}>분석</strong>을 누르면 융점·물성 차이와
-                      IMC·위험도 비교가 여기 표시됩니다.
+                      <strong style={{ color: "#e5e7eb" }}>분석</strong>을 누르면 차이와 비교 결과가 여기 표시됩니다.
                     </>
                   ) : (
                     <>
                       왼쪽에서 원소와 wt%를 입력한 뒤 <strong style={{ color: "#e5e7eb" }}>분석</strong>을
-                      누르면 융점·상·문헌·AI 요약이 여기 표시됩니다.
+                      누르면 융점·상·요약이 여기 표시됩니다.
                     </>
                   )}
                 </p>
