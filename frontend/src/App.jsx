@@ -1392,6 +1392,64 @@ export default function App() {
     );
   };
 
+  const _renderFavoriteControls = ({ label, value, onChange, onDelete, optionPrefix = "" }) => {
+    const hasFavorites = favoritesSorted.length > 0;
+    const canDelete = hasFavorites && Boolean(value);
+    return (
+      <div className="compare-compose-fav-row" style={{ minHeight: 44 }}>
+        <span style={{ fontSize: 13, color: "#9ca3af" }}>{label}</span>
+        <select
+          onChange={(e) => onChange(e.target.value)}
+          value={value}
+          disabled={!hasFavorites}
+          style={{
+            background: "var(--bg-page)",
+            color: "#e5e7eb",
+            borderRadius: 6,
+            border: "1px solid var(--border-muted)",
+            fontSize: 13,
+            padding: "3px 6px",
+            minWidth: 160,
+            opacity: hasFavorites ? 1 : 0.72
+          }}
+        >
+          <option value="" disabled>
+            {hasFavorites ? "선택..." : "저장된 즐겨찾기 없음"}
+          </option>
+          {hasFavorites &&
+            favoritesSorted.map((f) => (
+              <option key={`${optionPrefix}${f.name}`} value={f.name}>
+                {f.name}
+              </option>
+            ))}
+        </select>
+        <TactileButton
+          onClick={onDelete}
+          disabled={!canDelete}
+          style={{
+            minHeight: 44,
+            padding: "10px 12px",
+            borderRadius: 6,
+            border: "1px solid #7f1d1d",
+            background: canDelete ? "#7f1d1d" : "var(--border-muted)",
+            color: "white",
+            fontSize: 13,
+            cursor: canDelete ? "pointer" : "default",
+            opacity: canDelete ? 1 : 0.8
+          }}
+        >
+          삭제
+        </TactileButton>
+        {!hasFavorites && favSyncStatus === "syncing" && (
+          <span style={{ fontSize: 13, color: favSyncColor }}>저장된 즐겨찾기 불러오는 중...</span>
+        )}
+        {!hasFavorites && favSyncStatus === "ok" && (
+          <span style={{ fontSize: 13, color: "#9ca3af" }}>저장된 즐겨찾기가 없습니다.</span>
+        )}
+      </div>
+    );
+  };
+
   const totalColor = (t, hasInput) => {
     if (!hasInput && Number(t) < 0.01) return "#64748b";
     if (compositionTotalIsComplete(t)) return "#22c55e";
@@ -2088,7 +2146,7 @@ export default function App() {
                   >
                     조성 A 즐겨찾기 저장
                   </TactileButton>
-                  {favorites.length > 0 && (
+                  {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>합금 불러오기</span>
                       <select
@@ -2214,7 +2272,7 @@ export default function App() {
                   >
                     A 즐겨찾기
                   </TactileButton>
-                  {favorites.length > 0 && (
+                  {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
@@ -2455,7 +2513,7 @@ export default function App() {
                   >
                     B 즐겨찾기
                   </TactileButton>
-                  {favorites.length > 0 && (
+                  {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
