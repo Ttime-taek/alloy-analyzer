@@ -3082,7 +3082,11 @@ export default function App() {
             )}
             {!result && !compareResult && !error && !showMeltRecommendPanel && !loading && (
               <div className="empty-state-guide">
+                <div className="empty-state-guide__eyebrow">분석 대기 중</div>
                 <div className="empty-state-guide__icon" style={{ fontSize: 32, opacity: 0.8 }}>⚗️</div>
+                <div className="empty-state-guide__title">
+                  {mode === "compare" ? "A/B 비교 결과가 여기에 표시됩니다." : "분석 결과가 여기에 표시됩니다."}
+                </div>
                 <p className="empty-state-guide__copy" style={{ margin: 0, fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>
                   {mode === "compare" ? (
                     <>
@@ -3097,6 +3101,17 @@ export default function App() {
                     </>
                   )}
                 </p>
+                <div className="empty-state-steps">
+                  <div className="empty-state-step">
+                    <span className="empty-state-step-num">1</span>
+                    <span>{mode === "compare" ? "조성 A와 B를 입력합니다." : "원소와 wt%를 입력합니다."}</span>
+                  </div>
+                  <div className="empty-state-step">
+                    <span className="empty-state-step-num">2</span>
+                    <span>{mode === "compare" ? "분석을 누르면 차이, IMC, 위험도가 정리됩니다." : "분석을 누르면 융점, 상, 요약이 정리됩니다."}</span>
+                  </div>
+                </div>
+                <div className="empty-state-guide__footer">입력은 왼쪽, 결과 해석은 오른쪽에서 이어집니다.</div>
               </div>
             )}
             {!result && !compareResult && error && (
