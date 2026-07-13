@@ -5248,12 +5248,15 @@ function CompareView({ data, compA, compB }) {
     const nb = Number(vb);
     const dText = fmtDelta(na, nb, unit);
     const dNum = Number.isFinite(na) && Number.isFinite(nb) ? nb - na : null;
+    const toneClass =
+      dNum == null ? "compare-metrics-cell--flat" : dNum > 0 ? "compare-metrics-cell--up" : dNum < 0 ? "compare-metrics-cell--down" : "compare-metrics-cell--flat";
     return (
-      <tr>
-        <td style={compareLabelTd}>{label}</td>
-        <td style={compareNumTdRight}>{fmt(va, unit)}</td>
-        <td style={compareNumTdRight}>{fmt(vb, unit)}</td>
+      <tr className="compare-metrics-row">
+        <td className="compare-metrics-cell compare-metrics-cell--label" style={compareLabelTd}>{label}</td>
+        <td className="compare-metrics-cell compare-metrics-cell--a" style={compareNumTdRight}>{fmt(va, unit)}</td>
+        <td className="compare-metrics-cell compare-metrics-cell--b" style={compareNumTdRight}>{fmt(vb, unit)}</td>
         <td
+          className={`compare-metrics-cell compare-metrics-cell--diff ${toneClass}`}
           style={{
             ...compareNumTdRight,
             color:
@@ -5310,7 +5313,7 @@ function CompareView({ data, compA, compB }) {
           <div className="compare-metrics-block">
             <div className="compare-metrics-block__head">
               <div className="compare-metrics-block__title">주요 수치 비교</div>
-              <div className="compare-metrics-block__note">차이값은 `B−A` 기준입니다.</div>
+              <div className="compare-metrics-block__note">차이값은 B−A 기준입니다.</div>
             </div>
           <table className="compare-metrics-table">
             <colgroup>
@@ -5420,13 +5423,14 @@ function PropertyBars({ a, b }) {
 
   return (
     <div
+      className="property-bars"
       style={{
         marginTop: 6,
         paddingTop: 6,
         borderTop: "1px solid var(--bg-table-head)"
       }}
     >
-      <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
+      <div className="property-bars__title" style={{ fontSize: 13, color: "#9ca3af", marginBottom: 6 }}>
         물성 시각 비교
       </div>
       {metrics.map((mtr) => {
@@ -5446,8 +5450,8 @@ function PropertyBars({ a, b }) {
           pct <= 0 ? "0%" : `${Math.max(pct, 3)}%`;
 
         return (
-          <div key={mtr.key} style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>
+          <div key={mtr.key} className="property-bars__row" style={{ marginBottom: 10 }}>
+            <div className="property-bars__label" style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>
               {mtr.label}
             </div>
             <div style={{ ...rowStyle, marginBottom: 4 }}>

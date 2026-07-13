@@ -1104,6 +1104,40 @@ summary:focus-visible,
     font-size: 11.5px;
   }
 
+  .compare-metrics-block {
+    padding: 12px 12px;
+  }
+
+  .compare-metrics-block__head {
+    margin-bottom: 8px;
+  }
+
+  .compare-metrics-block__title {
+    font-size: 12.5px;
+  }
+
+  .compare-metrics-block__note {
+    font-size: 10.5px;
+  }
+
+  .compare-hints {
+    padding: 10px 11px;
+    font-size: 11.5px;
+  }
+
+  .summary-wetting-tensile-footnotes {
+    font-size: 10.5px;
+    margin-bottom: 16px;
+  }
+
+  .property-bars__title {
+    font-size: 11.5px !important;
+  }
+
+  .property-bars__label {
+    font-size: 11.5px !important;
+  }
+
   /* 주기율표 7열 그리드: 뷰포트가 좁으면 셀 너비가 44px 미만이 됨 → 최소 폭 보장 + 가로 스크롤 (감사 FINDING-002) */
   .periodic-element-grid-wrap {
     width: 100%;
@@ -1140,10 +1174,10 @@ summary:focus-visible,
 .summary-wetting-tensile-footnotes {
   font-size: 11px;
   color: var(--text-muted);
-  line-height: 1.45;
+  line-height: 1.5;
   margin-top: 0;
-  margin-bottom: 16px;
-  padding-left: 2px;
+  margin-bottom: 18px;
+  padding: 2px 2px 0;
   max-width: min(100%, 52rem);
 }
 
@@ -1152,7 +1186,7 @@ summary:focus-visible,
 }
 
 .summary-wetting-tensile-footnotes p:not(:last-child) {
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 
 .summary-footnote-label--wetting {
@@ -2414,6 +2448,36 @@ summary:focus-visible,
   font-size: 13px;
 }
 
+.compare-metrics-row td {
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.compare-metrics-cell--label {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.compare-metrics-cell--a,
+.compare-metrics-cell--b {
+  color: #e5e7eb;
+}
+
+.compare-metrics-cell--diff {
+  font-weight: 700;
+}
+
+.compare-metrics-cell--up {
+  color: #fcd34d !important;
+}
+
+.compare-metrics-cell--down {
+  color: #7dd3fc !important;
+}
+
+.compare-metrics-cell--flat {
+  color: #94a3b8 !important;
+}
+
 .compare-metrics-col-label {
   width: 38%;
 }
@@ -2461,9 +2525,26 @@ summary:focus-visible,
   border-top: 1px solid rgba(51, 65, 85, 0.38);
 }
 
+.property-bars {
+  margin-top: 10px;
+}
+
+.property-bars__title {
+  font-size: 12px !important;
+  font-weight: 700;
+  color: #cbd5e1 !important;
+  margin-bottom: 8px !important;
+}
+
+.property-bars__label {
+  font-size: 12px !important;
+  color: #94a3b8 !important;
+  margin-bottom: 5px !important;
+}
+
 .compare-hints {
   margin-bottom: 0;
-  padding: 10px 12px;
+  padding: 11px 12px;
   border-radius: 8px;
   border: 1px solid #334155;
   background: #0b1220;
