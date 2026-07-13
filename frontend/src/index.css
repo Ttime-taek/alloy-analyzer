@@ -1989,6 +1989,31 @@ summary:focus-visible,
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
+.summary-card__label {
+  text-transform: none;
+  opacity: 0.92;
+}
+
+.summary-card__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-card--primary .summary-card__label {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.03em !important;
+}
+
+.summary-card__value--primary {
+  font-size: 19px !important;
+  font-weight: 800 !important;
+  line-height: 1.22 !important;
+}
+
+.summary-card__value--compact {
+  font-size: 17px !important;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .summary-card:hover {
     transform: translateY(-2px);
@@ -2281,18 +2306,19 @@ summary:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 10px;
+  padding: 5px 9px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   border: 1px solid rgba(51, 65, 85, 0.8);
   background: rgba(15, 23, 42, 0.65);
   color: #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .compare-hero-delta__label {
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 500;
 }
 
@@ -2355,6 +2381,33 @@ summary:focus-visible,
   min-width: 0;
 }
 
+.compare-metrics-block {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.72);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.compare-metrics-block__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+
+.compare-metrics-block__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.compare-metrics-block__note {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
 .compare-metrics-table {
   width: 100%;
   border-collapse: collapse;
@@ -2397,6 +2450,15 @@ summary:focus-visible,
 
 .compare-metrics-th--diff {
   color: #94a3b8;
+}
+
+.compare-summary-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.compare-summary-card p + p {
+  padding-top: 6px;
+  border-top: 1px solid rgba(51, 65, 85, 0.38);
 }
 
 .compare-hints {

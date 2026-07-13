@@ -4361,6 +4361,7 @@ function SummaryCard({ label, value, variant }) {
   };
   const g = variant && gradients[variant] ? gradients[variant] : null;
   const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
+  const primaryCard = variant === "solidus" || variant === "liquidus" || variant === "peak";
   const hintText =
     variant &&
     SUMMARY_VARIANT_HINT[variant] &&
@@ -4369,7 +4370,7 @@ function SummaryCard({ label, value, variant }) {
       : null;
   return (
     <div
-      className="summary-card"
+      className={`summary-card${variant ? ` summary-card--${variant}` : ""}${primaryCard ? " summary-card--primary" : ""}`}
       style={{
         height: "100%",
         boxSizing: "border-box",
@@ -4383,6 +4384,7 @@ function SummaryCard({ label, value, variant }) {
       }}
     >
       <div
+        className="summary-card__label"
         style={{
           fontSize: 13,
           color: g ? g.labelColor : "#9ca3af",
@@ -4404,6 +4406,7 @@ function SummaryCard({ label, value, variant }) {
         }}
       >
         <div
+          className={`summary-card__value${primaryCard ? " summary-card__value--primary" : ""}${compactValue ? " summary-card__value--compact" : ""}`}
           style={{
             fontSize: compactValue ? 18 : 16,
             fontWeight: 700,
@@ -4837,9 +4840,9 @@ function CompareSummaryPair({ title, textA, textB, isLast, compact = false }) {
   const card = (accent) => ({
     padding: compact ? "8px 10px" : "12px 14px",
     borderRadius: compact ? 8 : 10,
-    border: "1px solid var(--border-default)",
-    background: "#0b1220",
-    borderLeft: `3px solid ${accent}`,
+    border: `1px solid ${accent === "#60a5fa" ? "rgba(96, 165, 250, 0.22)" : "rgba(251, 146, 60, 0.22)"}`,
+    background: accent === "#60a5fa" ? "rgba(15, 23, 42, 0.88)" : "rgba(22, 18, 14, 0.52)",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 3px 0 ${accent}22`,
     minWidth: 0
   });
   return (
@@ -4853,7 +4856,7 @@ function CompareSummaryPair({ title, textA, textB, isLast, compact = false }) {
           alignItems: "stretch"
         }}
       >
-        <div style={card("#60a5fa")}>
+        <div className="compare-summary-card compare-summary-card--a" style={card("#60a5fa")}>
           <div
             style={{
               fontSize: 11,
@@ -4871,7 +4874,7 @@ function CompareSummaryPair({ title, textA, textB, isLast, compact = false }) {
             </p>
           ))}
         </div>
-        <div style={card("#fb923c")}>
+        <div className="compare-summary-card compare-summary-card--b" style={card("#fb923c")}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#fb923c", marginBottom: compact ? 4 : 8 }}>B</div>
           {partsB.map((p, i) => (
             <p key={`b-${i}`} className={compact ? "compare-summary-pair__text" : undefined} style={pStyle(i === 0)} title={compact ? p : undefined}>
@@ -5304,6 +5307,11 @@ function CompareView({ data, compA, compB }) {
         <div className="compare-view__primary">
           <CompareHeroPanel a={a} b={b} compA={compA} compB={compB} />
 
+          <div className="compare-metrics-block">
+            <div className="compare-metrics-block__head">
+              <div className="compare-metrics-block__title">주요 수치 비교</div>
+              <div className="compare-metrics-block__note">차이값은 `B−A` 기준입니다.</div>
+            </div>
           <table className="compare-metrics-table">
             <colgroup>
               <col className="compare-metrics-col-label" />
@@ -5350,6 +5358,7 @@ function CompareView({ data, compA, compB }) {
                 : null}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="compare-view__secondary">
