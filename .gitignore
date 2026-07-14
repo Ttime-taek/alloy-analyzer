@@ -21,6 +21,8 @@ literature_cache.json
 frontend/dist/
 frontend/node_modules/
 frontend/node_modules.bak/
+/node_modules/
+.vercel/
 tools/node22/
 frontend/.eslintcache
 .gstack/
