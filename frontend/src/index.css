@@ -4,10 +4,8 @@ html {
 }
 
 :root {
-  /* 본문·차트·폼 공통 — Pretendard 우선, 미로드 시 한글 시스템 스택 */
+  /* 본문·차트·폼 공통 — 외부 웹폰트 대신 OS 한글 폰트를 사용 */
   --font-sans:
-    "Pretendard",
-    Pretendard,
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
@@ -17,6 +15,8 @@ html {
     "Noto Sans CJK KR",
     "Noto Sans KR",
     "Nanum Gothic",
+    "Pretendard",
+    Pretendard,
     sans-serif;
   --bg-page: #020617;
   --bg-elevated: #0b1220;

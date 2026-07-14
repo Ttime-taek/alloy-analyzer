@@ -132,6 +132,10 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertIn("google-generativeai", requirements)
         self.assertIn("cerebras-cloud-sdk", requirements)
 
+    def test_frontend_does_not_load_full_remote_font_family(self) -> None:
+        index = (_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("pretendard.min.css", index)
+
     def test_favorites_reads_from_supabase_when_configured(self) -> None:
         stored = [{"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}]
         with (
@@ -147,6 +151,25 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["storage"], "supabase")
         self.assertEqual(response.json()["favorites"], stored)
+
+    def test_favorites_repairs_legacy_cp949_mojibake(self) -> None:
+        stored = [{"name": "怨좉린 議곗꽦", "comp": {"Sn": 100.0}}]
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(
+                api_mod,
+                "read_supabase_favorites",
+                new=AsyncMock(return_value=stored),
+            ),
+        ):
+            response = self.client.get("/api/favorites")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["favorites"][0]["name"], "고기 조성")
+
+    def test_favorite_name_keeps_normal_unicode(self) -> None:
+        item = api_mod.WebFavoriteItem(name="高温 합금", comp={"Sn": 100.0})
+        self.assertEqual(item.name, "高温 합금")
 
     def test_favorites_writes_to_supabase_when_configured(self) -> None:
         payload = {

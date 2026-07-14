@@ -656,6 +656,20 @@ def _shrink_melting_detail_for_api(md: Any) -> Dict[str, Any]:
     return out
 
 
+def _repair_legacy_korean_mojibake(value: str) -> str:
+    """Repair UTF-8 Korean text that a legacy Windows path decoded as CP949."""
+    has_cjk_ideograph = any("\u4e00" <= char <= "\u9fff" for char in value)
+    if not has_cjk_ideograph:
+        return value
+    try:
+        repaired = value.encode("cp949").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    has_hangul = any("\uac00" <= char <= "\ud7a3" for char in repaired)
+    has_cjk_after = any("\u4e00" <= char <= "\u9fff" for char in repaired)
+    return repaired if has_hangul and not has_cjk_after else value
+
+
 class WebFavoriteItem(BaseModel):
     """웹 즐겨찾기 한 항목 (React localStorage와 동일 형태)."""
 
@@ -668,7 +682,7 @@ class WebFavoriteItem(BaseModel):
         s = (v or "").strip()
         if not s:
             raise ValueError("이름이 비어 있습니다.")
-        return s
+        return _repair_legacy_korean_mojibake(s)
 
     @field_validator("comp")
     @classmethod
