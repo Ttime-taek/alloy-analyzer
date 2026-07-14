@@ -4242,11 +4242,13 @@ function formatWettingFmaxPrimary(props) {
 }
 
 function formatTensileDbMpa(props) {
+  if (props?.tensile_strength_db_mpa == null) return "—";
   const v = Number(props?.tensile_strength_db_mpa);
   return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : "—";
 }
 
-function formatTensilePrimary(props) {
+export function formatTensilePrimary(props) {
+  if (props?.tensile_strength == null) return formatTensileDbMpa(props);
   const v = Number(props?.tensile_strength);
   return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : formatTensileDbMpa(props);
 }
@@ -4256,7 +4258,7 @@ function formatDensityPrimary(props) {
   return Number.isFinite(v) ? `${v.toFixed(2)} g/cm³` : "N/A";
 }
 
-function tensileSummaryLabel(props) {
+export function tensileSummaryLabel(props) {
   const basis = props?.tensile_strength_basis;
   if (basis === "db_priority") return "인장 (DB우선)";
   if (basis === "db_idw") return "인장 (BD유사 IDW)";
@@ -4697,6 +4699,16 @@ function ResultSummaryBlock({
           value={formatWettingFmaxPrimary(result.props)}
           variant="wetting"
         />
+        {(result.props?.tensile_strength != null &&
+          Number.isFinite(Number(result.props.tensile_strength))) ||
+        (result.props?.tensile_strength_db_mpa != null &&
+          Number.isFinite(Number(result.props.tensile_strength_db_mpa))) ? (
+          <SummaryCard
+            label={tensileSummaryLabel(result.props)}
+            value={formatTensilePrimary(result.props)}
+            variant="tensileDb"
+          />
+        ) : null}
         {Number.isFinite(Number(result.props?.density)) ? (
           <SummaryCard
             label="비중"

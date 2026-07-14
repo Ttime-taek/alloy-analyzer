@@ -14,4 +14,17 @@ describe("App module", () => {
     const match = source.match(/const solderElems = \[([\s\S]*?)\];/);
     expect(match?.[1]).toContain('"P"');
   });
+
+  it("formats the primary tensile KPI from the analysis result", async () => {
+    const { formatTensilePrimary, tensileSummaryLabel } = await import("./App.jsx");
+    const props = {
+      tensile_strength: 48.5,
+      tensile_strength_db_mpa: 48.5,
+      tensile_strength_basis: "db_priority"
+    };
+
+    expect(formatTensilePrimary(props)).toBe("48.5 MPa");
+    expect(tensileSummaryLabel(props)).toBe("인장 (DB우선)");
+    expect(formatTensilePrimary({})).toBe("—");
+  });
 });
