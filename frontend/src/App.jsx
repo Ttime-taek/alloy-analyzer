@@ -1133,8 +1133,9 @@ export default function App() {
       if (!res.ok) {
         let detail = formatApiDetail(data.detail, res.status);
         if (res.status === 405) {
-          detail =
-            "HTTP 405 — 백엔드에 POST /api/recommend_melt 없음. 127.0.0.1:8000에서 최신 python api_server.py 실행 확인.";
+          detail = hasConfiguredApiBaseUrl
+            ? "HTTP 405 — 운영 분석 서버에 POST /api/recommend_melt가 없습니다. 서버 배포 버전을 확인해 주세요."
+            : "HTTP 405 — 백엔드에 POST /api/recommend_melt 없음. 127.0.0.1:8000에서 최신 python api_server.py 실행 확인.";
         }
         throw new Error(detail);
       }
@@ -1149,8 +1150,9 @@ export default function App() {
         /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
         msg === "Failed to fetch"
       ) {
-        msg +=
-          "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다. start_all.bat 또는 run_api_server.bat 실행 후 새로고침하세요.";
+        msg += hasConfiguredApiBaseUrl
+          ? "\n\n운영 분석 서버가 아직 시작 중이거나 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요."
+          : "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다. start_all.bat 또는 run_api_server.bat 실행 후 새로고침하세요.";
       }
       setMeltRecError(msg);
     } finally {
@@ -1687,18 +1689,27 @@ export default function App() {
           >
             <strong style={{ color: "#fef3c7" }}>API 오프라인</strong>
             {" — "}
-            백엔드(
-            <code style={{ fontSize: 12, color: "#fcd34d" }}>127.0.0.1:8000</code>)에 연결되지
-            않았습니다. 즐겨찾기는 이 브라우저에만 저장됩니다.{" "}
-            <code style={{ fontSize: 12, color: "#fcd34d" }}>start_all.bat</code> 또는{" "}
-            <code style={{ fontSize: 12, color: "#fcd34d" }}>run_api_server.bat</code> 실행 후{" "}
-            <a
-              href="http://localhost:8000/"
-              style={{ color: "#fcd34d", textDecoration: "underline" }}
-            >
-              http://localhost:8000/
-            </a>
-            에서 새로고침하세요.
+            {hasConfiguredApiBaseUrl ? (
+              <>
+                운영 분석 서버에 일시적으로 연결할 수 없습니다. 즐겨찾기는 이 브라우저에만
+                저장됩니다. 잠시 후 새로고침해 주세요.
+              </>
+            ) : (
+              <>
+                백엔드(
+                <code style={{ fontSize: 12, color: "#fcd34d" }}>127.0.0.1:8000</code>)에 연결되지
+                않았습니다. 즐겨찾기는 이 브라우저에만 저장됩니다.{" "}
+                <code style={{ fontSize: 12, color: "#fcd34d" }}>start_all.bat</code> 또는{" "}
+                <code style={{ fontSize: 12, color: "#fcd34d" }}>run_api_server.bat</code> 실행 후{" "}
+                <a
+                  href="http://localhost:8000/"
+                  style={{ color: "#fcd34d", textDecoration: "underline" }}
+                >
+                  http://localhost:8000/
+                </a>
+                에서 새로고침하세요.
+              </>
+            )}
           </div>
         )}
         {aboutInfo?.runtime && aboutInfo.runtime.cloud_llm_any === false ? (

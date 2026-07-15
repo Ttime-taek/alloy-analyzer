@@ -1,6 +1,22 @@
-const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "")
-  .trim()
-  .replace(/\/+$/, "");
+export const PRODUCTION_API_BASE_URL = "https://alloy-analyzer.onrender.com";
+
+export function resolveApiBaseUrl(configuredValue, runtimeLocation) {
+  const configured = String(configuredValue || "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (configured) return configured;
+
+  const hostname = String(runtimeLocation?.hostname || "").toLowerCase();
+  const isAlloyAnalyzerVercel =
+    hostname === "alloy-analyzer.vercel.app" ||
+    (hostname.endsWith(".vercel.app") && hostname.startsWith("alloy-analyzer"));
+  return isAlloyAnalyzerVercel ? PRODUCTION_API_BASE_URL : "";
+}
+
+const configuredBaseUrl = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL,
+  typeof window === "undefined" ? null : window.location
+);
 
 export const hasConfiguredApiBaseUrl = Boolean(configuredBaseUrl);
 
