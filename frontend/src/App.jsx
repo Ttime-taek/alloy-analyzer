@@ -209,6 +209,14 @@ function compositionTotalPct(obj) {
   return Object.values(obj).reduce((s, v) => s + (Number(v) || 0), 0);
 }
 
+export function compositionInputId(element, side = "A") {
+  return `composition-${String(side).toLowerCase()}-${String(element).toLowerCase()}`;
+}
+
+export function compositionInputAccessibleName(element, side = "A") {
+  return `조성 ${side} ${element} wt%`;
+}
+
 /** null이면 분석 가능; 문자열이면 버튼 비활성·제출 차단 사유 */
 function compositionAnalyzeBlockReason(obj, label) {
   if (!Object.keys(obj).length) {
@@ -1365,12 +1373,15 @@ export default function App() {
     const composition = side === "A" ? comp : compB;
     const onChange = side === "A" ? handleChange : handleChangeB;
     const onRemove = side === "A" ? removeElemRowA : removeElemRowB;
+    const inputId = compositionInputId(el, side);
     return (
       <div className="compare-compose-input-row">
-        <label>{el}</label>
+        <label htmlFor={inputId}>{el}</label>
         <input
+          id={inputId}
           type="number"
           step="0.01"
+          aria-label={compositionInputAccessibleName(el, side)}
           value={composition[el] ?? ""}
           onChange={(e) => onChange(el, e.target.value)}
           style={{
@@ -2457,10 +2468,14 @@ export default function App() {
                       marginBottom: 8
                     }}
                   >
-                    <label style={{ width: 44, flexShrink: 0 }}>{el}</label>
+                    <label htmlFor={compositionInputId(el, "A")} style={{ width: 44, flexShrink: 0 }}>
+                      {el}
+                    </label>
                     <input
+                      id={compositionInputId(el, "A")}
                       type="number"
                       step="0.01"
+                      aria-label={compositionInputAccessibleName(el, "A")}
                       value={comp[el] ?? ""}
                       onChange={(e) => handleChange(el, e.target.value)}
                       style={{
