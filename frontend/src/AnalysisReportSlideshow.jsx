@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   analysisReportMeta,
@@ -12,6 +12,60 @@ import { apiUrl } from "./api.js";
 
 const chartGrid = { color: "#334155" };
 const chartTicks = { color: "#94a3b8", font: { size: 11 } };
+const reportDialogFocusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])'
+].join(",");
+
+export function focusIfConnected(element) {
+  if (!element || element.isConnected === false || typeof element.focus !== "function") return false;
+  element.focus();
+  return true;
+}
+
+export function handleReportDialogKeydown(event, { dialog, activeElement, onClose, go }) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    onClose?.();
+    return true;
+  }
+  if (event.key === "ArrowLeft") {
+    go?.(-1);
+    return true;
+  }
+  if (event.key === "ArrowRight") {
+    go?.(1);
+    return true;
+  }
+  if (event.key !== "Tab" || !dialog) return false;
+
+  const focusable = Array.from(dialog.querySelectorAll(reportDialogFocusableSelector));
+  if (!focusable.length) {
+    event.preventDefault();
+    focusIfConnected(dialog);
+    return true;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const focusIsInside = dialog.contains(activeElement);
+  const wrapTarget = event.shiftKey
+    ? !focusIsInside || activeElement === first
+      ? last
+      : null
+    : !focusIsInside || activeElement === last
+      ? first
+      : null;
+
+  if (!wrapTarget) return false;
+  event.preventDefault();
+  focusIfConnected(wrapTarget);
+  return true;
+}
 
 function buildCompositionConfig(norm) {
   const { labels, values } = compositionChartData(norm);
@@ -143,7 +197,7 @@ function SlideCharts({ norm, profile }) {
   );
 }
 
-function SlideChrome({ index, total, eyebrow, title, subtitle, onClose, onSaveHtml }) {
+function SlideChrome({ index, total, eyebrow, title, subtitle, onClose, onSaveHtml, closeButtonRef }) {
   return (
     <header className="rs-chrome">
       <div className="rs-chrome__titles">
@@ -158,7 +212,7 @@ function SlideChrome({ index, total, eyebrow, title, subtitle, onClose, onSaveHt
         <button type="button" className="rs-btn rs-btn--save" onClick={onSaveHtml}>
           HTML 저장
         </button>
-        <button type="button" className="rs-btn rs-btn--close" onClick={onClose}>
+        <button ref={closeButtonRef} type="button" className="rs-btn rs-btn--close" onClick={onClose}>
           닫기 ✕
         </button>
       </div>
@@ -206,6 +260,9 @@ function SlideBody({ slide, norm, profile }) {
 export default function AnalysisReportSlideshow({ open, onClose, payload }) {
   const [index, setIndex] = useState(0);
   const [wettingRows, setWettingRows] = useState(null);
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const openerRef = useRef(null);
 
   useEffect(() => {
     if (!open || !payload?.result?.norm) {
@@ -269,6 +326,16 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
   }, [open, payload?.result]);
 
   useEffect(() => {
+    if (!open) return undefined;
+    openerRef.current = document.activeElement;
+    focusIfConnected(closeButtonRef.current || dialogRef.current);
+    return () => {
+      focusIfConnected(openerRef.current);
+      openerRef.current = null;
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (!open || !total) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -290,9 +357,12 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-      if (e.key === "ArrowLeft") go(-1);
-      if (e.key === "ArrowRight") go(1);
+      handleReportDialogKeydown(e, {
+        dialog: dialogRef.current,
+        activeElement: document.activeElement,
+        onClose,
+        go
+      });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -331,7 +401,14 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
               : slide.title || "분석 보고서";
 
   return createPortal(
-    <div className="report-slideshow" role="dialog" aria-modal="true" aria-label="슬라이드 보고서">
+    <div
+      ref={dialogRef}
+      className="report-slideshow"
+      role="dialog"
+      aria-modal="true"
+      aria-label="슬라이드 보고서"
+      tabIndex={-1}
+    >
       <div className="report-slideshow__backdrop" aria-hidden />
       <div className="report-slideshow__frame">
         <article className="rs-deck">
@@ -343,6 +420,7 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
             subtitle={chromeSub}
             onClose={onClose}
             onSaveHtml={downloadHtml}
+            closeButtonRef={closeButtonRef}
           />
           <div className="rs-deck__main">
             <button
