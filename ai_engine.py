@@ -41,6 +41,15 @@ _NO_LITERATURE_SOURCE_LINE = (
 )
 
 
+def _remote_ai_timeout_s(default: float = 15.0) -> float:
+    """Bound one remote AI request so analysis can fall back locally."""
+    try:
+        value = float((os.getenv("AI_REMOTE_TIMEOUT_S") or str(default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(2.0, min(60.0, value))
+
+
 class AIEngine:
     @staticmethod
     def _is_quota_error_message(msg: str) -> bool:
@@ -122,6 +131,7 @@ class AIEngine:
         self.status_detail = ""
         self.last_error_detail = ""
         self.api_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
+        self.request_timeout_s = _remote_ai_timeout_s()
         self.usage_stats = {
             "ask_attempts": 0,
             "ask_success": 0,
@@ -159,7 +169,8 @@ class AIEngine:
                 self.model = genai.GenerativeModel("gemini-2.5-flash")
                 self.available = True
             elif _GENAI_BACKEND == "google.genai":
-                self.client = genai.Client(api_key=self.api_key)
+                http_options = genai.types.HttpOptions(timeout=int(self.request_timeout_s * 1000))
+                self.client = genai.Client(api_key=self.api_key, http_options=http_options)
                 self.available = True
             if self.available:
                 self.status_detail = "연결됨"
@@ -244,7 +255,10 @@ class AIEngine:
 
         try:
             if self.model:
-                res = self.model.generate_content(prompt)
+                res = self.model.generate_content(
+                    prompt,
+                    request_options={"timeout": self.request_timeout_s},
+                )
             elif self.client:
                 res = self.client.models.generate_content(
                     model="gemini-2.5-flash",
@@ -1560,6 +1574,5 @@ DB에서 가장 비슷한 이름
             "3) 취성·공정 창과의 트레이드오프\n"
         )
         return self.ask(prompt)
-
 
 

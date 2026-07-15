@@ -41,6 +41,7 @@ def test_gpt_oss_uses_low_reasoning_and_completion_tokens() -> None:
     assert completions.kwargs["model"] == "gpt-oss-120b"
     assert completions.kwargs["max_completion_tokens"] == 123
     assert completions.kwargs["reasoning_effort"] == "low"
+    assert completions.kwargs["timeout"] == 15.0
     assert "max_tokens" not in completions.kwargs
 
 

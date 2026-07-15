@@ -33,6 +33,14 @@ _SYSTEM_PROMPT = (
 )
 
 
+def _remote_ai_timeout_s(default: float = 15.0) -> float:
+    try:
+        value = float((load_env_key("AI_REMOTE_TIMEOUT_S") or str(default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(2.0, min(60.0, value))
+
+
 class CerebrasChatEngine:
     """Minimal Cerebras chat completion wrapper used as an AIEngine fallback."""
 
@@ -42,6 +50,7 @@ class CerebrasChatEngine:
         self.available = False
         self._client = None
         self.last_error = ""
+        self.request_timeout_s = _remote_ai_timeout_s()
 
         if not self.api_key:
             self.last_error = "CEREBRAS_API_KEY 없음"
@@ -54,7 +63,11 @@ class CerebrasChatEngine:
             return
 
         try:
-            self._client = Cerebras(api_key=self.api_key)
+            self._client = Cerebras(
+                api_key=self.api_key,
+                timeout=self.request_timeout_s,
+                max_retries=0,
+            )
             self.available = True
         except Exception as e:
             self._client = None
@@ -81,6 +94,7 @@ class CerebrasChatEngine:
             }
             if self.model.startswith("gpt-oss"):
                 kwargs["reasoning_effort"] = "low"
+            kwargs["timeout"] = getattr(self, "request_timeout_s", _remote_ai_timeout_s())
             resp: Any = self._client.chat.completions.create(**kwargs)
             try:
                 msg = resp.choices[0].message  # type: ignore[attr-defined]
