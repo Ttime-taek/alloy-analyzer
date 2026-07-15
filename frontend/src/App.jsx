@@ -3697,7 +3697,7 @@ export default function App() {
           </div>
           <div style={{ marginTop: 6 }}>
             API 문서(Swagger):{" "}
-            <a href="/docs" style={{ color: "var(--link)" }}>
+            <a href={apiUrl("/docs")} style={{ color: "var(--link)" }}>
               /docs
             </a>{" "}
             (FastAPI 서버 실행 시)
