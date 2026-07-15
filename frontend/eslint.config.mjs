@@ -22,6 +22,11 @@ export default [
     },
     settings: { react: { version: "detect" } },
     rules: {
+      // Vite uses React's automatic JSX runtime; importing React in every JSX file is unnecessary.
+      "react/react-in-jsx-scope": "off",
+      // React Compiler를 사용하지 않는 React 18 앱이므로 compiler 전용 권고 규칙은 제외합니다.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/preserve-manual-memoization": "off",
       // PropTypes 미사용 프로젝트
       "react/prop-types": "off",
       // 기존 단일 파일 UI: 점진 적용 — 치명적이지 않은 규칙은 완화
@@ -31,5 +36,9 @@ export default [
       "jsx-a11y/label-has-associated-control": "warn",
       "jsx-a11y/anchor-is-valid": "warn",
     },
+  },
+  {
+    files: ["**/*.test.{js,jsx}"],
+    languageOptions: { globals: { ...globals.node } },
   },
 ];
