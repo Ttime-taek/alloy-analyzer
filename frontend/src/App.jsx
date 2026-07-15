@@ -9,7 +9,7 @@ import {
   readReflowTuningGoalInitial as _readReflowTuningGoalInitial
 } from "./reflow_tune_engine.js";
 import AnalysisReportSlideshow from "./AnalysisReportSlideshow.jsx";
-import { apiUrl } from "./api.js";
+import { apiUrl, fetchApi, hasConfiguredApiBaseUrl } from "./api.js";
 
 // 매우 단순한 초기 Web UI:
 // - Sn / Ag / Cu / Bi / In 정도만 입력받아 /api/analyze 로 POST
@@ -928,10 +928,15 @@ export default function App() {
         if (wettingTempSelect !== "auto") {
           payload.wetting_temp_c = Number(wettingTempSelect);
         }
-        res = await fetch(apiUrl("/api/analyze"), {
+        res = await fetchApi("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
+        }, {
+          onRetry: (attempt) => {
+            setAnalysisStage("분석 서버를 시작하는 중...");
+            appendLog(`서버 준비 대기 후 재시도 (${attempt}/2)`);
+          }
         });
       } else {
         appendLog("POST /api/compare 요청 전송");
@@ -939,10 +944,15 @@ export default function App() {
         if (wettingTempSelect !== "auto") {
           payload.wetting_temp_c = Number(wettingTempSelect);
         }
-        res = await fetch(apiUrl("/api/compare"), {
+        res = await fetchApi("/api/compare", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
+        }, {
+          onRetry: (attempt) => {
+            setAnalysisStage("분석 서버를 시작하는 중...");
+            appendLog(`서버 준비 대기 후 재시도 (${attempt}/2)`);
+          }
         });
       }
 
@@ -973,8 +983,9 @@ export default function App() {
         /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
         msg === "Failed to fetch"
       ) {
-        msg +=
-          "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다.\n• start_all.bat 실행 후 그 창을 열어 둔 채 새로고침\n• 또는 run_api_server.bat → http://localhost:8000/";
+        msg += hasConfiguredApiBaseUrl
+          ? "\n\n분석 서버가 아직 시작 중이거나 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요."
+          : "\n\n백엔드(127.0.0.1:8000)에 연결되지 않았습니다.\n• start_all.bat 실행 후 그 창을 열어 둔 채 새로고침\n• 또는 run_api_server.bat → http://localhost:8000/";
       }
       setError(msg);
       setAnalysisLogs((prev) => [
