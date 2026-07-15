@@ -134,15 +134,19 @@ def predictAlloyProperties(
             y_l = np.array([float(r["liquidus"]) for r in rows], dtype=float)
             y_s = np.array([float(r["solidus"]) for r in rows], dtype=float)
             try:
-                coef_l, ice_l = _ridge_linear_map(X, y_l, ridge_lambda)
-                coef_s, ice_s = _ridge_linear_map(X, y_s, ridge_lambda)
+                coef_l, _ice_l = _ridge_linear_map(X, y_l, ridge_lambda)
+                coef_s, _ice_s = _ridge_linear_map(X, y_s, ridge_lambda)
             except np.linalg.LinAlgError:
-                coef_l = coef_s = ice_l = ice_s = None
+                coef_l = coef_s = None
             if coef_l is not None and coef_s is not None:
                 nv = np.array(norm_v, dtype=float)
                 cid = np.array(comp_idw, dtype=float)
-                pred_liq = float(ice_l + float(coef_l @ (nv - cid)))
-                pred_sol = float(ice_s + float(coef_s @ (nv - cid)))
+                # IDW is the local prediction baseline. Ridge coefficients only
+                # adjust that baseline by the query-to-neighbor composition delta.
+                # Using the global regression intercept here shifts even an exact
+                # DB match away from its measured solidus/liquidus.
+                pred_liq = float(liq_idw + float(coef_l @ (nv - cid)))
+                pred_sol = float(sol_idw + float(coef_s @ (nv - cid)))
                 for j, e in enumerate(elems):
                     elem_w_liq[e] = round(float(coef_l[j]), 4)
                     elem_w_sol[e] = round(float(coef_s[j]), 4)
@@ -214,4 +218,3 @@ def _build_process_report(sol: float, liq: float, peak_c: float, dtl: float) -> 
     if liq < 200.0:
         lines.append("· 저융 조성에 가깝습니다: 피크–프리히트 마진이 좁으니 온도 오버슈트를 최소화하세요.")
     return "\n".join(lines)
-

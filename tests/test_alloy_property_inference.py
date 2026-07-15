@@ -12,6 +12,7 @@ if str(_PARENT) not in sys.path:
     sys.path.insert(0, str(_PARENT))
 
 from test7.alloy_property_inference import predictAlloyProperties
+from test7.solder_db import SOLDER_DB
 
 
 def _tiny_db():
@@ -52,3 +53,16 @@ def test_predict_returns_neighbors_and_melting_range():
 def test_empty_norm():
     out = predictAlloyProperties({}, _tiny_db())
     assert out["solidus"] is None
+
+
+def test_exact_db_match_keeps_measured_melting_points_for_reflow_guidance():
+    norm = {"Sn": 80.2, "Ag": 1.0, "Cu": 0.8, "In": 8.0, "Bi": 10.0}
+
+    out = predictAlloyProperties(norm, SOLDER_DB, k=3)
+
+    assert out["idw_baseline_solidus"] == 159.0
+    assert out["idw_baseline_liquidus"] == 200.0
+    assert out["solidus"] == 159.0
+    assert out["liquidus"] == 200.0
+    assert out["recommended_peak_c"] == 225.0
+    assert "추정 액상선 200.0℃" in out["process_report"]
