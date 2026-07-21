@@ -233,6 +233,15 @@ function compositionAnalyzeBlockReason(obj, label) {
   return null;
 }
 
+export function meltSearchRightHint(open, liquidus, result) {
+  if (open) return "";
+  const target = String(liquidus ?? "").trim();
+  const count = Array.isArray(result?.candidates) ? result.candidates.length : 0;
+  if (target && count > 0) return `액상 ${target}℃ · 후보 ${count}개`;
+  if (target) return `액상 ${target}℃`;
+  return count > 0 ? `후보 ${count}개` : "";
+}
+
 /** 한 줄 문자열(복사·title 등) */
 function formatWtPercentCompositionReadable(comp) {
   const chunks = getWtPercentCompositionChunks(comp);
@@ -1883,7 +1892,7 @@ export default function App() {
               title="목표 융점 탐색 (℃)"
               open={meltSearchOpen}
               onToggle={() => setMeltSearchOpen((v) => !v)}
-              rightHint={mode === "compare" ? "선택" : ""}
+              rightHint={meltSearchRightHint(meltSearchOpen, meltRecLiquidus, meltRecResult)}
             >
             <p className="app-helper-copy" style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
               기본은 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
