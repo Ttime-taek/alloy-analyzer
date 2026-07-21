@@ -1104,9 +1104,10 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
             except Exception:
                 pass
             fb = self._build_local_fallback(norm, result, knn, literature_mode=literature_mode, mode=mode)
-            data = self._polish_rule_draft_with_ai(fb, mode, comp_str, norm)
-            if data is None:
-                return fb
+            # A malformed/failed remote response has already consumed the bounded
+            # Gemini request and any Cerebras fallback. Retrying the same remote
+            # chain here can double first-run latency without improving reliability.
+            return fb
 
         data.setdefault("phase", "")
         data.setdefault("imc", [])
@@ -1574,5 +1575,4 @@ DB에서 가장 비슷한 이름
             "3) 취성·공정 창과의 트레이드오프\n"
         )
         return self.ask(prompt)
-
 
