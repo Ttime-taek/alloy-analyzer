@@ -852,6 +852,8 @@ export default function App() {
     setError("");
     setResult(null);
     setCompareResult(null);
+    setMeltRecError("");
+    setMeltRecResult(null);
     let stageTimer = null;
     let elapsedTimer = null;
     try {
