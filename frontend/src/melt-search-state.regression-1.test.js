@@ -10,7 +10,7 @@ describe("melt-search result lifecycle", () => {
   it("clears prior melt-search output when a composition analysis starts", () => {
     const source = fs.readFileSync(path.resolve(__dirname, "./App.jsx"), "utf8");
     const handleAnalyze = source.match(
-      /const handleAnalyze = async \(\) => \{([\s\S]*?)\n  \};\n\n  const handleReset/
+      /const handleAnalyze = async \(\) => \{([\s\S]*?)\n[ ]{2}\};\n\n[ ]{2}const handleReset/
     );
 
     expect(handleAnalyze?.[1]).toContain('setMeltRecError("")');
