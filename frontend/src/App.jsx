@@ -1906,8 +1906,8 @@ export default function App() {
               </p>
             ) : null}
             <p className="app-helper-copy app-helper-copy--compact" style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
-              실행은 약 <strong style={{ color: "#94a3b8" }}>10~20초</strong> 걸릴 수 있습니다. 끝날 때까지 이 페이지를
-              유지하세요.
+              실행은 보통 <strong style={{ color: "#94a3b8" }}>10초~1분</strong> 걸릴 수 있습니다. 서버가 처음 시작하는
+              경우는 더 느릴 수 있으니 끝날 때까지 이 페이지를 유지하세요.
             </p>
             {meltSupport === "no" ? (
               <div
