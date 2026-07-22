@@ -1292,6 +1292,7 @@ export default function App() {
     () => (result ? getReflowMeltDisplay(result, reflowMeltBasis) : null),
     [result, reflowMeltBasis]
   );
+  const showReflowProcessDetails = shouldShowReflowProcessDetails(reflowMeltDisplay);
 
   const imcProfileMeltOverride = useMemo(() => {
     if (result?.prediction_contract || reflowMeltBasis !== "inference" || !result) return null;
@@ -3623,27 +3624,49 @@ export default function App() {
                       alignItems: "start"
                     }}
                   >
-                    <ReflowCard
-                      solidus={reflowMeltDisplay.solidus}
-                      liquidus={reflowMeltDisplay.liquidus}
-                      peak={reflowPeakEffective}
-                      modelPeak={reflowMeltDisplay.modelPeak}
-                      profileMeta={reflowProfile?.meta}
-                    />
+                    {showReflowProcessDetails ? (
+                      <ReflowCard
+                        solidus={reflowMeltDisplay.solidus}
+                        liquidus={reflowMeltDisplay.liquidus}
+                        peak={reflowPeakEffective}
+                        modelPeak={reflowMeltDisplay.modelPeak}
+                        profileMeta={reflowProfile?.meta}
+                      />
+                    ) : (
+                      <div
+                        data-testid="reflow-refusal-card"
+                        style={{
+                          padding: 10,
+                          borderRadius: 10,
+                          border: "1px solid #991b1b",
+                          background: "rgba(127,29,29,0.2)",
+                          color: "#fecaca",
+                          fontSize: 13,
+                          lineHeight: 1.55
+                        }}
+                      >
+                        <strong>리플로우 공정 추천 중단</strong>
+                        <div style={{ marginTop: 4 }}>
+                          피크 권장 범위·적용 피크·TAL 가드레일을 표시하지 않습니다. 위 물성 예측 범위는 연구 비교에만 사용하세요.
+                        </div>
+                      </div>
+                    )}
                     <RegulationCard norm={result.norm} />
                   </div>
-                  <ReflowChart
-                    profile={reflowProfile}
-                    solidus={reflowMeltDisplay.solidus}
-                    liquidus={reflowMeltDisplay.liquidus}
-                    expandable
-                    expandPayload={{
-                      result,
-                      initialTune: reflowTune,
-                      initialPeakUser: reflowPeakUser,
-                      meltBasis: reflowMeltBasis
-                    }}
-                  />
+                  {showReflowProcessDetails ? (
+                    <ReflowChart
+                      profile={reflowProfile}
+                      solidus={reflowMeltDisplay.solidus}
+                      liquidus={reflowMeltDisplay.liquidus}
+                      expandable
+                      expandPayload={{
+                        result,
+                        initialTune: reflowTune,
+                        initialPeakUser: reflowPeakUser,
+                        meltBasis: reflowMeltBasis
+                      }}
+                    />
+                  ) : null}
                   <div
                     style={{
                       marginTop: 4,
@@ -3661,9 +3684,9 @@ export default function App() {
                     }}
                   >
                     <strong>리플로우 곡선 기준: {reflowMeltDisplay.label}</strong>
-                    {reflowMeltDisplay.processAllowed === false ? (
+                    {!showReflowProcessDetails ? (
                       <div style={{ marginTop: 3, color: "#fecaca" }}>
-                        DB 검증 범위 밖 또는 근거 부족으로 생산 공정 추천은 중단됩니다. 차트는 비교 참고용이며 DSC 확인이 필요합니다.
+                        DB 검증 범위 밖 또는 근거 부족으로 생산 공정 추천은 중단됩니다. DSC 확인과 부품 허용온도·오븐 편차 입력이 필요합니다.
                       </div>
                     ) : (
                       <div style={{ marginTop: 3, color: "#94a3b8" }}>
@@ -3671,7 +3694,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {reflowMeltDisplay.processAllowed === false ? null : <ReflowTuneBar
+                  {!showReflowProcessDetails ? null : <ReflowTuneBar
                     liquidus={reflowMeltDisplay.liquidus}
                     modelPeak={reflowMeltDisplay.modelPeak}
                     reflowPeakUser={reflowPeakUser}
@@ -3696,23 +3719,25 @@ export default function App() {
                       });
                     }}
                   />}
-                  <ImcInterfaceCard
-                    result={result}
-                    substrate={imcSubstrate}
-                    talMode={imcTalMode}
-                    talRef={imcTalRef}
-                    talDeltaC={imcTalDeltaC}
-                    talSec={imcTalSec}
-                    reflowProfile={reflowProfile}
-                    reflowTune={reflowTune}
-                    presetName={reflowProfile?.meta?.presetName || pickPresetName(result)}
-                    profileMeltOverride={imcProfileMeltOverride}
-                    onSubstrateChange={setImcSubstrate}
-                    onTalModeChange={setImcTalMode}
-                    onTalRefChange={setImcTalRef}
-                    onTalDeltaChange={(v) => setImcTalDeltaC(v)}
-                    onTalSecChange={(v) => setImcTalSec(v)}
-                  />
+                  {!showReflowProcessDetails ? null : (
+                    <ImcInterfaceCard
+                      result={result}
+                      substrate={imcSubstrate}
+                      talMode={imcTalMode}
+                      talRef={imcTalRef}
+                      talDeltaC={imcTalDeltaC}
+                      talSec={imcTalSec}
+                      reflowProfile={reflowProfile}
+                      reflowTune={reflowTune}
+                      presetName={reflowProfile?.meta?.presetName || pickPresetName(result)}
+                      profileMeltOverride={imcProfileMeltOverride}
+                      onSubstrateChange={setImcSubstrate}
+                      onTalModeChange={setImcTalMode}
+                      onTalRefChange={setImcTalRef}
+                      onTalDeltaChange={(v) => setImcTalDeltaC(v)}
+                      onTalSecChange={(v) => setImcTalSec(v)}
+                    />
+                  )}
                 </CollapsibleSection>
 
                 {/* 엔지니어 원문: 엔지니어/연구소 모드 모두에서 표시. 엔지니어 모드일 때는 연구소 원문 블록을 숨김 */}
@@ -5797,6 +5822,10 @@ function getAlloyInferenceMelt(result) {
 }
 
 /** 리플로우 차트/튜너에 쓸 고상·액상·기준 피크 */
+export function shouldShowReflowProcessDetails(reflowMeltDisplay) {
+  return reflowMeltDisplay?.processAllowed !== false;
+}
+
 function getReflowMeltDisplay(result, meltBasis) {
   const contract = result?.prediction_contract;
   if (contract && typeof contract === "object") {

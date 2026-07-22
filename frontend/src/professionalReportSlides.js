@@ -118,7 +118,7 @@ function techSummaryLead(result, meta) {
   const l = Number(result?.liquidus);
   const p = Number(result?.peak);
   const range = Number.isFinite(s) && Number.isFinite(l) ? ` (Δ ${fmtNum(l - s, 1)} ℃)` : "";
-  return `조성 ${meta.composition} 기준 추정 융점: 고상선 ${fmtNum(s)} ℃, 액상선 ${fmtNum(l)} ℃${range}, 권장 피크 ${fmtNum(p)} ℃.${best}${conf}`;
+  return `조성 ${meta.composition} 기준 추정 융점: 고상선 ${fmtNum(s)} ℃, 액상선 ${fmtNum(l)} ℃${range}, 계산 피크(참고) ${fmtNum(p)} ℃.${best}${conf}`;
 }
 
 function fmtMaybe(v, digits = 1) {
@@ -445,12 +445,12 @@ function inferenceSlideContent(result) {
 
   const lead =
     Number.isFinite(engS) && Number.isFinite(engL)
-      ? `공정·리포트의 공식 융점은 하이브리드 엔진 값입니다 — 고상 ${fmtNum(engS)} ℃ · 액상 ${fmtNum(engL)} ℃ · 피크 ${fmtNum(engP)} ℃ · Δ ${fmtNum(engL - engS)} ℃`
-      : "공정·리포트의 공식 융점은 하이브리드 엔진 값을 사용합니다.";
+      ? `핵심 하이브리드 엔진 계산값 — 고상 ${fmtNum(engS)} ℃ · 액상 ${fmtNum(engL)} ℃ · 계산 피크 ${fmtNum(engP)} ℃ · Δ ${fmtNum(engL - engS)} ℃`
+      : "핵심 융점 계산은 하이브리드 엔진 값을 사용합니다.";
 
   const bullets = [];
   bullets.push(
-    `참고 — 유사 합금 DB 보간(3-NN 추론 모델): 고상 ${fmtNum(infS)} ℃ · 액상 ${fmtNum(infL)} ℃ · 권장 피크 ${fmtNum(infP)} ℃`
+    `교차확인 전용 — 유사 합금 DB 보간(3-NN 추론 모델): 고상 ${fmtNum(infS)} ℃ · 액상 ${fmtNum(infL)} ℃`
   );
   if (Number.isFinite(engS) && Number.isFinite(engL)) {
     const dS = infS - engS;
@@ -538,13 +538,15 @@ export function buildProfessionalReportSlides(payload) {
 
 
 
+  const processAllowed = result?.prediction_contract?.process_recommendation?.allowed !== false;
+
   const heroKpis = [
 
     { label: "고상선", value: `${fmtNum(result?.solidus)} ℃` },
 
     { label: "액상선", value: `${fmtNum(result?.liquidus)} ℃` },
 
-    { label: "피크", value: `${fmtNum(result?.peak)} ℃` },
+    { label: "계산 피크", value: `${fmtNum(result?.peak)} ℃`, hint: "열역학 참고값" },
 
     {
 
@@ -696,17 +698,31 @@ export function buildProfessionalReportSlides(payload) {
 
 
 
-  slides.push({
-
-    id: "charts",
-
-    kind: "charts",
-
-    title: "차트 요약",
-
-    subtitle: "조성 분포 · 리플로우 프로파일"
-
-  });
+  if (processAllowed) {
+    slides.push({
+      id: "charts",
+      kind: "charts",
+      title: "차트 요약",
+      subtitle: "조성 분포 · 리플로우 프로파일"
+    });
+  } else {
+    slides.push({
+      id: "process-refused",
+      kind: "brief",
+      title: "공정 추천 중단",
+      subtitle: meta.composition,
+      blocks: [
+        {
+          type: "lead",
+          text: "현재 조성은 DB 검증 범위 밖 또는 근거 부족으로 리플로우 차트와 피크 권장값을 보고서에 포함하지 않습니다."
+        },
+        {
+          type: "bullets",
+          items: ["DSC로 고상선·액상선을 확인하세요.", "부품 허용온도와 오븐 편차를 확인한 뒤 공학 검토를 다시 수행하세요."]
+        }
+      ]
+    });
+  }
 
 
 
@@ -725,5 +741,3 @@ export function buildProfessionalReportSlides(payload) {
   return slides;
 
 }
-
-
