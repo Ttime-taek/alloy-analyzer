@@ -17,7 +17,8 @@ TAGLINE = (
 )
 
 METHODOLOGY_POINTS = [
-    "내장 합금 DB와 조성 정규화·유사도(KNN) 매칭으로 고상선·액상선·피크 온도를 추정합니다.",
+    "내장 합금 DB와 상태도·유사도(KNN)·국소 보정으로 고상선·액상선·피크 온도를 추정합니다.",
+    "미등록 조성은 그룹 홀드아웃 교차검증의 오차·거리 분포로 경험적 90% 범위와 적용 가능 수준을 함께 제공합니다.",
     "문헌 모드(빠름/정밀)에 따라 공개 메타데이터 API를 통해 DOI·논문 후보를 수집합니다.",
     "IPC-J-STD·JIS 계열 표준 메타 참조(합금·리플로우·플럭스·시험)가 문헌 파이프라인에 자동 포함됩니다(표준 전문 본문은 미제공).",
     "Gemini API가 설정된 경우 자연어 요약·역할·미량 첨가(도핑) 권장을 생성하고, 미설정 시에도 동일 파이프라인의 로컬 규칙 결과로 동작합니다.",
@@ -28,6 +29,7 @@ DATA_SOURCES = [
     "선택: Google Gemini(사용자 API 키)",
     "선택: Crossref·Semantic Scholar 등 공개 메타데이터(네트워크 상태에 따라 제한)",
     "메타 인용: IPC-J-STD(006·020E·033·A-610·TM-650 등), JIS(Z 3282·Z 3198·H 1561 등) — 최신판은 발행 기관에서 확인",
+    "내장 DB 그룹 홀드아웃 교차검증(고상선·액상선·인장강도 오차 구간)",
 ]
 
 # 조성 계열별 규칙(요약): 어떤 입력이 들어와도 적용되는 규칙 기반 설명의 범위를 명시
@@ -105,7 +107,7 @@ COMPOSITION_INPUT_HELP = {
 def runtime_ai_capabilities() -> dict:
     """
     서버 환경변수만으로 연동 가능 여부를 노출(/api/about).
-    키 파일 로딩은 api_server 기동 시점에 이미 반영된 값을 사용합니다.
+    .env 또는 운영 환경변수 로딩은 api_server 기동 시점에 이미 반영된 값을 사용합니다.
     """
     gemini = bool((os.getenv("GEMINI_API_KEY") or "").strip())
     cerebras = bool((os.getenv("CEREBRAS_API_KEY") or "").strip())
@@ -191,5 +193,7 @@ def about_api_payload() -> dict:
             "recommend_melt": True,
             # 비교 /api/compare — A·B 공통 젖음 온도(compare_shared). 없으면 구버전 API.
             "compare_shared_wetting": True,
+            "prediction_contract_v1": True,
+            "separate_ai_explanation": True,
         },
     }

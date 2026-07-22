@@ -9,6 +9,7 @@ import {
   readReflowTuningGoalInitial as _readReflowTuningGoalInitial
 } from "./reflow_tune_engine.js";
 import AnalysisReportSlideshow from "./AnalysisReportSlideshow.jsx";
+import PredictionEvidencePanel from "./PredictionEvidencePanel.jsx";
 import { apiUrl, fetchApi, hasConfiguredApiBaseUrl } from "./api.js";
 
 // 매우 단순한 초기 Web UI:
@@ -171,6 +172,10 @@ function formatApiDetail(detail, status = 500) {
     return parts.length ? parts.join("; ") : `HTTP ${status}`;
   }
   if (typeof detail === "object") {
+    if (detail.message != null) {
+      const code = detail.code ? `[${String(detail.code)}] ` : "";
+      return `${code}${String(detail.message)}`;
+    }
     try {
       return JSON.stringify(detail);
     } catch {
@@ -350,6 +355,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [compareResult, setCompareResult] = useState(null);
+  const [aiExplanationLoading, setAiExplanationLoading] = useState(false);
   /** 온도별 젖음 표(250–290℃)는 기본 분석에 포함하지 않음 — 별도 로드 */
   const [wettingGridRows, setWettingGridRows] = useState(null);
   const [wettingGridLoading, setWettingGridLoading] = useState(false);
@@ -394,11 +400,20 @@ export default function App() {
   const analysisLogScrollRef = useRef(null);
   /** 단일 분석 완료 후 KPI 카드 스크롤 앵커 */
   const resultKpiScrollRef = useRef(null);
+  const analysisRequestRef = useRef({ sequence: 0, controller: null });
+  const explanationRequestRef = useRef(null);
 
   const showMeltRecommendPanel =
     Boolean(meltRecError) ||
     Boolean(meltRecResult?.meta?.disclaimer) ||
     (Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length > 0);
+
+  useEffect(() => {
+    return () => {
+      analysisRequestRef.current.controller?.abort();
+      explanationRequestRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -854,6 +869,13 @@ export default function App() {
       if (analyzeBlockReason) setError(analyzeBlockReason);
       return;
     }
+    analysisRequestRef.current.controller?.abort();
+    explanationRequestRef.current?.abort();
+    const requestSequence = analysisRequestRef.current.sequence + 1;
+    const requestController = new AbortController();
+    analysisRequestRef.current = { sequence: requestSequence, controller: requestController };
+    explanationRequestRef.current = null;
+    setAiExplanationLoading(false);
     setLoading(true);
     setAnalysisStage("입력값 검증 중...");
     setAnalysisElapsedSec(0);
@@ -942,15 +964,16 @@ export default function App() {
 
       let res;
       if (mode === "single") {
-        appendLog("POST /api/analyze 요청 전송");
+        appendLog("POST /api/v1/analyses 핵심 예측 요청 전송");
         const payload = { comp: a, mode: reportMode, literature_mode: literatureMode };
         if (wettingTempSelect !== "auto") {
           payload.wetting_temp_c = Number(wettingTempSelect);
         }
-        res = await fetchApi("/api/analyze", {
+        res = await fetchApi("/api/v1/analyses", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: requestController.signal
         }, {
           onRetry: (attempt) => {
             setAnalysisStage("분석 서버를 시작하는 중...");
@@ -966,7 +989,8 @@ export default function App() {
         res = await fetchApi("/api/compare", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: requestController.signal
         }, {
           onRetry: (attempt) => {
             setAnalysisStage("분석 서버를 시작하는 중...");
@@ -984,8 +1008,10 @@ export default function App() {
       setAnalysisStage("응답 데이터 반영 중...");
       appendLog("서버 응답 수신, 결과 반영 중...");
       const data = await res.json();
+      if (analysisRequestRef.current.sequence !== requestSequence) return;
       if (mode === "single") {
-        setResult(data);
+        const coreResult = data?.result && typeof data.result === "object" ? data.result : data;
+        setResult(coreResult);
         setWettingGridRows(null);
         setWettingGridError("");
         setWettingSectionOpen(false);
@@ -995,8 +1021,9 @@ export default function App() {
         setCompareResult(data);
         setResultPanelOpen(true);
       }
-      appendLog("분석 완료");
+      appendLog(mode === "single" ? "핵심 수치·검증 범위 분석 완료" : "분석 완료");
     } catch (e) {
+      if (requestController.signal.aborted || e?.name === "AbortError") return;
       let msg = String(e.message || e);
       if (
         /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
@@ -1014,8 +1041,67 @@ export default function App() {
     } finally {
       if (stageTimer) window.clearInterval(stageTimer);
       if (elapsedTimer) window.clearInterval(elapsedTimer);
-      setAnalysisStage("");
-      setLoading(false);
+      if (analysisRequestRef.current.sequence === requestSequence) {
+        analysisRequestRef.current.controller = null;
+        setAnalysisStage("");
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleLoadAiExplanation = async () => {
+    const analysisId = result?.prediction_contract?.analysis_id;
+    const normalizedComp = result?.norm;
+    if (!analysisId || !normalizedComp || aiExplanationLoading) return;
+    explanationRequestRef.current?.abort();
+    const controller = new AbortController();
+    explanationRequestRef.current = controller;
+    setAiExplanationLoading(true);
+    setResult((prev) => ({
+      ...prev,
+      ai_status_detail: "핵심 수치는 유지한 채 AI 설명을 생성하는 중입니다."
+    }));
+    try {
+      const res = await fetchApi(
+        `/api/v1/analyses/${encodeURIComponent(analysisId)}/explanations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analysis_id: analysisId,
+            comp: normalizedComp,
+            mode: reportMode,
+            literature_mode: literatureMode
+          }),
+          signal: controller.signal
+        },
+        { retryDelays: [] }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(formatApiDetail(data.detail, res.status));
+      const resultPatch = data?.result_patch && typeof data.result_patch === "object"
+        ? data.result_patch
+        : {};
+      setResult((prev) => {
+        if (prev?.prediction_contract?.analysis_id !== analysisId) return prev;
+        return { ...prev, ...resultPatch };
+      });
+    } catch (e) {
+      if (controller.signal.aborted || e?.name === "AbortError") return;
+      const message = String(e?.message || e);
+      setResult((prev) => {
+        if (prev?.prediction_contract?.analysis_id !== analysisId) return prev;
+        return {
+          ...prev,
+          ai_mode: "local",
+          ai_status_detail: `AI 설명을 불러오지 못했습니다. 핵심 수치 결과는 유효합니다. (${message})`
+        };
+      });
+    } finally {
+      if (explanationRequestRef.current === controller) {
+        explanationRequestRef.current = null;
+        setAiExplanationLoading(false);
+      }
     }
   };
 
@@ -1030,6 +1116,9 @@ export default function App() {
     setSelectedFavoriteName("");
     setSelectedFavoriteNameB("");
     setError("");
+    explanationRequestRef.current?.abort();
+    explanationRequestRef.current = null;
+    setAiExplanationLoading(false);
     setResult(null);
     setCompareResult(null);
     setWettingGridRows(null);
@@ -1205,7 +1294,7 @@ export default function App() {
   );
 
   const imcProfileMeltOverride = useMemo(() => {
-    if (reflowMeltBasis !== "inference" || !result) return null;
+    if (result?.prediction_contract || reflowMeltBasis !== "inference" || !result) return null;
     const inf = getAlloyInferenceMelt(result);
     if (!inf) return null;
     return { solidus: inf.solidus, liquidus: inf.liquidus };
@@ -1213,6 +1302,10 @@ export default function App() {
 
   useEffect(() => {
     if (!result) return;
+    if (result.prediction_contract && reflowMeltBasis !== "hybrid") {
+      setReflowMeltBasis("hybrid");
+      return;
+    }
     if (reflowMeltBasis === "inference" && !getAlloyInferenceMelt(result)) {
       setReflowMeltBasis("hybrid");
     }
@@ -3192,6 +3285,11 @@ export default function App() {
                   <AiModeBadge result={result} />
                   <AiSessionUsageRow usage={result.ai_usage_snapshot} />
                   <AiStatusDetail result={result} />
+                  <AiExplanationButton
+                    result={result}
+                    loading={aiExplanationLoading}
+                    onClick={handleLoadAiExplanation}
+                  />
                 </div>
                 <ResultSummaryBlock
                   result={result}
@@ -3219,6 +3317,11 @@ export default function App() {
                   <AiModeBadge result={result} />
                   <AiSessionUsageRow usage={result.ai_usage_snapshot} />
                   <AiStatusDetail result={result} />
+                  <AiExplanationButton
+                    result={result}
+                    loading={aiExplanationLoading}
+                    onClick={handleLoadAiExplanation}
+                  />
                 </div>
                 <ResultSummaryBlock
                   result={result}
@@ -3541,81 +3644,34 @@ export default function App() {
                       meltBasis: reflowMeltBasis
                     }}
                   />
-                  {getAlloyInferenceMelt(result) ? (
-                    <div
-                      style={{
-                        marginTop: 4,
-                        marginBottom: 8,
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        border: "1px solid #334155",
-                        background: "rgba(15,23,42,0.5)",
-                        fontSize: 12,
-                        color: "#cbd5e1",
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 10,
-                        alignItems: "center"
-                      }}
-                    >
-                      <span style={{ fontWeight: 600, color: "#94a3b8" }}>리플로우 곡선 기준</span>
-                      <span style={{ color: "#64748b" }}>(고상·액상·초기 피크 슬라이더)</span>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                        <TactileButton
-                          type="button"
-                          onClick={() => setReflowMeltBasis("hybrid")}
-                          style={{
-                            padding: "5px 10px",
-                            borderRadius: 6,
-                            border:
-                              reflowMeltBasis === "hybrid"
-                                ? "1px solid #38bdf8"
-                                : "1px solid #475569",
-                            background:
-                              reflowMeltBasis === "hybrid"
-                                ? "rgba(56,189,248,0.15)"
-                                : "transparent",
-                            color: "#e2e8f0",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: "pointer"
-                          }}
-                        >
-                          하이브리드 엔진
-                        </TactileButton>
-                        <TactileButton
-                          type="button"
-                          onClick={() => setReflowMeltBasis("inference")}
-                          style={{
-                            padding: "5px 10px",
-                            borderRadius: 6,
-                            border:
-                              reflowMeltBasis === "inference"
-                                ? "1px solid #a78bfa"
-                                : "1px solid #475569",
-                            background:
-                              reflowMeltBasis === "inference"
-                                ? "rgba(167,139,250,0.15)"
-                                : "transparent",
-                            color: "#e2e8f0",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: "pointer"
-                          }}
-                        >
-                          데이터 추론(3-NN)
-                        </TactileButton>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      marginBottom: 8,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: reflowMeltDisplay.processAllowed === false
+                        ? "1px solid #991b1b"
+                        : "1px solid #0e7490",
+                      background: reflowMeltDisplay.processAllowed === false
+                        ? "rgba(127,29,29,0.2)"
+                        : "rgba(14,116,144,0.14)",
+                      fontSize: 12,
+                      color: "#cbd5e1"
+                    }}
+                  >
+                    <strong>리플로우 곡선 기준: {reflowMeltDisplay.label}</strong>
+                    {reflowMeltDisplay.processAllowed === false ? (
+                      <div style={{ marginTop: 3, color: "#fecaca" }}>
+                        DB 검증 범위 밖 또는 근거 부족으로 생산 공정 추천은 중단됩니다. 차트는 비교 참고용이며 DSC 확인이 필요합니다.
                       </div>
-                      <span style={{ color: "#64748b", fontSize: 11 }}>
-                        적용 중: {reflowMeltDisplay.label}
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-                      데이터 추론(3-NN) 결과가 없어 리플로우는 하이브리드 엔진 융점만 사용합니다.
-                    </div>
-                  )}
-                  <ReflowTuneBar
+                    ) : (
+                      <div style={{ marginTop: 3, color: "#94a3b8" }}>
+                        보조 3-NN 값으로 기준을 바꾸지 않습니다. 부품 허용온도·오븐 편차를 반영한 공학 검토가 필요합니다.
+                      </div>
+                    )}
+                  </div>
+                  {reflowMeltDisplay.processAllowed === false ? null : <ReflowTuneBar
                     liquidus={reflowMeltDisplay.liquidus}
                     modelPeak={reflowMeltDisplay.modelPeak}
                     reflowPeakUser={reflowPeakUser}
@@ -3639,7 +3695,7 @@ export default function App() {
                         peakMargin: pset.peak_margin
                       });
                     }}
-                  />
+                  />}
                   <ImcInterfaceCard
                     result={result}
                     substrate={imcSubstrate}
@@ -4058,6 +4114,7 @@ function AiModeBadge({ result }) {
     summary.startsWith("[쉬운 요약 · 로컬 전용]") ||
     summary.startsWith("[쉬운 요약 · Gemini 미연결]");
   const rawMode = String(result?.ai_mode || "").toLowerCase();
+  const isNotRequested = rawMode === "not_requested";
   const isCerebras = rawMode === "cerebras";
   const isCache = rawMode === "cache" || String(result?.ai_source || "").toLowerCase() === "cache";
   const used = typeof result?.ai_used_this_request === "boolean"
@@ -4065,9 +4122,13 @@ function AiModeBadge({ result }) {
     : (rawMode
       ? rawMode === "gemini" || rawMode === "cerebras" || rawMode === "cache"
       : !isLocalSummary);
-  const mode = isCerebras ? "cerebras" : (isCache ? "cache" : (used ? "gemini" : "local"));
+  const mode = isNotRequested
+    ? "not_requested"
+    : (isCerebras ? "cerebras" : (isCache ? "cache" : (used ? "gemini" : "local")));
   const palette =
-    mode === "cerebras"
+    mode === "not_requested"
+      ? { border: "#1d4ed8", bg: "#1e3a8a", title: "핵심 수치와 검증 범위가 먼저 계산되었습니다. AI 설명은 선택해서 불러올 수 있습니다.", label: "✓ 핵심 예측 완료 · AI 설명 선택" }
+      : mode === "cerebras"
       ? { border: "#4338ca", bg: "#4f46e5", title: "Gemini 한도/오류로 인해 이번 요청은 Cerebras 폴백으로 응답되었습니다.", label: "✓ 이번 요청: Cerebras 폴백 (AI+DB)" }
       : mode === "cache"
         ? { border: "#0e7490", bg: "#0891b2", title: "이전에 Gemini로 생성한 AI 응답을 디스크 캐시에서 재사용했습니다. 이번 요청에는 외부 API를 호출하지 않았습니다.", label: "✓ 이번 요청: AI 응답 캐시 재사용" }
@@ -4090,6 +4151,31 @@ function AiModeBadge({ result }) {
     >
       {palette.label}
     </span>
+  );
+}
+
+function AiExplanationButton({ result, loading, onClick }) {
+  if (!result?.prediction_contract || String(result?.ai_summary || "").trim()) return null;
+  return (
+    <TactileButton
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      aria-busy={loading ? "true" : undefined}
+      style={{
+        minHeight: 34,
+        padding: "6px 11px",
+        borderRadius: 7,
+        border: "1px solid #6366f1",
+        background: loading ? "#312e81" : "#3730a3",
+        color: "#eef2ff",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: loading ? "wait" : "pointer"
+      }}
+    >
+      {loading ? "AI 설명 생성 중..." : "AI 설명 불러오기"}
+    </TactileButton>
   );
 }
 
@@ -4716,6 +4802,7 @@ function ResultSummaryBlock({
           ))}
         </div>
       ) : null}
+      <PredictionEvidencePanel contract={result.prediction_contract} />
       <div
         ref={kpiGridRef}
         id="results-kpi-strip"
@@ -4785,12 +4872,11 @@ function ResultSummaryBlock({
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 8, color: "#7dd3fc" }}>
-            데이터 추론 (상위 3개 DB 이웃 + 함량 민감도)
+            보조 모델 교차확인 (공정 권장값에는 사용하지 않음)
           </div>
           <div style={{ marginBottom: 6 }}>
             추정 고상선 {Number(result.alloy_inference.solidus).toFixed(1)} ℃ · 액상선{" "}
-            {Number(result.alloy_inference.liquidus).toFixed(1)} ℃ · 권장 피크(참고) 약{" "}
-            {Number(result.alloy_inference.recommended_peak_c).toFixed(1)} ℃
+            {Number(result.alloy_inference.liquidus).toFixed(1)} ℃
           </div>
           {Array.isArray(result.alloy_inference.neighbors) && result.alloy_inference.neighbors.length ? (
             <div style={{ marginBottom: 8, color: "#94a3b8", fontSize: 11 }}>
@@ -4804,14 +4890,10 @@ function ResultSummaryBlock({
             하이브리드 엔진 대비 Δ(추론 − 하이브리드): 고상{" "}
             {(Number(result.alloy_inference.solidus) - Number(result.solidus)).toFixed(2)} ℃ · 액상{" "}
             {(Number(result.alloy_inference.liquidus) - Number(result.liquidus)).toFixed(2)} ℃
-            {Number.isFinite(Number(result.alloy_inference.recommended_peak_c)) &&
-            Number.isFinite(Number(result.peak))
-              ? ` · 권장피크(추) − 엔진피크 ${(
-                  Number(result.alloy_inference.recommended_peak_c) - Number(result.peak)
-                ).toFixed(1)} ℃`
-              : null}
           </div>
-          <div style={{ color: "#cbd5e1" }}>{String(result.alloy_inference.process_report || "").trim()}</div>
+          <div style={{ color: "#64748b", fontSize: 11 }}>
+            표시값과 차이가 크면 실제 DSC 측정을 우선하세요. 리플로우 차트는 위 검증 판정의 핵심 엔진 값만 사용합니다.
+          </div>
         </div>
       ) : null}
       <CollapsibleSection
@@ -5716,6 +5798,17 @@ function getAlloyInferenceMelt(result) {
 
 /** 리플로우 차트/튜너에 쓸 고상·액상·기준 피크 */
 function getReflowMeltDisplay(result, meltBasis) {
+  const contract = result?.prediction_contract;
+  if (contract && typeof contract === "object") {
+    return {
+      solidus: Number(result?.solidus || 0),
+      liquidus: Number(result?.liquidus || 0),
+      modelPeak: Number(result?.peak || 0),
+      basis: "validated_core",
+      label: "검증 판정 핵심 엔진",
+      processAllowed: Boolean(contract?.process_recommendation?.allowed)
+    };
+  }
   const inf = getAlloyInferenceMelt(result);
   if (meltBasis === "inference" && inf) {
     return { ...inf, basis: "inference", label: "데이터 추론(3-NN)" };

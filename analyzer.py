@@ -649,7 +649,7 @@ class AlloyAnalyzer:
         solidus, liquidus, peak, stage, _detail = self.calc_melting_with_detail(best, norm)
         return solidus, liquidus, peak, stage
 
-    def calc_melting_with_detail(self, best, norm):
+    def calc_melting_with_detail(self, best, norm, include_ai: bool = True):
         """
         calc_melting + detail 반환 버전.
 
@@ -669,7 +669,9 @@ class AlloyAnalyzer:
             )
 
         solidus, liquidus, peak, detail = hybrid_melting_predict(
-            norm, self.db_prepared, ai_engine=self.melting_ai
+            norm,
+            self.db_prepared,
+            ai_engine=self.melting_ai if include_ai else None,
         )
 
         # stage는 best_dist 기준으로 기존 stage 숫자 유지
@@ -770,6 +772,8 @@ class AlloyAnalyzer:
         wetting_temp_c=None,
         wetting_temp_basis=None,
         include_wetting_grid=False,
+        include_ai: bool = True,
+        include_melting_ai: bool | None = None,
     ):
         def _p(v, msg):
             if callable(progress_cb):
@@ -785,7 +789,10 @@ class AlloyAnalyzer:
         _p(16, "DB 최근접 합금 탐색 중...")
         best, score, conf = self.find_best_match(norm)
         _p(28, "융점/온도 프로파일 계산 중...")
-        solidus, liquidus, peak, stage, melting_detail = self.calc_melting_with_detail(best, norm)
+        melting_ai_enabled = include_ai if include_melting_ai is None else include_melting_ai
+        solidus, liquidus, peak, stage, melting_detail = self.calc_melting_with_detail(
+            best, norm, include_ai=bool(melting_ai_enabled)
+        )
 
         _p(66, "KNN 유사 합금 검색 중...")
         knn  = self.find_knn(norm, k=3)
@@ -1082,9 +1089,20 @@ class AlloyAnalyzer:
         #                        → 첫 호출 이후 영구적으로 API 0회 + 품질 완전 동일
         #    - skip: 로컬 폴백으로만 생성 (API 완전 0회, 서술 간결)
         #    - always: 정확 일치 무시하고 항상 API 호출 (기존 동작)
-        cached = ai_cache.get(cache_key)
+        cached = ai_cache.get(cache_key) if include_ai else None
 
-        if isinstance(cached, dict):
+        if not include_ai:
+            # 수치 예측 API는 외부 생성형 AI 상태와 분리한다. 로컬 규칙 설명만
+            # 구성해 핵심 결과가 API 키·네트워크·AI 지연에 영향받지 않게 한다.
+            try:
+                full_ai = self.ai._build_local_fallback(
+                    norm, ai_result_payload, knn,
+                    literature_mode=literature_mode, mode=mode,
+                )
+            except Exception:
+                full_ai = {}
+            ai_source = "local"
+        elif isinstance(cached, dict):
             full_ai = cached
             ai_source = "cache"
         elif db_exact_hit and _AI_DB_EXACT_MODE == "skip":

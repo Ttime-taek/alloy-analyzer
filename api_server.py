@@ -27,13 +27,16 @@ so that GUI와 서버가 항상 동일한 엔진을 사용합니다.
 """
 
 import json
+import math
 import os
 import threading
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -111,34 +114,10 @@ except ImportError:
     )
 
 
-def _load_gemini_key_from_file() -> None:
-    """
-    uvicorn/별도 cmd에서 GEMINI_API_KEY가 비어 있을 때, 프로젝트 루트의
-    .gemini_api_key 또는 gemini_api_key.txt(한 줄)에서 키를 읽어 환경변수에 넣습니다.
-    환경변수가 이미 있으면 덮어쓰지 않습니다.
-    """
-    if (os.getenv("GEMINI_API_KEY") or "").strip():
-        return
-    root = Path(__file__).resolve().parent
-    for name in (".gemini_api_key", "gemini_api_key.txt"):
-        path = root / name
-        if not path.is_file():
-            continue
-        raw = path.read_text(encoding="utf-8", errors="replace")
-        for line in raw.splitlines():
-            key = line.strip()
-            if not key or key.startswith("#"):
-                continue
-            os.environ["GEMINI_API_KEY"] = key
-            return
-
-
-_load_gemini_key_from_file()
-
-# Cerebras 키도 동일한 규칙으로 .env에서 로드(환경변수가 이미 있으면 덮어쓰지 않음).
+# API 키는 저장소 파일이 아니라 .env/환경변수에서만 로드한다.
 if load_env_keys:
     try:
-        load_env_keys(["CEREBRAS_API_KEY"], override=False)
+        load_env_keys(["GEMINI_API_KEY", "CEREBRAS_API_KEY"], override=False)
     except Exception:
         pass
 
@@ -221,6 +200,8 @@ def _validate_alloy_comp_dict(v: Any, label: str = "comp") -> Dict[str, float]:
             f = float(val)
         except Exception:
             raise ValueError(f"{k} 값은 숫자여야 합니다.")
+        if not math.isfinite(f):
+            raise ValueError(f"{k} 값은 유한한 숫자여야 합니다.")
         if f < 0:
             raise ValueError(f"{k} 값은 0 이상이어야 합니다.")
         sk = k.strip()
@@ -320,6 +301,22 @@ class CompositionRequest(BaseModel):
             return "fast"
         v = v.strip().lower()
         return "deep" if v in ("deep", "precise", "detailed", "slow") else "fast"
+
+
+class ProcessConstraints(BaseModel):
+    """리플로우 참고값을 검토할 때 필요한 사용자 공정 한계."""
+
+    max_component_temp_c: float | None = Field(default=None, ge=50.0, le=500.0)
+    oven_tolerance_c: float | None = Field(default=None, ge=0.0, le=100.0)
+    target_peak_margin_c: float | None = Field(default=None, ge=0.0, le=100.0)
+
+
+class AnalysisV1Request(CompositionRequest):
+    process_constraints: ProcessConstraints | None = None
+
+
+class ExplanationV1Request(CompositionRequest):
+    analysis_id: str = Field(..., min_length=8, max_length=80)
 
 
 class AnalysisResponse(BaseModel):
@@ -831,9 +828,18 @@ async def _no_cache_spa_assets(request, call_next):
 # 다른 PC·다른 포트의 웹에서 API를 직접 호출할 때 브라우저 CORS 차단 방지.
 # ALLOY_API_CORS=0 이면 비활성화(폐쇄망 전용 등).
 if (os.getenv("ALLOY_API_CORS") or "").strip().lower() not in ("0", "false", "no", "off"):
+    _cors_raw = (os.getenv("ALLOY_API_CORS_ORIGINS") or "").strip()
+    _cors_origins = [x.strip() for x in _cors_raw.split(",") if x.strip()] or [
+        "https://alloy-analyzer.vercel.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_origins,
+        allow_origin_regex=r"https://alloy-analyzer(?:-[a-z0-9-]+)?\.vercel\.app",
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -842,6 +848,52 @@ if (os.getenv("ALLOY_API_CORS") or "").strip().lower() not in ("0", "false", "no
 _ai_engine: Any | None = None
 _analyzer: Any | None = None
 _analyzer_lock = threading.Lock()
+
+
+def _bounded_env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int((os.getenv(name) or str(default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return min(maximum, max(minimum, value))
+
+
+_EXPLANATION_RATE_LIMIT = _bounded_env_int(
+    "ALLOY_EXPLANATION_RATE_LIMIT",
+    6,
+    minimum=1,
+    maximum=100,
+)
+_EXPLANATION_RATE_WINDOW_SEC = _bounded_env_int(
+    "ALLOY_EXPLANATION_RATE_WINDOW_SEC",
+    60,
+    minimum=10,
+    maximum=3600,
+)
+_EXPLANATION_CONCURRENCY = _bounded_env_int(
+    "ALLOY_EXPLANATION_CONCURRENCY",
+    1,
+    minimum=1,
+    maximum=8,
+)
+_explanation_gate = threading.BoundedSemaphore(_EXPLANATION_CONCURRENCY)
+_explanation_rate_lock = threading.Lock()
+_explanation_requests: Dict[str, deque[float]] = defaultdict(deque)
+
+
+def _consume_explanation_quota(client_key: str) -> tuple[bool, int]:
+    """단일 인스턴스의 원격 설명 호출을 IP별 슬라이딩 윈도우로 제한한다."""
+    now = time.monotonic()
+    cutoff = now - float(_EXPLANATION_RATE_WINDOW_SEC)
+    with _explanation_rate_lock:
+        queue = _explanation_requests[client_key]
+        while queue and queue[0] <= cutoff:
+            queue.popleft()
+        if len(queue) >= _EXPLANATION_RATE_LIMIT:
+            retry_after = max(1, math.ceil(queue[0] + _EXPLANATION_RATE_WINDOW_SEC - now))
+            return False, retry_after
+        queue.append(now)
+    return True, 0
 
 
 def _get_engine_bundle() -> tuple[Any, Any]:
@@ -855,6 +907,275 @@ def _get_engine_bundle() -> tuple[Any, Any]:
             _, _, runtime_solder_db = _load_analysis_runtime()
             _analyzer = AlloyAnalyzer(runtime_solder_db, ai_engine=_ai_engine)
     return _ai_engine, _analyzer
+
+
+def _prediction_contract_builder() -> Any:
+    try:
+        from .prediction_contract import build_prediction_contract
+    except ImportError:
+        from test7.prediction_contract import build_prediction_contract
+    return build_prediction_contract
+
+
+def _core_result_payload(
+    result: Dict[str, Any],
+    *,
+    comp_input_wt_sum: float,
+    composition_notes: list[str],
+    prediction_contract: Dict[str, Any],
+) -> Dict[str, Any]:
+    """기존 React 결과 컴포넌트와 호환되는 AI 비의존 핵심 결과."""
+    best = result.get("best") or {}
+    return {
+        "norm": result.get("norm") or {},
+        "best_name": best.get("name"),
+        "score": float(result.get("score", 0.0) or 0.0),
+        "confidence": float(result.get("confidence", 0.0) or 0.0),
+        "confidence_overall": float(result.get("confidence_overall", 0.0) or 0.0),
+        "solidus": float(result.get("solidus", 0.0) or 0.0),
+        "liquidus": float(result.get("liquidus", 0.0) or 0.0),
+        "peak": float(result.get("peak", 0.0) or 0.0),
+        "phase": _coerce_response_str(result.get("phase")),
+        "imc": [str(x) for x in (result.get("imc") or [])],
+        "risk": [str(x) for x in (result.get("risk") or [])],
+        "props": result.get("props") or {},
+        "melting_stage": int(result.get("melting_stage", 0) or 0),
+        "melting_detail": result.get("melting_detail") or {},
+        "evidence": result.get("evidence") or {},
+        "ai_summary": "",
+        "ai_sources": [],
+        "ai_cited_sources": [],
+        "retrieved_candidates": [],
+        "ai_used_this_request": False,
+        "ai_source": "not_requested",
+        "element_roles": _coerce_response_str(result.get("element_roles")),
+        "dopant_rec": _coerce_response_str(result.get("dopant_rec")),
+        "eng_report": "",
+        "lab_report": "",
+        "ai_mode": "not_requested",
+        "ai_status_detail": "핵심 수치 예측 완료 · AI 설명은 별도 요청",
+        "ai_usage_snapshot": {},
+        "comp_input_wt_sum": float(comp_input_wt_sum),
+        "composition_notes": list(composition_notes),
+        "alloy_inference": result.get("alloy_inference") or {},
+        "prediction_contract": prediction_contract,
+    }
+
+
+def _v1_error(code: str, message: str, *, details: Any = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"code": code, "message": message}
+    if details is not None:
+        payload["details"] = details
+    return payload
+
+
+@app.get("/api/v1/capabilities")
+def api_v1_capabilities() -> Dict[str, Any]:
+    about = about_api_payload()
+    return {
+        "api_version": API_VERSION_SEMVER,
+        "core_prediction": True,
+        "unregistered_composition_prediction": True,
+        "empirical_prediction_intervals": True,
+        "out_of_domain_policy": True,
+        "explanation_separate": True,
+        "runtime": about.get("runtime") or {},
+    }
+
+
+@app.get("/api/v1/models")
+def api_v1_models() -> Dict[str, Any]:
+    try:
+        from .prediction_contract import CONTRACT_VERSION, POLICY_VERSION
+        from .prediction_validation import calibration_report, tensile_anchor_count
+    except ImportError:
+        from test7.prediction_contract import CONTRACT_VERSION, POLICY_VERSION
+        from test7.prediction_validation import calibration_report, tensile_anchor_count
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "policy_version": POLICY_VERSION,
+        "melting_engine_version": MELTING_ENGINE_VERSION,
+        "tensile_anchor_count": tensile_anchor_count(),
+        "validation": calibration_report(),
+    }
+
+
+@app.post("/api/v1/analyses")
+def analyze_v1(req: AnalysisV1Request) -> Dict[str, Any]:
+    """외부 생성형 AI를 호출하지 않고 핵심 수치·검증 범위를 먼저 반환."""
+    started = time.perf_counter()
+    _engine, analyzer = _get_engine_bundle()
+    try:
+        _require_wt_sum_100_00(dict(req.comp), "comp")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_v1_error("COMPOSITION_SUM_INVALID", str(exc)),
+        ) from exc
+    sum_in, comp_notes = _composition_notes_for_raw_comp(dict(req.comp))
+    try:
+        result = analyzer.analyze_all(
+            req.comp,
+            mode=req.mode or "eng",
+            literature_mode=req.literature_mode or "fast",
+            wetting_temp_c=req.wetting_temp_c,
+            include_wetting_grid=bool(req.include_wetting_grid),
+            include_ai=False,
+        )
+        constraints = (
+            req.process_constraints.model_dump(exclude_none=True)
+            if req.process_constraints is not None
+            else {}
+        )
+        contract = _prediction_contract_builder()(result, constraints)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_v1_error("COMPOSITION_INVALID", str(exc)),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=_v1_error("CORE_ANALYSIS_FAILED", "핵심 예측에 실패했습니다."),
+        ) from exc
+    payload = _core_result_payload(
+        result,
+        comp_input_wt_sum=sum_in,
+        composition_notes=comp_notes,
+        prediction_contract=contract,
+    )
+    return {
+        "analysis_id": contract["analysis_id"],
+        "prediction_contract": contract,
+        "result": payload,
+        "explanation": {"status": "not_requested"},
+        "timing_ms": {"core": round((time.perf_counter() - started) * 1000.0, 2)},
+    }
+
+
+@app.post("/api/v1/analyses/{analysis_id}/explanations")
+def explain_v1(
+    analysis_id: str,
+    req: ExplanationV1Request,
+    request: Request,
+) -> Dict[str, Any]:
+    """핵심 결과 ID와 조성을 다시 결합해 선택적 AI 설명만 생성."""
+    started = time.perf_counter()
+    if analysis_id != req.analysis_id:
+        raise HTTPException(
+            status_code=409,
+            detail=_v1_error("ANALYSIS_ID_MISMATCH", "경로와 요청의 분석 ID가 다릅니다."),
+        )
+    engine, analyzer = _get_engine_bundle()
+    try:
+        _require_wt_sum_100_00(dict(req.comp), "comp")
+        core = analyzer.analyze_all(
+            req.comp,
+            mode=req.mode or "eng",
+            literature_mode=req.literature_mode or "fast",
+            wetting_temp_c=req.wetting_temp_c,
+            include_wetting_grid=False,
+            include_ai=False,
+        )
+        core_contract = _prediction_contract_builder()(core, {})
+        if core_contract.get("analysis_id") != analysis_id:
+            raise HTTPException(
+                status_code=409,
+                detail=_v1_error(
+                    "ANALYSIS_BINDING_INVALID",
+                    "분석 ID가 현재 조성·모델·DB 버전과 일치하지 않습니다. 핵심 분석을 다시 실행하세요.",
+                ),
+            )
+        client_key = request.client.host if request.client is not None else "unknown"
+        quota_ok, retry_after = _consume_explanation_quota(client_key)
+        if not quota_ok:
+            raise HTTPException(
+                status_code=429,
+                detail=_v1_error(
+                    "EXPLANATION_RATE_LIMITED",
+                    "AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+                ),
+                headers={"Retry-After": str(retry_after)},
+            )
+        if not _explanation_gate.acquire(blocking=False):
+            raise HTTPException(
+                status_code=429,
+                detail=_v1_error(
+                    "EXPLANATION_BUSY",
+                    "다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
+                ),
+                headers={"Retry-After": "2"},
+            )
+        try:
+            result = analyzer.analyze_all(
+                req.comp,
+                mode=req.mode or "eng",
+                literature_mode=req.literature_mode or "fast",
+                wetting_temp_c=req.wetting_temp_c,
+                include_wetting_grid=False,
+                include_ai=True,
+                include_melting_ai=False,
+            )
+        finally:
+            _explanation_gate.release()
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_v1_error("COMPOSITION_INVALID", str(exc)),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=_v1_error("EXPLANATION_FAILED", "AI 설명 생성에 실패했습니다."),
+        ) from exc
+
+    norm = result.get("norm") or {}
+    comp_str = ", ".join(f"{k}{float(v):.2f}%" for k, v in norm.items())
+    try:
+        knn = analyzer.find_knn(norm, k=3)
+    except Exception:
+        knn = []
+    try:
+        eng_report = engine.build_eng_report(comp_str, result, knn)
+    except Exception:
+        eng_report = ""
+    lab_report = ""
+    if (req.mode or "eng").strip().lower() == "lab":
+        try:
+            lab_report = engine.build_lab_report(comp_str, result, knn)
+        except Exception:
+            lab_report = ""
+    source = str(result.get("ai_source") or "local")
+    ai_mode = "cache" if source == "cache" else (
+        "gemini" if bool(result.get("ai_used_this_request")) else "local"
+    )
+    patch = {
+        "ai_summary": _coerce_response_str(result.get("ai_summary")),
+        "ai_sources": [str(x) for x in (result.get("ai_sources") or [])],
+        "ai_cited_sources": [str(x) for x in (result.get("ai_cited_sources") or [])],
+        "retrieved_candidates": [str(x) for x in (result.get("retrieved_candidates") or [])],
+        "ai_used_this_request": bool(result.get("ai_used_this_request")),
+        "ai_source": source,
+        "ai_mode": ai_mode,
+        "ai_status_detail": str(getattr(engine, "status_detail", "") or ""),
+        "ai_usage_snapshot": dict(getattr(engine, "get_usage_snapshot", lambda: {})() or {}),
+        "element_roles": _coerce_response_str(result.get("element_roles")),
+        "dopant_rec": _coerce_response_str(result.get("dopant_rec")),
+        "eng_report": _coerce_response_str(eng_report),
+        "lab_report": _coerce_response_str(lab_report),
+    }
+    return {
+        "analysis_id": analysis_id,
+        "explanation": {
+            "status": "ready",
+            "source": source,
+            "used_remote_this_request": bool(result.get("ai_used_this_request")),
+        },
+        "result_patch": patch,
+        "timing_ms": {"explanation_total": round((time.perf_counter() - started) * 1000.0, 2)},
+    }
 
 
 @app.get("/api/about")
