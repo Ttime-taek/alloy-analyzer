@@ -188,7 +188,7 @@ class ApiStaticSmokeTest(unittest.TestCase):
         self.assertEqual(response.json()["storage"], "supabase")
         writer.assert_awaited_once_with(payload["favorites"])
 
-    def test_favorites_returns_503_when_supabase_is_unavailable(self) -> None:
+    def test_favorites_falls_back_to_local_when_supabase_is_unavailable(self) -> None:
         failure = api_mod.FavoritesStoreError("Supabase unavailable")
         with (
             patch.object(api_mod, "supabase_configured", return_value=True),
@@ -200,8 +200,22 @@ class ApiStaticSmokeTest(unittest.TestCase):
         ):
             response = self.client.get("/api/favorites")
 
-        self.assertEqual(response.status_code, 503, response.text)
-        self.assertIn("Supabase unavailable", response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["storage"], "local_fallback")
+
+    def test_favorites_write_falls_back_to_local_when_supabase_is_unavailable(self) -> None:
+        failure = api_mod.FavoritesStoreError("Supabase unavailable")
+        payload = {"favorites": [{"name": "SAC305", "comp": {"Sn": 96.5}}]}
+        with (
+            patch.object(api_mod, "supabase_configured", return_value=True),
+            patch.object(api_mod, "write_supabase_favorites", new=AsyncMock(side_effect=failure)),
+            patch.object(api_mod, "_write_web_favorites_file") as local_writer,
+        ):
+            response = self.client.put("/api/favorites", json=payload)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["storage"], "local_fallback")
+        local_writer.assert_called_once()
 
     def test_favorites_rejects_accidental_empty_supabase_overwrite(self) -> None:
         stored = [{"name": "SAC305", "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}}]

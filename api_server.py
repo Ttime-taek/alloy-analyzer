@@ -762,6 +762,19 @@ def _read_web_favorites_file() -> List[Dict[str, Any]]:
     return out[:20]
 
 
+def _local_favorites_items() -> List[Dict[str, Any]]:
+    """Read local favorites and migrate the legacy GUI file when needed."""
+    items = _read_web_favorites_file()
+    if not items:
+        items = _read_gui_favorites_as_list()
+        if items:
+            try:
+                _write_web_favorites_file(items)
+            except Exception:
+                pass
+    return items
+
+
 def _write_web_favorites_file(items: List[Dict[str, Any]]) -> None:
     path = _web_favorites_path()
     tmp = path.with_suffix(".json.tmp")
@@ -1195,21 +1208,18 @@ async def get_favorites() -> WebFavoritesPayload:
     if supabase_configured():
         try:
             items = await read_supabase_favorites()
-        except FavoritesStoreError as e:
-            raise HTTPException(status_code=503, detail=str(e)) from e
+        except FavoritesStoreError:
+            items = _local_favorites_items()
+            return WebFavoritesPayload(
+                favorites=[WebFavoriteItem(**x) for x in items],
+                storage="local_fallback",
+            )
         return WebFavoritesPayload(
             favorites=[WebFavoriteItem(**x) for x in items],
             storage="supabase",
         )
 
-    items = _read_web_favorites_file()
-    if not items:
-        items = _read_gui_favorites_as_list()
-        if items:
-            try:
-                _write_web_favorites_file(items)
-            except Exception:
-                pass
+    items = _local_favorites_items()
     return WebFavoritesPayload(
         favorites=[WebFavoriteItem(**x) for x in items],
         storage="local",
@@ -1233,8 +1243,12 @@ async def put_favorites(body: WebFavoritesPayload) -> WebFavoritesPayload:
                         ),
                     )
             await write_supabase_favorites(items)
-        except FavoritesStoreError as e:
-            raise HTTPException(status_code=503, detail=str(e)) from e
+        except FavoritesStoreError:
+            try:
+                _write_web_favorites_file(items)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"즐겨찾기 저장 실패: {e}") from e
+            return WebFavoritesPayload(favorites=body.favorites, storage="local_fallback")
         return WebFavoritesPayload(favorites=body.favorites, storage="supabase")
 
     try:
