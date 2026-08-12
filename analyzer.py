@@ -64,10 +64,9 @@ def _imc_line_to_plain_korean(s: str) -> str:
     t = str(s).strip()
     if not t:
         return t
-    hangul = sum(1 for c in t if "\uac00" <= c <= "\ud7a3")
-    if hangul >= 10 and ("약칭" in t or "만나" in t or "단단한" in t):
-        return t
     low = t.lower()
+    # 알려진 IMC는 AI 수식어를 그대로 신뢰하지 않고 용어집 문장으로 고정한다.
+    # 예: Ag3Sn을 "약한 층"으로 쓰는 상충 설명을 차단한다.
     if "규칙 기반으로는 지배적" in t:
         return "이 조성만으로는 어떤 합금층이 가장 두드러지는지 특정하기 어렵습니다."
     if "ag3sn" in low or "sn-ag" in low:
@@ -88,7 +87,26 @@ def _imc_line_to_plain_korean(s: str) -> str:
         return "납이 있을 때 생길 수 있는 층(규제 확인 필요)"
     if "snsb" in low:
         return "안티몬과 주석이 만난 층"
+    hangul = sum(1 for c in t if "\uac00" <= c <= "\ud7a3")
+    if hangul >= 10 and ("약칭" in t or "만나" in t or "단단한" in t):
+        return t
     return t
+
+
+def _mentions_unentered_element(text: str, norm: dict) -> bool:
+    """AI 문장에 입력하지 않은 명시적 원소명이 섞이면 표시하지 않는다."""
+    raw = str(text or "")
+    low = raw.lower()
+    explicit_mentions = {
+        "As": ("비소", "arsenic", "(as)", " as 원소", "as 첨가"),
+    }
+    for symbol, markers in explicit_mentions.items():
+        if float(norm.get(symbol, 0.0) or 0.0) <= 0 and any(
+            marker in low if marker.isascii() else marker in raw
+            for marker in markers
+        ):
+            return True
+    return False
 
 
 class AlloyAnalyzer:
@@ -596,6 +614,8 @@ class AlloyAnalyzer:
         kept = []
         for ln in lines:
             l = ln.lower()
+            if _mentions_unentered_element(ln, norm):
+                continue
             if ("ag3sn" in l or "sn-ag" in l or " ag" in l) and ag <= 0:
                 continue
             if ("cu6sn5" in l or "cu3sn" in l or "sn-cu" in l or "(ni,cu)6sn5" in l) and cu <= 0:
@@ -1199,6 +1219,8 @@ class AlloyAnalyzer:
         def _compatible_with_input(text: str) -> bool:
             t = text.lower()
             # 입력에 없는 원소 기반 상/IMC는 제외 (AI 환각 방어)
+            if _mentions_unentered_element(text, norm):
+                return False
             if ("ag3sn" in t or " ag" in t or "ag-" in t or "sn-ag" in t) and ag <= 0:
                 return False
             if ("cu6sn5" in t or "cu3sn" in t or "(ni,cu)6sn5" in t or "cu-sn" in t) and cu <= 0:
