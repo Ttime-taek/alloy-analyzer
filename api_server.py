@@ -455,6 +455,22 @@ class CompareOne(BaseModel):
         default_factory=dict,
         description="단일 분석과 동일한 예측 상태·사용 가능 범위 계약",
     )
+    evidence: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="표준·물성 문헌 등 분석 근거",
+    )
+    ai_sources: list[str] = Field(
+        default_factory=list,
+        description="기존 클라이언트 호환 출처 목록",
+    )
+    ai_cited_sources: list[str] = Field(
+        default_factory=list,
+        description="AI가 실제 답변에 인용한 출처",
+    )
+    retrieved_candidates: list[str] = Field(
+        default_factory=list,
+        description="로컬·공개 문헌 검색에서 수집한 참고 후보",
+    )
 
 
 class CompareResponse(BaseModel):
@@ -934,6 +950,21 @@ def _prediction_contract_builder() -> Any:
     return build_prediction_contract
 
 
+def _source_strings(value: Any) -> list[str]:
+    """출처 목록을 JSON-safe 문자열로 정리하고 순서를 유지한 채 중복 제거."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        item_text = str(item).strip()
+        if not item_text or item_text in seen:
+            continue
+        seen.add(item_text)
+        out.append(item_text)
+    return out
+
+
 def _core_result_payload(
     result: Dict[str, Any],
     *,
@@ -960,9 +991,12 @@ def _core_result_payload(
         "melting_detail": result.get("melting_detail") or {},
         "evidence": result.get("evidence") or {},
         "ai_summary": "",
-        "ai_sources": [],
-        "ai_cited_sources": [],
-        "retrieved_candidates": [],
+        # include_ai=False에서도 로컬 엔진이 수집한 공개 문헌 후보는 보존한다.
+        # ai_sources는 기존 클라이언트 호환 필드이며 실제 AI 인용 여부는
+        # ai_cited_sources에서 별도로 구분한다.
+        "ai_sources": _source_strings(result.get("ai_sources")),
+        "ai_cited_sources": _source_strings(result.get("ai_cited_sources")),
+        "retrieved_candidates": _source_strings(result.get("retrieved_candidates")),
         "ai_used_this_request": False,
         "ai_source": "not_requested",
         "element_roles": _coerce_response_str(result.get("element_roles")),
@@ -1599,6 +1633,10 @@ async def compare(req: CompareRequest) -> CompareResponse:
             imc_line=_one_line(imc_list, "IMC 요약 없음"),
             risk_line=_one_line(risk_list, "리스크 특이사항 없음"),
             prediction_contract=_prediction_contract_builder()(r, {}),
+            evidence=r.get("evidence") or {},
+            ai_sources=_source_strings(r.get("ai_sources")),
+            ai_cited_sources=_source_strings(r.get("ai_cited_sources")),
+            retrieved_candidates=_source_strings(r.get("retrieved_candidates")),
         )
 
     snap: Dict[str, Any] = {}

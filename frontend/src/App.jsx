@@ -3485,117 +3485,7 @@ export default function App() {
                   open={sectionOpen.sources}
                   onToggle={() => toggleSection("sources")}
                 >
-                  {(() => {
-                    const aiCited = Array.isArray(result.ai_cited_sources)
-                      ? result.ai_cited_sources
-                      : [];
-                    const retrieved = Array.isArray(result.retrieved_candidates)
-                      ? result.retrieved_candidates
-                      : Array.isArray(result.ai_sources)
-                        ? result.ai_sources
-                        : [];
-                    return (
-                      <>
-                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
-                    AI가 실제로 인용한 출처와 자동 검색 후보를 분리해 표시합니다. DOI/URL이 포함된
-                    항목은 링크로 열 수 있습니다.
-                  </p>
-                  {Array.isArray(result.evidence?.standards_refs) &&
-                  result.evidence.standards_refs.length > 0 ? (
-                    <div style={{ marginBottom: 14 }}>
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "#94a3b8",
-                          marginBottom: 6
-                        }}
-                      >
-                        업계 표준 참고 (IPC·JIS)
-                      </div>
-                      <ul
-                        style={{
-                          margin: 0,
-                          paddingLeft: 18,
-                          fontSize: 13,
-                          color: "var(--text-soft)",
-                          lineHeight: 1.5
-                        }}
-                      >
-                        {result.evidence.standards_refs.map((x, i) => (
-                          <li key={i}>
-                            {x.family} {x.id}: {x.note}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {Array.isArray(result.evidence?.strength_literature?.refs) &&
-                  result.evidence.strength_literature.refs.length > 0 ? (
-                    <div style={{ marginBottom: 14 }}>
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "#94a3b8",
-                          marginBottom: 6
-                        }}
-                      >
-                        기계적 물성 문헌 참고
-                      </div>
-                      <ul
-                        style={{
-                          margin: 0,
-                          paddingLeft: 18,
-                          fontSize: 13,
-                          color: "var(--text-soft)",
-                          lineHeight: 1.5
-                        }}
-                      >
-                        {result.evidence.strength_literature.refs.map((x, i) => (
-                          <li key={i}>
-                            {x.alloy}: UTS≈{x.tensile_mpa} MPa — {x.source}
-                            {x.doi ? ` (DOI: ${x.doi})` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  <div style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
-                      AI 실제 인용 출처
-                    </div>
-                    {aiCited.length > 0 ? (
-                      <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
-                        {aiCited.map((s, idx) => (
-                          <SourceListItem key={`ai-${idx}`} s={s} />
-                        ))}
-                      </ul>
-                    ) : (
-                      <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
-                        이번 요청에서 AI가 직접 인용한 DOI/URL이 없습니다.
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
-                      자동 검색 참고 후보 (Crossref/Semantic Scholar)
-                    </div>
-                    {retrieved.length > 0 ? (
-                      <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
-                        {retrieved.map((s, idx) => (
-                          <SourceListItem key={`retr-${idx}`} s={s} />
-                        ))}
-                      </ul>
-                    ) : (
-                      <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
-                        아직 표시할 자동 검색 후보가 없습니다. 네트워크 제한 시 비어 있을 수 있습니다.
-                      </p>
-                    )}
-                  </div>
-                      </>
-                    );
-                  })()}
+                  <SourceReferences result={result} />
                 </CollapsibleSection>
 
                 {/* 구성 원소 역할 & 도펀트 추천 */}
@@ -4259,17 +4149,24 @@ function AiStatusDetail({ result }) {
   );
 }
 
-function sourceLinkFromString(s) {
+function safeHttpUrl(raw) {
+  const value = String(raw || "")
+    .trim()
+    .replace(/[)\]},.;]+$/g, "");
+  return /^https?:\/\/[^\s<>"']+$/i.test(value) ? value : null;
+}
+
+export function sourceLinkFromString(s) {
   const t = String(s).trim();
   const upper = t.toUpperCase();
   // URL이 함께 있으면 URL을 우선 사용 (DOI 파싱 오류 가능성 회피)
   if (upper.startsWith("URL:")) {
-    const u = t.slice(4).trim().split(/\s/)[0].replace(/[)\],.;]+$/g, "");
+    const u = safeHttpUrl(t.slice(4).trim().split(/\s/)[0]);
     if (u) return { href: u, text: t };
   }
   const um = t.match(/\bURL:\s*(\S+)/i);
   if (um && um[1]) {
-    const u = String(um[1]).trim().replace(/[)\],.;]+$/g, "");
+    const u = safeHttpUrl(um[1]);
     if (u) return { href: u, text: t };
   }
 
@@ -4289,6 +4186,13 @@ function sourceLinkFromString(s) {
   if (m && m[1]) {
     const doi = normalizeDoi(m[1]);
     if (doi) return { href: `https://doi.org/${doi}`, text: t };
+  }
+
+  // AI 응답이 URL:/DOI: 라벨 없이 주소만 반환하는 경우도 링크로 표시한다.
+  const bareUrl = t.match(/\bhttps?:\/\/[^\s<>"']+/i);
+  if (bareUrl && bareUrl[0]) {
+    const href = safeHttpUrl(bareUrl[0]);
+    if (href) return { href, text: t };
   }
   return { href: null, text: t };
 }
@@ -4310,6 +4214,179 @@ function SourceListItem({ s }) {
         <span style={{ color: "var(--text-soft)" }}>{text}</span>
       )}
     </li>
+  );
+}
+
+function uniqueStrings(items) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    const value = String(item || "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function uniqueSourceObjects(items, keyFor) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    if (!item || typeof item !== "object") continue;
+    const key = keyFor(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function standardSourceLine(ref) {
+  const label = `${ref?.family || "표준"} ${ref?.id || ""}`.trim();
+  const note = ref?.note ? `: ${ref.note}` : "";
+  const url = safeHttpUrl(ref?.url);
+  return `${label}${note}${url ? ` URL:${url}` : ""}`;
+}
+
+function strengthSourceLine(ref) {
+  const parts = [];
+  if (ref?.alloy) parts.push(String(ref.alloy));
+  if (ref?.tensile_mpa != null) parts.push(`UTS≈${ref.tensile_mpa} MPa`);
+  if (ref?.source) parts.push(String(ref.source));
+  if (ref?.citation) parts.push(String(ref.citation));
+  const url = safeHttpUrl(ref?.url);
+  if (url) parts.push(`URL:${url}`);
+  else if (ref?.doi) parts.push(`DOI:${ref.doi}`);
+  return parts.join(" — ");
+}
+
+export function SourceReferences({ result, showAiCitations = true, showIntro = true }) {
+  const aiCited = uniqueStrings(Array.isArray(result?.ai_cited_sources) ? result.ai_cited_sources : []);
+  const retrieved = uniqueStrings(
+    Array.isArray(result?.retrieved_candidates) && result.retrieved_candidates.length > 0
+      ? result.retrieved_candidates
+      : Array.isArray(result?.ai_sources)
+        ? result.ai_sources
+        : []
+  );
+  const standards = Array.isArray(result?.evidence?.standards_refs)
+    ? result.evidence.standards_refs
+    : [];
+  const strengthRefs = Array.isArray(result?.evidence?.strength_literature?.refs)
+    ? result.evidence.strength_literature.refs
+    : [];
+  const aiNotRequested = result?.ai_source === "not_requested" || result?.ai_mode === "not_requested";
+
+  return (
+    <>
+      {showIntro ? (
+        <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+          실제 인용 출처와 자동 검색 후보를 구분해 표시합니다. DOI/URL이 포함된 항목은
+          링크로 열 수 있습니다.
+        </p>
+      ) : null}
+      {standards.length > 0 ? (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
+            업계 표준 참고 (IPC·JIS)
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
+            {standards.map((ref, index) => (
+              <SourceListItem key={`std-${index}`} s={standardSourceLine(ref)} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {strengthRefs.length > 0 ? (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
+            기계적 물성 문헌 참고
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
+            {strengthRefs.map((ref, index) => (
+              <SourceListItem key={`strength-${index}`} s={strengthSourceLine(ref)} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {showAiCitations ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
+            AI 실제 인용 출처
+          </div>
+          {aiCited.length > 0 ? (
+            <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
+              {aiCited.map((source, index) => (
+                <SourceListItem key={`ai-${index}`} s={source} />
+              ))}
+            </ul>
+          ) : (
+            <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+              {aiNotRequested
+                ? "AI 설명을 불러오면 실제 인용 출처가 여기에 표시됩니다."
+                : "이번 요청에서 AI가 직접 인용한 DOI/URL이 없습니다."}
+            </p>
+          )}
+        </div>
+      ) : null}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
+          자동 검색 참고 후보 (Crossref/Semantic Scholar)
+        </div>
+        {retrieved.length > 0 ? (
+          <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
+            {retrieved.map((source, index) => (
+              <SourceListItem key={`retr-${index}`} s={source} />
+            ))}
+          </ul>
+        ) : (
+          <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+            아직 표시할 자동 검색 후보가 없습니다. 네트워크 제한 시 비어 있을 수 있습니다.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function mergeComparisonSourceResult(a, b) {
+  const sides = [a, b].filter(Boolean);
+  const candidateLists = sides.flatMap((side) =>
+    Array.isArray(side?.retrieved_candidates) && side.retrieved_candidates.length > 0
+      ? side.retrieved_candidates
+      : Array.isArray(side?.ai_sources)
+        ? side.ai_sources
+        : []
+  );
+  const standards = uniqueSourceObjects(
+    sides.flatMap((side) => side?.evidence?.standards_refs || []),
+    (ref) => `${ref.family || ""}|${ref.id || ""}|${ref.url || ""}`
+  );
+  const strengthRefs = uniqueSourceObjects(
+    sides.flatMap((side) => side?.evidence?.strength_literature?.refs || []),
+    (ref) => `${ref.alloy || ""}|${ref.doi || ""}|${ref.url || ""}|${ref.source || ""}`
+  );
+  return {
+    ai_source: "not_requested",
+    ai_cited_sources: [],
+    retrieved_candidates: uniqueStrings(candidateLists),
+    evidence: {
+      standards_refs: standards,
+      strength_literature: { refs: strengthRefs }
+    }
+  };
+}
+
+export function ComparisonSources({ a, b }) {
+  return (
+    <details className="compare-hints compare-sources">
+      <summary>참고 문헌 / 출처</summary>
+      <p style={{ color: "#94a3b8", fontSize: 13, margin: "10px 0" }}>
+        A·B 분석 참고 근거를 합쳐 중복 없이 표시합니다.
+      </p>
+      <SourceReferences result={mergeComparisonSourceResult(a, b)} showAiCitations={false} showIntro={false} />
+    </details>
   );
 }
 
@@ -5580,6 +5657,8 @@ function CompareView({ data, compA, compB }) {
               </ul>
             </details>
           )}
+
+          <ComparisonSources a={a} b={b} />
 
           <CompareSummaryPair title="IMC" textA={a?.imc_line} textB={b?.imc_line} />
           <CompareSummaryPair title="위험도" textA={a?.risk_line} textB={b?.risk_line} isLast />

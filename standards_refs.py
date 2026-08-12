@@ -24,14 +24,54 @@ IPC_JIS_LITERATURE_LINES: list[str] = [
 
 # evidence·UI용 짧은 레이블
 IPC_JIS_SUMMARY_FOR_EVIDENCE: list[dict[str, str]] = [
-    {"family": "IPC", "id": "J-STD-006", "note": "전자용 등급 납합금·플럭스 함유 납·고체 납땜재 요구"},
-    {"family": "IPC", "id": "J-STD-020E", "note": "습기·리플로우 민감도 등급(MSL), 피크 설계 참고"},
-    {"family": "IPC", "id": "J-STD-033", "note": "습기 민감 SMD 취급·포장·운송"},
-    {"family": "IPC", "id": "A-610", "note": "전자 조립물 허용 품질(납땜 등)"},
-    {"family": "IPC", "id": "TM-650", "note": "시험 방법 모음(매뉴얼)"},
-    {"family": "JIS", "id": "Z 3282", "note": "소프트솔더용 플럭스"},
-    {"family": "JIS", "id": "Z 3198", "note": "솔더 페이스트 시험 방법"},
-    {"family": "JIS", "id": "H 1561", "note": "주석·납 납땜 합금 재료"},
+    {
+        "family": "IPC",
+        "id": "J-STD-006",
+        "note": "전자용 등급 납합금·플럭스 함유 납·고체 납땜재 요구",
+        "url": "https://www.ipc.org/ipc-standards",
+    },
+    {
+        "family": "IPC",
+        "id": "J-STD-020E",
+        "note": "습기·리플로우 민감도 등급(MSL), 피크 설계 참고",
+        "url": "https://www.ipc.org/ipc-standards",
+    },
+    {
+        "family": "IPC",
+        "id": "J-STD-033",
+        "note": "습기 민감 SMD 취급·포장·운송",
+        "url": "https://www.ipc.org/ipc-standards",
+    },
+    {
+        "family": "IPC",
+        "id": "A-610",
+        "note": "전자 조립물 허용 품질(납땜 등)",
+        "url": "https://www.ipc.org/ipc-standards",
+    },
+    {
+        "family": "IPC",
+        "id": "TM-650",
+        "note": "시험 방법 모음(매뉴얼)",
+        "url": "https://www.ipc.org/ipc-standards",
+    },
+    {
+        "family": "JIS",
+        "id": "Z 3282",
+        "note": "소프트솔더용 플럭스",
+        "url": "https://www.jisc.go.jp/",
+    },
+    {
+        "family": "JIS",
+        "id": "Z 3198",
+        "note": "솔더 페이스트 시험 방법",
+        "url": "https://www.jisc.go.jp/",
+    },
+    {
+        "family": "JIS",
+        "id": "H 1561",
+        "note": "주석·납 납땜 합금 재료",
+        "url": "https://www.jisc.go.jp/",
+    },
 ]
 
 
