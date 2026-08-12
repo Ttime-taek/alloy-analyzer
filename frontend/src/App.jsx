@@ -2289,6 +2289,7 @@ export default function App() {
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>합금 불러오기</span>
                       <select
+                        aria-label="조성 A 즐겨찾기 불러오기"
                         onChange={(e) => loadFavoriteToA(e.target.value)}
                         value={selectedFavoriteName}
                         style={{
@@ -2415,6 +2416,7 @@ export default function App() {
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
+                        aria-label="조성 A 즐겨찾기 불러오기"
                         onChange={(e) => loadFavoriteToA(e.target.value)}
                         value={selectedFavoriteName}
                         style={{
@@ -2533,6 +2535,7 @@ export default function App() {
                   : "위 주기율표에서 원소를 클릭하거나, 아래에서 원소를 추가하면 입력란이 나타납니다."}
               </p>
               <select
+                aria-label="조성 A 원소 추가"
                 value={addPickA}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -2660,6 +2663,7 @@ export default function App() {
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
                       <select
+                        aria-label="조성 B 즐겨찾기 불러오기"
                         onChange={(e) => loadFavoriteToB(e.target.value)}
                         value={selectedFavoriteNameB}
                         style={{
@@ -2767,6 +2771,7 @@ export default function App() {
                     주기율표·원소 추가로 입력란을 만듭니다.
                   </p>
                   <select
+                    aria-label="조성 B 원소 추가"
                     value={addPickB}
                     onChange={(e) => {
                       const v = e.target.value;
