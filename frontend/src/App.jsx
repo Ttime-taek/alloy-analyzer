@@ -4984,9 +4984,17 @@ function formatCompareCompositionLabel(comp) {
   return parts.length ? parts.join(" · ") : "—";
 }
 
+export function roundedDisplayDelta(na, nb, digits = 2) {
+  if (!Number.isFinite(na) || !Number.isFinite(nb)) return null;
+  const raw = nb - na;
+  const halfStep = 0.5 * 10 ** -digits;
+  if (Math.abs(raw) < halfStep) return 0;
+  return Number(raw.toFixed(digits));
+}
+
 function fmtDelta(na, nb, unit = "") {
-  if (!Number.isFinite(na) || !Number.isFinite(nb)) return "-";
-  const d = nb - na;
+  const d = roundedDisplayDelta(na, nb, 2);
+  if (!Number.isFinite(d)) return "-";
   const sign = d > 0 ? "+" : "";
   return `${sign}${d.toFixed(2)}${unit}`;
 }
@@ -5378,7 +5386,9 @@ function CompareHeroPanel({ a, b, compA, compB }) {
         {deltaSpecs.map(({ label, va, vb, unit }) => {
           const na = Number(va);
           const nb = Number(vb);
-          const delta = Number.isFinite(na) && Number.isFinite(nb) ? nb - na : null;
+          const delta = Number.isFinite(na) && Number.isFinite(nb)
+            ? roundedDisplayDelta(na, nb)
+            : null;
           const tone = compareDeltaTone(delta);
           return (
             <span
@@ -5431,7 +5441,9 @@ function CompareView({ data, compA, compB }) {
     const na = Number(va);
     const nb = Number(vb);
     const dText = fmtDelta(na, nb, unit);
-    const dNum = Number.isFinite(na) && Number.isFinite(nb) ? nb - na : null;
+    const dNum = Number.isFinite(na) && Number.isFinite(nb)
+      ? roundedDisplayDelta(na, nb)
+      : null;
     const toneClass =
       dNum == null ? "compare-metrics-cell--flat" : dNum > 0 ? "compare-metrics-cell--up" : dNum < 0 ? "compare-metrics-cell--down" : "compare-metrics-cell--flat";
     return (
