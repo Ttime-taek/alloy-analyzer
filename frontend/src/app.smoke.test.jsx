@@ -27,4 +27,38 @@ describe("App module", () => {
     expect(tensileSummaryLabel(props)).toBe("인장 (DB우선)");
     expect(formatTensilePrimary({})).toBe("—");
   });
+
+  it("uses final tensile values in comparison metrics", async () => {
+    const { compareTensileMetric } = await import("./App.jsx");
+    const a = {
+      props: {
+        tensile_strength: 48.5,
+        tensile_strength_db_mpa: 72,
+        tensile_strength_basis: "db_priority"
+      }
+    };
+    const b = {
+      props: {
+        tensile_strength: 38,
+        tensile_strength_db_mpa: 65,
+        tensile_strength_basis: "lit_ref"
+      }
+    };
+
+    expect(compareTensileMetric(a, b)).toEqual({
+      label: "인장 (최종값)",
+      valueA: 48.5,
+      valueB: 38
+    });
+  });
+
+  it("falls back to DB tensile only when the final value is unavailable", async () => {
+    const { compareTensileMetric } = await import("./App.jsx");
+    const metric = compareTensileMetric(
+      { props: { tensile_strength_db_mpa: 44, tensile_strength_basis: "db_idw" } },
+      { props: { tensile_strength: 42, tensile_strength_basis: "db_idw" } }
+    );
+
+    expect(metric).toEqual({ label: "인장 (BD유사)", valueA: 44, valueB: 42 });
+  });
 });

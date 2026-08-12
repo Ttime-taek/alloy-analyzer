@@ -4427,13 +4427,29 @@ export function tensileSummaryLabel(props) {
   return "물성 DB 인장";
 }
 
-function tensileCompareLabel(a, b) {
-  const bases = [a?.props?.tensile_strength_basis, b?.props?.tensile_strength_basis];
-  if (bases.some((x) => x === "db_priority")) return "인장 (DB우선)";
-  if (bases.some((x) => x === "db_idw")) return "인장 (BD유사)";
-  if (bases.some((x) => x === "lit_ref")) return "인장 (문헌)";
-  if (bases.some((x) => x === "lit_blend")) return "인장 (문헌보정)";
-  return "인장";
+export function tensileCompareLabel(a, b) {
+  const bases = [a?.props?.tensile_strength_basis, b?.props?.tensile_strength_basis].filter(Boolean);
+  if (new Set(bases).size > 1) return "인장 (최종값)";
+  if (bases.includes("db_priority")) return "인장 (DB우선)";
+  if (bases.includes("db_idw")) return "인장 (BD유사)";
+  if (bases.includes("lit_ref")) return "인장 (문헌)";
+  if (bases.includes("lit_blend")) return "인장 (문헌보정)";
+  if (bases.includes("db_blend")) return "인장 (BD 블렌드)";
+  return "인장강도";
+}
+
+export function compareTensileMetric(a, b) {
+  const value = (side) => {
+    const finalValue = Number(side?.props?.tensile_strength);
+    if (Number.isFinite(finalValue)) return finalValue;
+    const dbValue = Number(side?.props?.tensile_strength_db_mpa);
+    return Number.isFinite(dbValue) ? dbValue : null;
+  };
+  return {
+    label: tensileCompareLabel(a, b),
+    valueA: value(a),
+    valueB: value(b)
+  };
 }
 
 function showCompareDbTensileRow(a, b) {
@@ -5458,6 +5474,7 @@ function CompareView({ data, compA, compB }) {
     a?.props?.shear_strength_basis === "db_idw" || b?.props?.shear_strength_basis === "db_idw"
       ? "전단 (BD유사)"
       : "전단";
+  const tensileMetric = compareTensileMetric(a, b);
   const showDbTensile = showCompareDbTensileRow(a, b);
   const wetT0Label = wetAtLabel ? `젖음T₀ ${wetAtLabel}` : "젖음T₀";
 
@@ -5510,6 +5527,7 @@ function CompareView({ data, compA, compB }) {
               )}
               {rowD("피크", a?.peak, b?.peak, "℃")}
               {rowD("신뢰도", a?.confidence, b?.confidence, "%")}
+              {rowD(tensileMetric.label, tensileMetric.valueA, tensileMetric.valueB, " MPa")}
               {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa")}
               {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN")}
               {rowD(wetT0Label, a?.props?.wetting_t0_pred_s, b?.props?.wetting_t0_pred_s, " s")}
