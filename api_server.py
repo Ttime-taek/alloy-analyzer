@@ -451,6 +451,10 @@ class CompareOne(BaseModel):
         default="",
         description="위험도/리스크 요약(비교 표용 전체 텍스트)",
     )
+    prediction_contract: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="단일 분석과 동일한 예측 상태·사용 가능 범위 계약",
+    )
 
 
 class CompareResponse(BaseModel):
@@ -1592,6 +1596,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
             props=r.get("props") or {},
             imc_line=_one_line(imc_list, "IMC 요약 없음"),
             risk_line=_one_line(risk_list, "리스크 특이사항 없음"),
+            prediction_contract=_prediction_contract_builder()(r, {}),
         )
 
     snap: Dict[str, Any] = {}

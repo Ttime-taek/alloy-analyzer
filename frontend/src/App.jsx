@@ -9,6 +9,7 @@ import {
   readReflowTuningGoalInitial as _readReflowTuningGoalInitial
 } from "./reflow_tune_engine.js";
 import AnalysisReportSlideshow from "./AnalysisReportSlideshow.jsx";
+import ComparisonPredictionStatus from "./ComparisonPredictionStatus.jsx";
 import PredictionEvidencePanel from "./PredictionEvidencePanel.jsx";
 import { apiUrl, fetchApi, hasConfiguredApiBaseUrl } from "./api.js";
 
@@ -5482,6 +5483,8 @@ function CompareView({ data, compA, compB }) {
     <div className="compare-view">
       <AiSessionUsageRow usage={data?.ai_usage_snapshot} />
 
+      <ComparisonPredictionStatus a={a} b={b} />
+
       {(warnA || warnB) && (
         <div className="compare-view__warn">
           <strong>조성 합계</strong>
@@ -5526,7 +5529,7 @@ function CompareView({ data, compA, compB }) {
                 "℃"
               )}
               {rowD("피크", a?.peak, b?.peak, "℃")}
-              {rowD("신뢰도", a?.confidence, b?.confidence, "%")}
+              {rowD("DB 근접 신뢰도", a?.confidence, b?.confidence, "%")}
               {rowD(tensileMetric.label, tensileMetric.valueA, tensileMetric.valueB, " MPa")}
               {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa")}
               {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN")}
