@@ -1557,6 +1557,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
             wetting_temp_c=wet_t,
             wetting_temp_basis=wet_basis,
             include_wetting_grid=bool(req.include_wetting_grid),
+            include_ai=False,
         )
         rb = _analyzer.analyze_all(
             req.comp_b,
@@ -1565,6 +1566,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
             wetting_temp_c=wet_t,
             wetting_temp_basis=wet_basis,
             include_wetting_grid=bool(req.include_wetting_grid),
+            include_ai=False,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e

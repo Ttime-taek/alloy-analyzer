@@ -757,7 +757,9 @@ class AlloyAnalyzer:
         self.validate_input_comp(comp)
         norm = self.normalize(comp)
         best, _, _ = self.find_best_match(norm)
-        _, liquidus, _, _, _ = self.calc_melting_with_detail(best, norm)
+        # 공통 젖음 온도 선택은 결정론적 핵심 수치만 필요하다.
+        # 원격 AI를 호출하면 비교 요청마다 불필요한 지연과 비결정성이 생긴다.
+        _, liquidus, _, _, _ = self.calc_melting_with_detail(best, norm, include_ai=False)
         return float(liquidus or 0.0)
 
     def compare_wetting_temp_c(self, comp_a, comp_b, user_wetting_temp_c=None):
