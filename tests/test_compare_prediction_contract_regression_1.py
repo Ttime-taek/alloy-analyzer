@@ -28,4 +28,3 @@ def test_compare_exposes_refused_out_of_domain_state_for_each_side():
         assert contract["overall_state"] == "out_of_domain"
         assert contract["overall_usage"] == "refused"
         assert contract["properties"]["tensile_strength_mpa"]["state"] == "out_of_domain"
-

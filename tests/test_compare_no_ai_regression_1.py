@@ -69,4 +69,3 @@ def test_shared_wetting_liquidus_probe_disables_melting_ai():
 
     assert analyzer.liquidus_for_comp({"Sn": 100.0}) == 200.0
     assert seen == [False]
-

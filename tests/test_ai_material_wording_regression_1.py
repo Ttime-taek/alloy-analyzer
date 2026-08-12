@@ -24,4 +24,3 @@ def test_ag3sn_uses_controlled_noncontradictory_wording():
     text = "은(Ag)과 주석이 만나 약한 층(약칭: Ag3Sn)이 형성될 수 있습니다."
 
     assert _imc_line_to_plain_korean(text) == "은과 주석이 만나 생기는 단단한 층(약칭: Ag3Sn)"
-
