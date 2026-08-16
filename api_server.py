@@ -267,7 +267,7 @@ def _composition_notes_for_raw_comp(comp: Dict[str, float]) -> tuple[float, list
     return total, notes
 
 
-class CompositionRequest(BaseModel):
+class CompositionParameters(BaseModel):
     """합금 조성 입력 (wt%). 예: {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}"""
 
     comp: Dict[str, float] = Field(
@@ -285,18 +285,6 @@ class CompositionRequest(BaseModel):
         default=None,
         description="젖음 대표 온도(℃). 생략 시 액상선+30℃를 측정 DB 온도(250–290℃)에 맞춤.",
     )
-    include_wetting_grid: bool = Field(
-        default=False,
-        description="True면 분석 응답에 250–290℃ 온도별 젖음 표를 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
-    )
-    include_ai: bool = Field(
-        default=False,
-        description=(
-            "True를 명시한 요청만 Gemini/Cerebras 서술 생성을 허용합니다. "
-            "기본값 False에서는 수치 예측과 로컬 규칙 설명만 반환합니다."
-        ),
-    )
-
     @field_validator("comp")
     @classmethod
     def _validate_comp(cls, v: Dict[str, float]) -> Dict[str, float]:
@@ -319,6 +307,22 @@ class CompositionRequest(BaseModel):
         return "deep" if v in ("deep", "precise", "detailed", "slow") else "fast"
 
 
+class CompositionRequest(CompositionParameters):
+    """레거시 /api/analyze 요청. 생성형 AI는 명시적으로 허용할 때만 호출합니다."""
+
+    include_wetting_grid: bool = Field(
+        default=False,
+        description="True면 분석 응답에 250–290℃ 온도별 젖음 표를 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
+    )
+    include_ai: bool = Field(
+        default=False,
+        description=(
+            "True를 명시한 요청만 Gemini/Cerebras 서술 생성을 허용합니다. "
+            "기본값 False에서는 수치 예측과 로컬 규칙 설명만 반환합니다."
+        ),
+    )
+
+
 class ProcessConstraints(BaseModel):
     """리플로우 참고값을 검토할 때 필요한 사용자 공정 한계."""
 
@@ -327,8 +331,13 @@ class ProcessConstraints(BaseModel):
     target_peak_margin_c: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
-class AnalysisV1Request(CompositionRequest):
+class AnalysisV1Request(CompositionParameters):
+    include_wetting_grid: bool = Field(
+        default=False,
+        description="True면 분석 응답에 250–290℃ 온도별 젖음 표를 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
+    )
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5},
@@ -342,7 +351,9 @@ class AnalysisV1Request(CompositionRequest):
     process_constraints: ProcessConstraints | None = None
 
 
-class ExplanationV1Request(CompositionRequest):
+class ExplanationV1Request(CompositionParameters):
+    model_config = ConfigDict(extra="forbid")
+
     analysis_id: str = Field(..., min_length=8, max_length=80)
 
 
@@ -788,6 +799,9 @@ def _require_favorites_sync_auth(
 
 
 def _web_favorites_path() -> Path:
+    configured = (os.getenv("ALLOY_FAVORITES_PATH") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
     return Path(__file__).resolve().parent / "web_favorites.json"
 
 
@@ -864,6 +878,7 @@ def _local_favorites_items() -> List[Dict[str, Any]]:
 
 def _write_web_favorites_file(items: List[Dict[str, Any]]) -> None:
     path = _web_favorites_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     payload = {"favorites": items[:20]}
     text = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -1017,6 +1032,18 @@ def _prediction_contract_builder() -> Any:
     return build_prediction_contract
 
 
+def _analysis_context_for_contract(
+    result: Dict[str, Any], *, mode: str | None, literature_mode: str | None
+) -> Dict[str, Any]:
+    props = dict(result.get("props") or {})
+    return {
+        "mode": mode or "eng",
+        "literature_mode": literature_mode or "fast",
+        "wetting_temp_c": props.get("wetting_temp_c"),
+        "wetting_temp_basis": props.get("wetting_temp_basis"),
+    }
+
+
 def _source_strings(value: Any) -> list[str]:
     """출처 목록을 JSON-safe 문자열로 정리하고 순서를 유지한 채 중복 제거."""
     if not isinstance(value, (list, tuple)):
@@ -1145,7 +1172,15 @@ def analyze_v1(req: AnalysisV1Request) -> AnalysisV1Response:
             if req.process_constraints is not None
             else {}
         )
-        contract = _prediction_contract_builder()(result, constraints)
+        contract = _prediction_contract_builder()(
+            result,
+            constraints,
+            _analysis_context_for_contract(
+                result,
+                mode=req.mode,
+                literature_mode=req.literature_mode,
+            ),
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -1195,13 +1230,22 @@ def explain_v1(
             include_wetting_grid=False,
             include_ai=False,
         )
-        core_contract = _prediction_contract_builder()(core, {})
+        core_contract = _prediction_contract_builder()(
+            core,
+            {},
+            _analysis_context_for_contract(
+                core,
+                mode=req.mode,
+                literature_mode=req.literature_mode,
+            ),
+        )
         if core_contract.get("analysis_id") != analysis_id:
             raise HTTPException(
                 status_code=409,
                 detail=_v1_error(
                     "ANALYSIS_BINDING_INVALID",
-                    "분석 ID가 현재 조성·모델·DB 버전과 일치하지 않습니다. 핵심 분석을 다시 실행하세요.",
+                    "분석 ID가 현재 조성·분석 모드·문헌 모드·젖음 온도 또는 모델·DB 버전과 "
+                    "일치하지 않습니다. 핵심 분석을 다시 실행하세요.",
                 ),
             )
         client_key = request.client.host if request.client is not None else "unknown"
@@ -1706,7 +1750,15 @@ async def compare(req: CompareRequest) -> CompareResponse:
             props=r.get("props") or {},
             imc_line=_one_line(imc_list, "IMC 요약 없음"),
             risk_line=_one_line(risk_list, "리스크 특이사항 없음"),
-            prediction_contract=_prediction_contract_builder()(r, {}),
+            prediction_contract=_prediction_contract_builder()(
+                r,
+                {},
+                _analysis_context_for_contract(
+                    r,
+                    mode="eng",
+                    literature_mode=lm,
+                ),
+            ),
             evidence=r.get("evidence") or {},
             ai_sources=_source_strings(r.get("ai_sources")),
             ai_cited_sources=_source_strings(r.get("ai_cited_sources")),

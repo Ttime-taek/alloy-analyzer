@@ -31,6 +31,8 @@ def test_group_holdout_calibration_exposes_real_sample_and_error_metrics():
     assert 0.80 <= liquidus["empirical_coverage"] <= 1.0
     assert tensile["sample_count"] >= 20
     assert tensile["p90_absolute_error"] > 0
+    assert tensile["mae"] <= 8.6
+    assert tensile["p90_absolute_error"] <= 18.0
 
 
 def test_unregistered_in_domain_composition_gets_empirical_ranges():
@@ -85,3 +87,36 @@ def test_analysis_id_changes_when_composition_changes():
 
     assert first.startswith("ana_")
     assert first != second
+
+
+def test_analysis_id_changes_when_result_affecting_context_changes():
+    result = _result()
+    result["props"]["wetting_temp_c"] = 250.0
+    result["props"]["wetting_temp_basis"] = "user"
+    base_context = {"mode": "eng", "literature_mode": "fast"}
+
+    original = build_prediction_contract(result, analysis_context=base_context)
+    lab = build_prediction_contract(
+        result,
+        analysis_context={**base_context, "mode": "lab"},
+    )
+    deep = build_prediction_contract(
+        result,
+        analysis_context={**base_context, "literature_mode": "deep"},
+    )
+    warmer = build_prediction_contract(
+        result,
+        analysis_context={
+            **base_context,
+            "wetting_temp_c": 290.0,
+            "wetting_temp_basis": "user",
+        },
+    )
+
+    assert original["analysis_context"]["wetting_temp_c"] == 250.0
+    assert len({
+        original["analysis_id"],
+        lab["analysis_id"],
+        deep["analysis_id"],
+        warmer["analysis_id"],
+    }) == 4

@@ -209,11 +209,16 @@ function canonicalComposition(comp) {
 }
 
 /** 분석 결과가 생성된 입력과 현재 입력을 안전하게 결합하기 위한 결정적 서명. */
-export function buildAnalysisInputSignature(mode, compA, compB = {}) {
+export function buildAnalysisInputSignature(mode, compA, compB = {}, requestOptions = {}) {
+  const normalizedMode = mode === "compare" ? "compare" : "single";
   return JSON.stringify({
-    mode: mode === "compare" ? "compare" : "single",
+    mode: normalizedMode,
     compA: canonicalComposition(compA),
-    compB: mode === "compare" ? canonicalComposition(compB) : {}
+    compB: mode === "compare" ? canonicalComposition(compB) : {},
+    reportMode:
+      normalizedMode === "single" && requestOptions.reportMode === "lab" ? "lab" : "eng",
+    literatureMode: requestOptions.literatureMode === "deep" ? "deep" : "fast",
+    wettingTempSelect: String(requestOptions.wettingTempSelect ?? "auto")
   });
 }
 
@@ -444,8 +449,20 @@ export default function App() {
     [compB, activeElemsB]
   );
   const analysisInputSignature = useMemo(
-    () => buildAnalysisInputSignature(mode, analysisSignatureCompA, analysisSignatureCompB),
-    [mode, analysisSignatureCompA, analysisSignatureCompB]
+    () => buildAnalysisInputSignature(
+      mode,
+      analysisSignatureCompA,
+      analysisSignatureCompB,
+      { reportMode, literatureMode, wettingTempSelect }
+    ),
+    [
+      mode,
+      analysisSignatureCompA,
+      analysisSignatureCompB,
+      reportMode,
+      literatureMode,
+      wettingTempSelect
+    ]
   );
   const analysisInputSignatureRef = useRef(analysisInputSignature);
   const previousAnalysisInputSignatureRef = useRef(analysisInputSignature);
@@ -1090,7 +1107,10 @@ export default function App() {
             analysis_id: analysisId,
             comp: normalizedComp,
             mode: reportMode,
-            literature_mode: literatureMode
+            literature_mode: literatureMode,
+            ...(wettingTempSelect !== "auto"
+              ? { wetting_temp_c: Number(wettingTempSelect) }
+              : {})
           }),
           signal: controller.signal
         },

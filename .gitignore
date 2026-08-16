@@ -1,8 +1,12 @@
 # 키·환경
 .gemini_api_key
 gemini_api_key.txt
+gemini_api_key
+GEMINI_API_KEY.txt
 .env
 .env.local
+.env.*
+!.env.example
 
 # 로컬 사용자 데이터(저장소에 커밋하지 않음). 초기값은 *.example.json 참고.
 /favorites.json

@@ -6,6 +6,8 @@
 
 ## 5분 로컬 실행
 
+Python 3.12 이상과 Node.js 20.19 이상(또는 22.12 이상)이 필요합니다.
+
 macOS/Linux:
 
 ```bash
@@ -47,9 +49,13 @@ GEMINI_API_KEY=...
 CEREBRAS_API_KEY=...
 # 선택: 신뢰된 API 클라이언트의 공유 즐겨찾기 전용(32자 이상, 프론트엔드에 넣지 않음)
 ALLOY_FAVORITES_SYNC_TOKEN=...
+# 선택: 서버 공유 즐겨찾기 파일의 쓰기 가능한 경로(Docker에서는 자동 설정)
+ALLOY_FAVORITES_PATH=/var/lib/alloy/web_favorites.json
+# 선택: 외부 문헌 메타데이터 캐시 경로(Docker에서는 자동 설정)
+ALLOY_LITERATURE_CACHE_PATH=/var/cache/alloy/literature_cache.json
 ```
 
-`.env`, `.env.local`, 기존 키 파일명은 `.gitignore`에 포함됩니다. 새 v1 핵심 예측 API는 키가 없어도 동작합니다. 공개 웹의 즐겨찾기는 서버 비밀 토큰을 노출하지 않도록 브라우저 `localStorage`에만 저장됩니다.
+API 키는 `.env`, `.env.local` 또는 운영 환경변수에서만 읽으며 Git에 커밋하지 않습니다. 새 v1 핵심 예측 API는 키가 없어도 동작합니다. 공개 웹의 즐겨찾기는 서버 비밀 토큰을 노출하지 않도록 브라우저 `localStorage`에만 저장됩니다.
 
 ## 주요 API
 

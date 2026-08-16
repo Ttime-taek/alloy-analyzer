@@ -361,6 +361,9 @@ class AlloyAnalyzer:
         unknown_penalty = min(35.0, max(0.0, float(unknown_total)) * 0.7) if unknown_total > 0 else 0.0
 
         db_top = (db_out.get("top") if isinstance(db_out, dict) else None) or []
+        db_tensile_top = (
+            (db_out.get("tensile_top") if isinstance(db_out, dict) else None) or db_top
+        )
         db_best_dist = None
         try:
             if isinstance(db_top, list) and db_top:
@@ -402,6 +405,9 @@ class AlloyAnalyzer:
                 "support_n": db_support_n,
                 "support_factor": float(db_support_factor) if db_support_factor is not None else None,
                 "top": db_top[:5] if isinstance(db_top, list) else [],
+                "tensile_top": (
+                    db_tensile_top[:5] if isinstance(db_tensile_top, list) else []
+                ),
             },
             "ai": {
                 "enabled": bool(getattr(self.ai, "available", False)),

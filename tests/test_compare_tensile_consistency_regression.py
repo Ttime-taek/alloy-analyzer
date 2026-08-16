@@ -32,7 +32,7 @@ def test_unregistered_alloy_tensile_matches_between_single_and_compare() -> None
     single_tensile = single["props"]["tensile_strength"]
     compared_tensile = compared["props"]["tensile_strength"]
 
-    assert single_tensile == pytest.approx(70.4780276803982)
+    assert single_tensile == pytest.approx(78.0)
     assert compared_tensile == pytest.approx(single_tensile)
     assert (
         compared["prediction_contract"]["properties"]["tensile_strength_mpa"]["usage"]

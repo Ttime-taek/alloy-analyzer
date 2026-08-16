@@ -24,6 +24,9 @@ def _http_get_json(url: str, timeout_s: float = 6.0):
 
 
 def _cache_path():
+    configured = (os.getenv("ALLOY_LITERATURE_CACHE_PATH") or "").strip()
+    if configured:
+        return os.path.expanduser(configured)
     try:
         base = os.path.dirname(__file__)
     except Exception:
@@ -46,6 +49,7 @@ def _load_cache():
 def _save_cache(cache: dict):
     path = _cache_path()
     try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -263,4 +267,3 @@ def semantic_scholar_lookup_by_doi(doi: str, timeout_s: float = 6.0):
     except (socket.timeout, OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
-

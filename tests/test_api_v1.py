@@ -112,6 +112,34 @@ def test_v1_capabilities_and_models_publish_validation_contract():
     assert models.json()["validation"]["properties"]["liquidus_c"]["global"]["sample_count"] > 0
 
 
+def test_analysis_id_binds_wetting_temperature_and_rejects_mismatched_explanation():
+    composition = {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5}
+    at_250 = client.post(
+        "/api/v1/analyses",
+        json={"comp": composition, "wetting_temp_c": 250},
+    )
+    at_290 = client.post(
+        "/api/v1/analyses",
+        json={"comp": composition, "wetting_temp_c": 290},
+    )
+
+    assert at_250.status_code == 200, at_250.text
+    assert at_290.status_code == 200, at_290.text
+    analysis_250 = at_250.json()["analysis_id"]
+    assert analysis_250 != at_290.json()["analysis_id"]
+
+    mismatched = client.post(
+        f"/api/v1/analyses/{analysis_250}/explanations",
+        json={
+            "analysis_id": analysis_250,
+            "comp": composition,
+            "wetting_temp_c": 290,
+        },
+    )
+    assert mismatched.status_code == 409
+    assert mismatched.json()["detail"]["code"] == "ANALYSIS_BINDING_INVALID"
+
+
 def test_explanation_keeps_melting_ai_disabled_and_only_enables_text_ai(monkeypatch):
     calls = []
 
@@ -145,7 +173,7 @@ def test_explanation_keeps_melting_ai_disabled_and_only_enables_text_ai(monkeypa
     monkeypatch.setattr(
         api_module,
         "_prediction_contract_builder",
-        lambda: (lambda _result, _constraints: {"analysis_id": "ana_expected_value"}),
+        lambda: (lambda _result, _constraints, _context: {"analysis_id": "ana_expected_value"}),
     )
     monkeypatch.setattr(api_module, "_consume_explanation_quota", lambda _key: (True, 0))
 

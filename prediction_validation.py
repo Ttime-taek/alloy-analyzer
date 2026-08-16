@@ -10,7 +10,7 @@ from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Sequence
 
 
-CALIBRATION_VERSION = "group-holdout-v1"
+CALIBRATION_VERSION = "group-holdout-v2-adaptive-tensile"
 NEAR_DUPLICATE_DISTANCE = 0.25
 MIN_FAMILY_SAMPLES = 8
 
@@ -181,8 +181,17 @@ def _tensile_anchors() -> List[Dict[str, Any]]:
 
 
 def _predict_tensile(comp: Dict[str, Any], train: Sequence[Dict[str, Any]]) -> float | None:
+    try:
+        from .db_regression import _select_tensile_candidates
+    except ImportError:
+        from test7.db_regression import _select_tensile_candidates
+
     ranked = sorted(((_distance(comp, row["comp"]), row) for row in train), key=lambda x: x[0])
-    top = ranked[:5]
+    selected_rows = _select_tensile_candidates(
+        [(str(row["name"]), float(dist)) for dist, row in ranked]
+    )
+    selected_names = {name for name, _dist in selected_rows}
+    top = [(dist, row) for dist, row in ranked if str(row["name"]) in selected_names]
     weighted: List[tuple[float, float]] = []
     for dist, row in top:
         weight = (1.0 / (1.0 + float(dist))) * max(1, int(row.get("n") or 1))

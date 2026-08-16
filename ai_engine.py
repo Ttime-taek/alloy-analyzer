@@ -57,9 +57,9 @@ class AIEngine:
         return any(k in t for k in keys)
 
     @staticmethod
-    def _load_key_from_project_files() -> str:
+    def _load_key_from_env_files() -> str:
         """
-        GEMINI_API_KEY 환경변수가 없을 때 키 파일/.env를 탐색한다.
+        GEMINI_API_KEY 환경변수가 없을 때 .env 계열만 탐색한다.
         탐색 순서:
         1) ai_engine.py 폴더
         2) 현재 작업 폴더(os.getcwd())
@@ -75,27 +75,9 @@ class AIEngine:
                 if rr and rr not in roots:
                     roots.append(rr)
 
-            key_files = (
-                ".gemini_api_key",
-                "gemini_api_key.txt",
-                "gemini_api_key",
-                "GEMINI_API_KEY.txt",
-            )
             env_files = (".env", ".env.local")
 
-            # 1) 단일 키 파일(첫 유효 라인)
-            for root in roots:
-                for name in key_files:
-                    path = os.path.join(root, name)
-                    if not os.path.isfile(path):
-                        continue
-                    with open(path, "r", encoding="utf-8", errors="replace") as f:
-                        for line in f:
-                            key = line.strip()
-                            if key and not key.startswith("#"):
-                                return key
-
-            # 2) .env 계열에서 GEMINI_API_KEY=... 파싱
+            # .env 계열에서 GEMINI_API_KEY=... 파싱
             for root in roots:
                 for name in env_files:
                     path = os.path.join(root, name)
@@ -145,7 +127,7 @@ class AIEngine:
         except Exception:
             self._cerebras = None
         if not self.api_key:
-            self.api_key = self._load_key_from_project_files().strip()
+            self.api_key = self._load_key_from_env_files().strip()
 
         if not self.api_key:
             self.status_detail = "GEMINI_API_KEY 없음"

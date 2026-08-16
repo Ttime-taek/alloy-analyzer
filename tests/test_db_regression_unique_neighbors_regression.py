@@ -6,6 +6,8 @@ import pytest
 
 from test7.db_regression import (
     _unique_alloy_candidates,
+    _select_tensile_candidates,
+    _tensile_neighbor_cutoff,
     get_statistics,
     parse_alloy,
     predict_from_db,
@@ -22,17 +24,18 @@ def _expected_unique_neighbor_property(input_comp: dict[str, float], prop: str) 
         _unique_alloy_candidates(input_comp).items(),
         key=lambda item: item[1]["dist"],
     )
-    exact = [item for item in candidates if item[1]["dist"] <= 1e-4]
-    selected = (exact or candidates)[:5]
+    selected = _select_tensile_candidates(
+        [(alloy_name, item["dist"]) for alloy_name, item in candidates]
+    )
 
     weighted_values = []
     weights = []
-    for alloy_name, item in selected:
+    for alloy_name, dist in selected:
         stats = get_statistics(alloy_name)
         prop_stats = stats.get(prop) if stats else None
         if not prop_stats:
             continue
-        weight = (1.0 / (1.0 + item["dist"])) * prop_stats["n"]
+        weight = (1.0 / (1.0 + dist)) * prop_stats["n"]
         weighted_values.append(prop_stats["mean"] * weight)
         weights.append(weight)
 
@@ -40,18 +43,23 @@ def _expected_unique_neighbor_property(input_comp: dict[str, float], prop: str) 
     return sum(weighted_values) / sum(weights)
 
 
-def test_unregistered_composition_uses_five_unique_alloy_neighbors():
+def test_unregistered_composition_uses_local_unique_tensile_neighbors():
     comp = {"Sn": 94.1, "Ag": 2.4, "Cu": 0.5, "Bi": 3.0}
 
     detail = predict_from_db_with_detail(comp)
-    top_names = [item["alloy"] for item in detail["top"]]
+    top_names = [item["alloy"] for item in detail["tensile_top"]]
+    best_dist = detail["top"][0]["dist"]
 
-    assert len(top_names) == 5
+    assert 1 <= len(top_names) <= 5
     assert len(top_names) == len(set(top_names))
+    assert all(
+        item["dist"] <= _tensile_neighbor_cutoff(best_dist)
+        for item in detail["tensile_top"]
+    )
     assert detail["pred"]["tensile"] == pytest.approx(
         _expected_unique_neighbor_property(comp, "tensile")
     )
-    assert detail["pred"]["tensile"] == pytest.approx(70.4780276803982)
+    assert detail["pred"]["tensile"] == pytest.approx(78.0)
 
 
 def test_exact_registered_composition_still_returns_measured_alloy_mean():

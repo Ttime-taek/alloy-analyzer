@@ -42,8 +42,35 @@ def test_docker_uses_hashed_lock_and_runs_as_non_root() -> None:
         "-r /workspace/test7/requirements-fastapi.lock"
     ) in dockerfile
     assert "install -d -o alloy -g alloy -m 0750 /workspace/test7/.cache/ai" in dockerfile
+    assert "install -d -o alloy -g alloy -m 0750 /workspace/test7/.data" in dockerfile
+    assert "ALLOY_FAVORITES_PATH=/workspace/test7/.data/web_favorites.json" in dockerfile
+    assert (
+        "ALLOY_LITERATURE_CACHE_PATH=/workspace/test7/.data/literature_cache.json"
+        in dockerfile
+    )
+    assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
     assert re.search(r"(?m)^USER alloy$", dockerfile)
     assert re.search(r"(?m)^\.cache/?$", dockerignore)
+    ignored = set(dockerignore.splitlines())
+    assert {
+        "favorites.json",
+        "web_favorites.json",
+        "profile_settings.json",
+        "literature_cache.json",
+        "*.log",
+        ".venv",
+        "venv",
+        ".vercel",
+        "node_modules",
+        "tools/node22",
+        "VitalProgram-qa",
+    }.issubset(ignored)
+    assert {
+        ".gemini_api_key",
+        "gemini_api_key",
+        "gemini_api_key.txt",
+        "GEMINI_API_KEY.txt",
+    }.issubset(ignored)
 
 
 # Regression: SECURITY-005 — CI executed mutable action release tags.

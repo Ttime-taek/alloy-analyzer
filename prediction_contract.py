@@ -18,7 +18,7 @@ except ImportError:
     from test7.solder_db import SOLDER_DB_FINGERPRINT, classify_family
 
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
 POLICY_VERSION = "prediction-use-policy-v1"
 
 STATE_ORDER = {
@@ -201,9 +201,33 @@ def _property_result(
     }
 
 
-def _analysis_id(norm: Dict[str, Any]) -> str:
+def _canonical_analysis_context(
+    result: Dict[str, Any], analysis_context: Dict[str, Any] | None
+) -> Dict[str, Any]:
+    context = dict(analysis_context or {})
+    props = dict(result.get("props") or {})
+    wetting_temp = _finite_float(context.get("wetting_temp_c"))
+    if wetting_temp is None:
+        wetting_temp = _finite_float(props.get("wetting_temp_c"))
+    wetting_basis = str(
+        context.get("wetting_temp_basis") or props.get("wetting_temp_basis") or "auto"
+    ).strip().lower()
+    return {
+        "mode": "lab" if str(context.get("mode") or "eng").lower() == "lab" else "eng",
+        "literature_mode": (
+            "deep"
+            if str(context.get("literature_mode") or "fast").lower() == "deep"
+            else "fast"
+        ),
+        "wetting_temp_c": round(wetting_temp, 4) if wetting_temp is not None else None,
+        "wetting_temp_basis": wetting_basis,
+    }
+
+
+def _analysis_id(norm: Dict[str, Any], analysis_context: Dict[str, Any]) -> str:
     payload = {
         "composition": sorted((str(k), round(float(v), 8)) for k, v in norm.items()),
+        "analysis_context": analysis_context,
         "contract": CONTRACT_VERSION,
         "api": API_VERSION_SEMVER,
         "melting_model": MELTING_ENGINE_VERSION,
@@ -218,6 +242,7 @@ def _analysis_id(norm: Dict[str, Any]) -> str:
 def build_prediction_contract(
     result: Dict[str, Any],
     process_constraints: Dict[str, Any] | None = None,
+    analysis_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     norm = dict(result.get("norm") or {})
     family = str(classify_family(norm))
@@ -229,6 +254,7 @@ def build_prediction_contract(
     melting_distance = _finite_float(melting_ev.get("best_dist"))
     tensile_distance = _finite_float(props_db_ev.get("best_dist"))
     props = dict(result.get("props") or {})
+    canonical_context = _canonical_analysis_context(result, analysis_context)
     neighbors = list((result.get("alloy_inference") or {}).get("neighbors") or [])[:3]
 
     melting_exact = bool(melting_ev.get("forced_db")) or (
@@ -270,7 +296,9 @@ def build_prediction_contract(
             unsupported_elements=unknown_names,
             evidence={
                 "support_n": props_db_ev.get("support_n"),
-                "neighbors": list(props_db_ev.get("top") or [])[:5],
+                "neighbors": list(
+                    props_db_ev.get("tensile_top") or props_db_ev.get("top") or []
+                )[:5],
             },
         ),
     }
@@ -337,7 +365,7 @@ def build_prediction_contract(
         process_usage = "reference"
 
     return {
-        "analysis_id": _analysis_id(norm),
+        "analysis_id": _analysis_id(norm, canonical_context),
         "contract_version": CONTRACT_VERSION,
         "versions": {
             "api": API_VERSION_SEMVER,
@@ -347,6 +375,7 @@ def build_prediction_contract(
             "policy": POLICY_VERSION,
         },
         "composition": norm,
+        "analysis_context": canonical_context,
         "family": family,
         "overall_state": overall_state,
         "overall_state_label_ko": STATE_LABEL_KO[overall_state],

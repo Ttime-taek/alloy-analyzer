@@ -7,10 +7,8 @@
 - 조성 → 문자열 변환 개선
 """
 
+import logging
 import re
-from datetime import datetime
-import traceback
-from pathlib import Path
 
 
 # ================================================================
@@ -108,18 +106,17 @@ def composition_to_string(comp):
 # ================================================================
 def log_exception(context: str, exc: BaseException):
     """
-    예외를 조용히 삼키지 않고 파일로 남김.
-    GUI 사용 중 원인 추적을 쉽게 하기 위한 최소 로깅.
+    예외를 조용히 삼키지 않고 표준 로깅(stderr)으로 남김.
+    GUI와 비루트 컨테이너 모두에서 원인 추적이 가능하도록 파일 쓰기를 피함.
     """
     try:
-        root = Path(__file__).resolve().parent
-        path = root / "error.log"
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with path.open("a", encoding="utf-8") as f:
-            f.write(f"\n[{ts}] {context}\n")
-            f.write(f"{type(exc).__name__}: {exc}\n")
-            f.write(traceback.format_exc())
-            f.write("\n")
+        logging.getLogger(__name__).error(
+            "%s — %s: %s",
+            context,
+            type(exc).__name__,
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
     except Exception:
-        # logging must never break the app
+        # 오류 기록 자체가 분석/GUI 폴백을 깨뜨리면 안 됩니다.
         pass

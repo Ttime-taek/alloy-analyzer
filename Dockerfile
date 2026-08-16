@@ -18,6 +18,7 @@ FROM python:3.12-slim-bookworm
 WORKDIR /workspace
 ENV PYTHONPATH=/workspace
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ \
@@ -29,12 +30,15 @@ RUN pip install --no-cache-dir --require-hashes -r /workspace/test7/requirements
 COPY . /workspace/test7/
 COPY --from=frontend /src/test7/frontend/dist /workspace/test7/frontend/dist
 
-# 애플리케이션 코드는 루트 소유로 유지하고, AI 캐시만 전용 계정에게 쓰기를 허용합니다.
+# 애플리케이션 코드는 루트 소유로 유지하고, 런타임 데이터만 전용 계정에게 쓰기를 허용합니다.
 RUN groupadd --gid 10001 alloy \
     && useradd --uid 10001 --gid alloy --create-home --home-dir /home/alloy \
         --shell /usr/sbin/nologin alloy \
-    && install -d -o alloy -g alloy -m 0750 /workspace/test7/.cache/ai
+    && install -d -o alloy -g alloy -m 0750 /workspace/test7/.cache/ai \
+    && install -d -o alloy -g alloy -m 0750 /workspace/test7/.data
 ENV HOME=/home/alloy
+ENV ALLOY_FAVORITES_PATH=/workspace/test7/.data/web_favorites.json
+ENV ALLOY_LITERATURE_CACHE_PATH=/workspace/test7/.data/literature_cache.json
 USER alloy
 
 EXPOSE 8000

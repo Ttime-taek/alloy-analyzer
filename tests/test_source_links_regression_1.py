@@ -70,7 +70,7 @@ def test_compare_response_keeps_evidence_and_sources_for_each_side(monkeypatch):
     monkeypatch.setattr(
         api_module,
         "_prediction_contract_builder",
-        lambda: (lambda _result, _constraints: {"overall_state": "in_domain"}),
+        lambda: (lambda _result, _constraints, _context: {"overall_state": "in_domain"}),
     )
 
     response = client.post(

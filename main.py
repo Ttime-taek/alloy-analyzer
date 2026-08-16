@@ -1,27 +1,13 @@
 # main.py
 
 import os
-from pathlib import Path
 
+try:
+    from .env_loader import load_env_key
+except ImportError:
+    from env_loader import load_env_key  # type: ignore
 
-def _ensure_gemini_key_from_file() -> None:
-    """GEMINI_API_KEY가 없으면 test7 폴더의 .gemini_api_key(주석 줄 제외 첫 줄)를 환경변수에 넣는다."""
-    if (os.getenv("GEMINI_API_KEY") or "").strip():
-        return
-    root = Path(__file__).resolve().parent
-    for name in (".gemini_api_key", "gemini_api_key.txt"):
-        path = root / name
-        if not path.is_file():
-            continue
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            key = line.strip()
-            if not key or key.startswith("#"):
-                continue
-            os.environ["GEMINI_API_KEY"] = key
-            return
-
-
-_ensure_gemini_key_from_file()
+load_env_key("GEMINI_API_KEY")
 
 # Support both:
 # - package run:   python -m test7.main
@@ -41,11 +27,10 @@ if __name__ == "__main__":
     except Exception as e:
         try:
             if __package__ in (None, ""):
-                from test7.utils import save_error
+                from test7.utils import log_exception
             else:
-                from .utils import save_error
-            save_error(e)
+                from .utils import log_exception
+            log_exception("desktop startup", e)
         except Exception:
             pass
         raise
-

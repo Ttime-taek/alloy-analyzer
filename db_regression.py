@@ -1,4 +1,4 @@
-# db_regression.py (Fixed v2.3)
+# db_regression.py (Fixed v2.4)
 # parse_alloy: 하이픈 표기 + solder_db 연속 BD명(Sn3.0Ag0.5Cu, Sn63Pb37, Sn0.7Cu 등)
 
 from .SOLDER_PROPERTIES_DB import SOLDER_PROPERTIES_DB
@@ -12,6 +12,12 @@ import statistics
 _SHEAR_IDW_MAX_DIST = 12.0
 _SHEAR_IDW_DIST_FLOOR = 0.35
 _SHEAR_IDW_DIST_POWER = 1.6
+
+# 인장 DB는 합금명별 고유 후보를 유지하되, 먼 후보가 희소 합금족의 값을
+# 끌어내리지 않도록 최근접 거리 주변의 국소 이웃만 사용합니다.
+_TENSILE_NEIGHBOR_LIMIT = 5
+_TENSILE_NEIGHBOR_ABS_MARGIN = 0.25
+_TENSILE_NEIGHBOR_REL_FACTOR = 1.20
 
 
 # ------------------------------------------------
@@ -143,6 +149,30 @@ def _unique_alloy_candidates(input_comp):
         if name not in by_name or dist < by_name[name]["dist"]:
             by_name[name] = {"dist": dist, "comp": db_comp}
     return by_name
+
+
+def _tensile_neighbor_cutoff(best_dist):
+    best = max(0.0, float(best_dist))
+    return max(
+        best + _TENSILE_NEIGHBOR_ABS_MARGIN,
+        best * _TENSILE_NEIGHBOR_REL_FACTOR,
+    )
+
+
+def _select_tensile_candidates(candidates):
+    """정렬된 ``(합금명, 거리)``에서 실제 인장 기여 이웃을 선택합니다."""
+    ranked = sorted(candidates, key=lambda item: float(item[1]))
+    exact = [item for item in ranked if float(item[1]) <= 1e-4]
+    if exact:
+        return exact[:_TENSILE_NEIGHBOR_LIMIT]
+    if not ranked:
+        return []
+    cutoff = _tensile_neighbor_cutoff(ranked[0][1])
+    return [
+        item
+        for item in ranked[:_TENSILE_NEIGHBOR_LIMIT]
+        if float(item[1]) <= cutoff
+    ]
 
 
 def _shear_family_weight(input_comp, db_comp, dist):
@@ -287,12 +317,14 @@ def predict_from_db(input_comp):
     props = ["tensile", "yield_strength", "elongation", "shear"]
     exact = [item for item in candidates if item[1] <= 1e-4]
     effective_top = exact[:5] if exact else top
+    tensile_top = _select_tensile_candidates(candidates)
 
     for p in props:
         weighted_values = []
         weights = []
 
-        for alloy_name, dist in effective_top:
+        selected = tensile_top if p == "tensile" else effective_top
+        for alloy_name, dist in selected:
             stats = get_statistics(alloy_name)
             if not stats or not stats[p]:
                 continue
@@ -323,5 +355,11 @@ def predict_from_db_with_detail(input_comp):
         key=lambda x: x["dist"],
     )
     top = candidates[:5]
+    tensile_top = [
+        {"alloy": name, "dist": dist}
+        for name, dist in _select_tensile_candidates(
+            [(item["alloy"], item["dist"]) for item in candidates]
+        )
+    ]
     pred = predict_from_db(input_comp)
-    return {"pred": pred or {}, "top": top}
+    return {"pred": pred or {}, "top": top, "tensile_top": tensile_top}
