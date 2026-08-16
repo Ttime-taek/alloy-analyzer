@@ -211,6 +211,34 @@ function compositionWtForPanel(comp, activeElems) {
   return out;
 }
 
+function canonicalComposition(comp) {
+  return Object.fromEntries(
+    Object.entries(comp || {})
+      .map(([element, value]) => [String(element), Number(value)])
+      .filter(([_, value]) => Number.isFinite(value))
+      .sort(([elementA], [elementB]) => elementA.localeCompare(elementB))
+  );
+}
+
+/** 분석 결과가 생성된 입력과 현재 입력을 안전하게 결합하기 위한 결정적 서명. */
+export function buildAnalysisInputSignature(mode, compA, compB = {}) {
+  return JSON.stringify({
+    mode: mode === "compare" ? "compare" : "single",
+    compA: canonicalComposition(compA),
+    compB: mode === "compare" ? canonicalComposition(compB) : {}
+  });
+}
+
+/** 목표 융점 후보가 생성된 목표값과 현재 목표값을 결합하기 위한 결정적 서명. */
+export function buildMeltInputSignature(liquidus, solidus, alsoSolidusTarget) {
+  const includeSolidus = Boolean(alsoSolidusTarget);
+  return JSON.stringify({
+    liquidus: String(liquidus ?? "").trim(),
+    solidus: includeSolidus ? String(solidus ?? "").trim() : "",
+    alsoSolidusTarget: includeSolidus
+  });
+}
+
 function compositionTotalPct(obj) {
   return Object.values(obj).reduce((s, v) => s + (Number(v) || 0), 0);
 }
@@ -403,6 +431,32 @@ export default function App() {
   const resultKpiScrollRef = useRef(null);
   const analysisRequestRef = useRef({ sequence: 0, controller: null });
   const explanationRequestRef = useRef(null);
+  const wettingGridRequestRef = useRef({ sequence: 0, controller: null });
+  const meltRequestRef = useRef({ sequence: 0, controller: null });
+
+  const analysisSignatureCompA = useMemo(
+    () => compositionWtForPanel(comp, activeElemsA),
+    [comp, activeElemsA]
+  );
+  const analysisSignatureCompB = useMemo(
+    () => compositionWtForPanel(compB, activeElemsB),
+    [compB, activeElemsB]
+  );
+  const analysisInputSignature = useMemo(
+    () => buildAnalysisInputSignature(mode, analysisSignatureCompA, analysisSignatureCompB),
+    [mode, analysisSignatureCompA, analysisSignatureCompB]
+  );
+  const analysisInputSignatureRef = useRef(analysisInputSignature);
+  const previousAnalysisInputSignatureRef = useRef(analysisInputSignature);
+  analysisInputSignatureRef.current = analysisInputSignature;
+
+  const meltInputSignature = useMemo(
+    () => buildMeltInputSignature(meltRecLiquidus, meltRecSolidus, meltRecAlsoSolidusTarget),
+    [meltRecLiquidus, meltRecSolidus, meltRecAlsoSolidusTarget]
+  );
+  const meltInputSignatureRef = useRef(meltInputSignature);
+  const previousMeltInputSignatureRef = useRef(meltInputSignature);
+  meltInputSignatureRef.current = meltInputSignature;
 
   const showMeltRecommendPanel =
     Boolean(meltRecError) ||
@@ -413,8 +467,58 @@ export default function App() {
     return () => {
       analysisRequestRef.current.controller?.abort();
       explanationRequestRef.current?.abort();
+      wettingGridRequestRef.current.controller?.abort();
+      meltRequestRef.current.controller?.abort();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (previousAnalysisInputSignatureRef.current === analysisInputSignature) return;
+    previousAnalysisInputSignatureRef.current = analysisInputSignature;
+
+    analysisRequestRef.current.controller?.abort();
+    analysisRequestRef.current = {
+      sequence: analysisRequestRef.current.sequence + 1,
+      controller: null
+    };
+    explanationRequestRef.current?.abort();
+    explanationRequestRef.current = null;
+    wettingGridRequestRef.current.controller?.abort();
+    wettingGridRequestRef.current = {
+      sequence: wettingGridRequestRef.current.sequence + 1,
+      controller: null
+    };
+
+    setLoading(false);
+    setAnalysisStage("");
+    setAnalysisElapsedSec(0);
+    setAnalysisLogs([]);
+    setError("");
+    setResult(null);
+    setCompareResult(null);
+    setAiExplanationLoading(false);
+    setWettingGridRows(null);
+    setWettingGridLoading(false);
+    setWettingGridError("");
+    setWettingSectionOpen(false);
+    setChartReportOpen(false);
+    setReflowPeakUser(null);
+    setResultPanelOpen(true);
+  }, [analysisInputSignature]);
+
+  useLayoutEffect(() => {
+    if (previousMeltInputSignatureRef.current === meltInputSignature) return;
+    previousMeltInputSignatureRef.current = meltInputSignature;
+
+    meltRequestRef.current.controller?.abort();
+    meltRequestRef.current = {
+      sequence: meltRequestRef.current.sequence + 1,
+      controller: null
+    };
+    setMeltRecLoading(false);
+    setMeltRecError("");
+    setMeltRecResult(null);
+  }, [meltInputSignature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -874,9 +978,26 @@ export default function App() {
     explanationRequestRef.current?.abort();
     const requestSequence = analysisRequestRef.current.sequence + 1;
     const requestController = new AbortController();
-    analysisRequestRef.current = { sequence: requestSequence, controller: requestController };
+    const requestInputSignature = analysisInputSignature;
+    analysisRequestRef.current = {
+      sequence: requestSequence,
+      controller: requestController,
+      inputSignature: requestInputSignature
+    };
     explanationRequestRef.current = null;
+    wettingGridRequestRef.current.controller?.abort();
+    wettingGridRequestRef.current = {
+      sequence: wettingGridRequestRef.current.sequence + 1,
+      controller: null
+    };
+    meltRequestRef.current.controller?.abort();
+    meltRequestRef.current = {
+      sequence: meltRequestRef.current.sequence + 1,
+      controller: null
+    };
     setAiExplanationLoading(false);
+    setWettingGridLoading(false);
+    setMeltRecLoading(false);
     setLoading(true);
     setAnalysisStage("입력값 검증 중...");
     setAnalysisElapsedSec(0);
@@ -1009,7 +1130,10 @@ export default function App() {
       setAnalysisStage("응답 데이터 반영 중...");
       appendLog("서버 응답 수신, 결과 반영 중...");
       const data = await res.json();
-      if (analysisRequestRef.current.sequence !== requestSequence) return;
+      if (
+        analysisRequestRef.current.sequence !== requestSequence ||
+        analysisInputSignatureRef.current !== requestInputSignature
+      ) return;
       if (mode === "single") {
         const coreResult = data?.result && typeof data.result === "object" ? data.result : data;
         setResult(coreResult);
@@ -1024,7 +1148,12 @@ export default function App() {
       }
       appendLog(mode === "single" ? "핵심 수치·검증 범위 분석 완료" : "분석 완료");
     } catch (e) {
-      if (requestController.signal.aborted || e?.name === "AbortError") return;
+      if (
+        requestController.signal.aborted ||
+        e?.name === "AbortError" ||
+        analysisRequestRef.current.sequence !== requestSequence ||
+        analysisInputSignatureRef.current !== requestInputSignature
+      ) return;
       let msg = String(e.message || e);
       if (
         /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
@@ -1054,6 +1183,7 @@ export default function App() {
     const analysisId = result?.prediction_contract?.analysis_id;
     const normalizedComp = result?.norm;
     if (!analysisId || !normalizedComp || aiExplanationLoading) return;
+    const explanationInputSignature = analysisInputSignature;
     explanationRequestRef.current?.abort();
     const controller = new AbortController();
     explanationRequestRef.current = controller;
@@ -1084,14 +1214,20 @@ export default function App() {
         ? data.result_patch
         : {};
       setResult((prev) => {
-        if (prev?.prediction_contract?.analysis_id !== analysisId) return prev;
+        if (
+          analysisInputSignatureRef.current !== explanationInputSignature ||
+          prev?.prediction_contract?.analysis_id !== analysisId
+        ) return prev;
         return { ...prev, ...resultPatch };
       });
     } catch (e) {
       if (controller.signal.aborted || e?.name === "AbortError") return;
       const message = String(e?.message || e);
       setResult((prev) => {
-        if (prev?.prediction_contract?.analysis_id !== analysisId) return prev;
+        if (
+          analysisInputSignatureRef.current !== explanationInputSignature ||
+          prev?.prediction_contract?.analysis_id !== analysisId
+        ) return prev;
         return {
           ...prev,
           ai_mode: "local",
@@ -1108,6 +1244,21 @@ export default function App() {
 
   const handleReset = () => {
     if (loading) return;
+    analysisRequestRef.current.controller?.abort();
+    analysisRequestRef.current = {
+      sequence: analysisRequestRef.current.sequence + 1,
+      controller: null
+    };
+    wettingGridRequestRef.current.controller?.abort();
+    wettingGridRequestRef.current = {
+      sequence: wettingGridRequestRef.current.sequence + 1,
+      controller: null
+    };
+    meltRequestRef.current.controller?.abort();
+    meltRequestRef.current = {
+      sequence: meltRequestRef.current.sequence + 1,
+      controller: null
+    };
     setComp({});
     setCompB({});
     setActiveElemsA([]);
@@ -1120,6 +1271,8 @@ export default function App() {
     explanationRequestRef.current?.abort();
     explanationRequestRef.current = null;
     setAiExplanationLoading(false);
+    setWettingGridLoading(false);
+    setMeltRecLoading(false);
     setResult(null);
     setCompareResult(null);
     setWettingGridRows(null);
@@ -1137,30 +1290,58 @@ export default function App() {
 
   const loadWettingGrid = async () => {
     if (!result?.norm || typeof result.norm !== "object") return;
+    wettingGridRequestRef.current.controller?.abort();
+    const requestSequence = wettingGridRequestRef.current.sequence + 1;
+    const requestController = new AbortController();
+    const requestInputSignature = analysisInputSignature;
+    wettingGridRequestRef.current = {
+      sequence: requestSequence,
+      controller: requestController
+    };
     setWettingGridLoading(true);
     setWettingGridError("");
     try {
       const res = await fetch(apiUrl("/api/wetting_grid"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comp: result.norm })
+        body: JSON.stringify({ comp: result.norm }),
+        signal: requestController.signal
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(formatApiDetail(data.detail, res.status));
       }
+      if (
+        wettingGridRequestRef.current.sequence !== requestSequence ||
+        analysisInputSignatureRef.current !== requestInputSignature
+      ) return;
       const rows = Array.isArray(data.wetting_by_temp) ? data.wetting_by_temp : [];
       setWettingGridRows(rows);
       setWettingSectionOpen(true);
     } catch (e) {
+      if (
+        requestController.signal.aborted ||
+        e?.name === "AbortError" ||
+        wettingGridRequestRef.current.sequence !== requestSequence ||
+        analysisInputSignatureRef.current !== requestInputSignature
+      ) return;
       setWettingGridError(String(e.message || e));
       setWettingGridRows(null);
     } finally {
-      setWettingGridLoading(false);
+      if (wettingGridRequestRef.current.sequence === requestSequence) {
+        wettingGridRequestRef.current.controller = null;
+        setWettingGridLoading(false);
+      }
     }
   };
 
   const runMeltRecommend = async () => {
+    meltRequestRef.current.controller?.abort();
+    meltRequestRef.current = {
+      sequence: meltRequestRef.current.sequence + 1,
+      controller: null
+    };
+    setMeltRecLoading(false);
     setMeltRecError("");
     setMeltRecResult(null);
     // Sn1Ag0.8Cu8In10Bi 근처 SAC-In-Bi: Ag·Cu·In·Bi 스윕, 나머지 Sn.
@@ -1207,6 +1388,14 @@ export default function App() {
         return;
       }
     }
+    const requestSequence = meltRequestRef.current.sequence + 1;
+    const requestController = new AbortController();
+    const requestInputSignature = meltInputSignature;
+    meltRequestRef.current = {
+      sequence: requestSequence,
+      controller: requestController,
+      inputSignature: requestInputSignature
+    };
     setMeltRecLoading(true);
     try {
       const res = await fetch(apiUrl("/api/recommend_melt"), {
@@ -1228,7 +1417,8 @@ export default function App() {
           // 고상·액상 둘 다 지정 시 true면 한 축만 맞춰도 상위(액상만 맞고 고상은 어긋나기 쉬움) → |Δ고상|+|Δ액상| 합으로 정렬
           rank_match_any_axis: false,
           max_grid_points
-        })
+        }),
+        signal: requestController.signal
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1240,12 +1430,22 @@ export default function App() {
         }
         throw new Error(detail);
       }
+      if (
+        meltRequestRef.current.sequence !== requestSequence ||
+        meltInputSignatureRef.current !== requestInputSignature
+      ) return;
       setMeltRecResult(data);
       const cand = Array.isArray(data?.candidates) ? data.candidates : [];
       if (cand.length === 0 && !data?.meta?.disclaimer) {
         setMeltRecError("탐색은 끝났지만 후보 행이 없습니다. 목표 온도·허용 범위를 넓히거나 백엔드 로그를 확인하세요.");
       }
     } catch (e) {
+      if (
+        requestController.signal.aborted ||
+        e?.name === "AbortError" ||
+        meltRequestRef.current.sequence !== requestSequence ||
+        meltInputSignatureRef.current !== requestInputSignature
+      ) return;
       let msg = String(e.message || e);
       if (
         /failed to fetch|networkerror|load failed|fetch/i.test(msg) ||
@@ -1257,7 +1457,10 @@ export default function App() {
       }
       setMeltRecError(msg);
     } finally {
-      setMeltRecLoading(false);
+      if (meltRequestRef.current.sequence === requestSequence) {
+        meltRequestRef.current.controller = null;
+        setMeltRecLoading(false);
+      }
     }
   };
 
