@@ -140,7 +140,8 @@ class ApiStaticSmokeTest(unittest.TestCase):
 
     def test_render_runtime_requirements_include_cloud_ai_sdks(self) -> None:
         requirements = (_ROOT / "requirements-fastapi.txt").read_text(encoding="utf-8")
-        self.assertIn("google-generativeai", requirements)
+        self.assertIn("google-genai", requirements)
+        self.assertNotIn("google-generativeai", requirements)
         self.assertIn("cerebras-cloud-sdk", requirements)
 
     def test_frontend_does_not_load_full_remote_font_family(self) -> None:

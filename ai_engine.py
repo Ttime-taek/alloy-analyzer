@@ -10,29 +10,21 @@ import json
 import os
 import re
 import time
-import warnings
 from .utils import normalize_subscript
 from .literature import crossref_search, semantic_scholar_search, semantic_scholar_lookup_by_doi
 from .standards_refs import ipc_jis_literature_lines, standards_search_hints
 
 # ============================
-# Gemini 최신/구버전 자동 호환
+# Gemini SDK (Google Gen AI)
 # ============================
 genai = None
 _GENAI_BACKEND = None
 try:
-    # Prefer the new SDK first
     import google.genai as genai
     _GENAI_BACKEND = "google.genai"
 except Exception:
-    try:
-        # Legacy SDK fallback (deprecated, but keep for compatibility)
-        warnings.filterwarnings("ignore", category=FutureWarning)
-        import google.generativeai as genai
-        _GENAI_BACKEND = "google.generativeai"
-    except Exception:
-        genai = None
-        _GENAI_BACKEND = None
+    genai = None
+    _GENAI_BACKEND = None
 
 # Crossref/S2 후보가 없을 때 sources에 넣는 공통 안내 (GUI/웹/Gemini 경로 동일)
 _NO_LITERATURE_SOURCE_LINE = (
@@ -164,11 +156,7 @@ class AIEngine:
             return
 
         try:
-            if _GENAI_BACKEND == "google.generativeai":
-                genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel("gemini-2.5-flash")
-                self.available = True
-            elif _GENAI_BACKEND == "google.genai":
+            if _GENAI_BACKEND == "google.genai":
                 http_options = genai.types.HttpOptions(timeout=int(self.request_timeout_s * 1000))
                 self.client = genai.Client(api_key=self.api_key, http_options=http_options)
                 self.available = True
