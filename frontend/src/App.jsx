@@ -271,6 +271,15 @@ export function compositionAnalyzeBlockReason(obj, label) {
   return null;
 }
 
+export function analysisModeForKey(currentMode, key) {
+  if (key === "Home") return "single";
+  if (key === "End") return "compare";
+  if (key === "ArrowLeft" || key === "ArrowRight") {
+    return currentMode === "single" ? "compare" : "single";
+  }
+  return null;
+}
+
 export function meltSearchRightHint(open, liquidus, result) {
   if (open) return "";
   const target = String(liquidus ?? "").trim();
@@ -972,6 +981,18 @@ export default function App() {
   }, [comp, compB, mode, activeElemsA, activeElemsB]);
 
   const analyzeReady = analyzeBlockReason === null;
+
+  const handleModeTabKeyDown = (event, focusedMode) => {
+    const nextMode = analysisModeForKey(focusedMode, event.key);
+    if (!nextMode) return;
+    event.preventDefault();
+    const tabList = event.currentTarget.closest('[role="tablist"]');
+    setMode(nextMode);
+    window.requestAnimationFrame(() => {
+      const nextTab = tabList?.querySelector(`[data-analysis-mode="${nextMode}"]`);
+      nextTab?.focus();
+    });
+  };
 
   const handleAnalyze = async () => {
     if (!analyzeReady) {
@@ -2359,14 +2380,18 @@ export default function App() {
                 <ModeButton
                   active={mode === "single"}
                   onClick={() => setMode("single")}
+                  onKeyDown={(event) => handleModeTabKeyDown(event, "single")}
                   ariaSelected={mode === "single"}
+                  modeValue="single"
                 >
                   단일 분석
                 </ModeButton>
                 <ModeButton
                   active={mode === "compare"}
                   onClick={() => setMode("compare")}
+                  onKeyDown={(event) => handleModeTabKeyDown(event, "compare")}
                   ariaSelected={mode === "compare"}
+                  modeValue="compare"
                 >
                   비교 분석
                 </ModeButton>
@@ -4599,12 +4624,15 @@ export function ComparisonSources({ a, b }) {
   );
 }
 
-function ModeButton({ active, onClick, children, ariaSelected }) {
+function ModeButton({ active, onClick, onKeyDown, children, ariaSelected, modeValue }) {
   return (
     <TactileButton
       role="tab"
       onClick={onClick}
+      onKeyDown={onKeyDown}
       aria-selected={ariaSelected ?? active}
+      tabIndex={active ? 0 : -1}
+      data-analysis-mode={modeValue}
       labelStyle={{ display: "block", width: "100%", textAlign: "center" }}
       style={{
         width: "100%",
