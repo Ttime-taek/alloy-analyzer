@@ -252,9 +252,13 @@ export function compositionInputAccessibleName(element, side = "A") {
 }
 
 /** null이면 분석 가능; 문자열이면 버튼 비활성·제출 차단 사유 */
-function compositionAnalyzeBlockReason(obj, label) {
+export function compositionAnalyzeBlockReason(obj, label) {
   if (!Object.keys(obj).length) {
     return `${label}에 최소 1개 이상 원소(%)를 입력하세요.`;
+  }
+  const negativeEntry = Object.entries(obj).find(([, value]) => Number(value) < 0);
+  if (negativeEntry) {
+    return `${label}의 ${negativeEntry[0]} 값은 0 이상이어야 합니다.`;
   }
   const total = compositionTotalPct(obj);
   const hasPositive = Object.values(obj).some((v) => Number(v) > 0);
@@ -1654,7 +1658,7 @@ export default function App() {
     const v = composition[el];
     if (v === "" || v === undefined) return true;
     const n = Number(v);
-    return Number.isFinite(n) && n > 0;
+    return Number.isFinite(n) && n !== 0;
   };
 
   /** 비교 모드: 열마다 보이는 원소만 elemList 순 — 빈 칸·줄 맞춤 없이 아래로 붙임 */
@@ -1692,6 +1696,7 @@ export default function App() {
           id={inputId}
           type="number"
           step="0.01"
+          min="0"
           aria-label={compositionInputAccessibleName(el, side)}
           value={composition[el] ?? ""}
           onChange={(e) => onChange(el, e.target.value)}
@@ -2798,6 +2803,7 @@ export default function App() {
                       id={compositionInputId(el, "A")}
                       type="number"
                       step="0.01"
+                      min="0"
                       aria-label={compositionInputAccessibleName(el, "A")}
                       value={comp[el] ?? ""}
                       onChange={(e) => handleChange(el, e.target.value)}
