@@ -1163,7 +1163,10 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
                 continue
             if self._is_placeholder_source(s):
                 continue
-            if not (self._source_identities(s) & allowed_source_identities):
+            cited_identities = self._source_identities(s)
+            if not cited_identities or not cited_identities.issubset(
+                allowed_source_identities
+            ):
                 continue
             cleaned.append(s)
             if len(cleaned) >= 12:

@@ -34,7 +34,14 @@ def test_retrieved_metadata_is_delimited_and_citations_are_bound(monkeypatch) ->
                 "roles": "충분히 긴 원소 역할 검증 설명입니다. 결정론적 수치를 바꾸지 않습니다.",
                 "dopant": "충분히 긴 첨가 검증 설명이며 실제 시험 확인이 필요합니다.",
                 "summary": "검증 요약",
-                "sources": ["DOI:10.9999/injected", "DOI:10.1234/safe-source"],
+                "sources": [
+                    "DOI:10.9999/injected",
+                    "DOI:10.1234/safe-source",
+                    (
+                        "DOI:10.1234/safe-source "
+                        "URL:https://attacker.invalid/fabricated-citation"
+                    ),
+                ],
             },
             ensure_ascii=False,
         )
