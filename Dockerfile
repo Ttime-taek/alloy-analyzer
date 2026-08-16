@@ -23,8 +23,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-fastapi.txt /workspace/test7/
-RUN pip install --no-cache-dir -r /workspace/test7/requirements-fastapi.txt
+COPY requirements-fastapi.lock /workspace/test7/
+RUN pip install --no-cache-dir --require-hashes -r /workspace/test7/requirements-fastapi.lock
 
 COPY . /workspace/test7/
 COPY --from=frontend /src/test7/frontend/dist /workspace/test7/frontend/dist
