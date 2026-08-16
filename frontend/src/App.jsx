@@ -52,10 +52,6 @@ const DEFAULT_REFLOW_TUNE = {
   peakMargin: 20.0
 };
 
-/** 즐겨찾기 API가 응답 없을 때 UI가 영구히 "불러오는 중..."에 머물지 않도록 */
-const FAVORITES_FETCH_TIMEOUT_MS = 70000;
-const FAVORITES_PUT_TIMEOUT_MS = 70000;
-
 /** /api/about 실패 시에도 데모·보고용 신뢰 문구 표시 */
 const TRUST_FALLBACK = {
   methodology: [
@@ -388,7 +384,7 @@ export default function App() {
   const [selectedFavoriteName, setSelectedFavoriteName] = useState("");
   /** 비교 모드 조성 B용 즐겨찾기 선택 */
   const [selectedFavoriteNameB, setSelectedFavoriteNameB] = useState("");
-  const [favSyncStatus, setFavSyncStatus] = useState("idle"); // idle | syncing | ok | offline | error
+  const [favSyncStatus, setFavSyncStatus] = useState("idle"); // idle | local
   const [favSyncMessage, setFavSyncMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [analysisStage, setAnalysisStage] = useState("");
@@ -658,60 +654,13 @@ export default function App() {
     }
   };
 
-  const syncFavoritesToServer = async (
-    nextFavorites,
-    { silent = false, allowEmpty = false } = {}
-  ) => {
-    if (!silent) {
-      setFavSyncStatus("syncing");
-      setFavSyncMessage("즐겨찾기 서버 동기화 중...");
-    }
-    const putAc = new AbortController();
-    const putT = window.setTimeout(() => putAc.abort(), FAVORITES_PUT_TIMEOUT_MS);
-    try {
-      const res = await fetch(apiUrl("/api/favorites"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          favorites: nextFavorites,
-          allow_empty: allowEmpty
-        }),
-        signal: putAc.signal
-      });
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`;
-        try {
-          const j = await res.json();
-          detail = j.detail || detail;
-        } catch {
-          // ignore
-        }
-        throw new Error(detail);
-      }
-      setFavSyncStatus("ok");
-      setFavSyncMessage(`서버 동기화 완료 (${new Date().toLocaleTimeString()})`);
-      return true;
-    } catch (e) {
-      const msg = String(e?.message || e || "알 수 없는 오류");
-      if (e?.name === "AbortError" || /aborted|timeout/i.test(msg)) {
-        setFavSyncStatus("offline");
-        setFavSyncMessage("서버 응답 지연: 브라우저 저장소 기준으로 사용합니다.");
-        return false;
-      }
-      if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
-        setFavSyncStatus("offline");
-        setFavSyncMessage("서버 연결 실패: 현재 브라우저에만 저장되었습니다.");
-      } else {
-        setFavSyncStatus("error");
-        setFavSyncMessage(`동기화 실패: ${msg}`);
-      }
-      return false;
-    } finally {
-      window.clearTimeout(putT);
-    }
+  const persistFavoritesLocal = (nextFavorites) => {
+    saveFavoritesLocal(nextFavorites);
+    setFavSyncStatus("local");
+    setFavSyncMessage("현재 브라우저에만 안전하게 저장됩니다.");
   };
 
-  // 프로필 로드 + 즐겨찾기: 서버(web_favorites.json) 우선 → 없으면 localStorage → 서버가 비었고 로컬만 있으면 업로드
+  // 공개 브라우저에는 서버 비밀 토큰을 넣지 않는다. 즐겨찾기는 localStorage 전용이다.
   useEffect(() => {
     try {
       const profRaw = window.localStorage.getItem("alloyProfile");
@@ -791,85 +740,20 @@ export default function App() {
       setUiPrefsLoaded(true);
     }
 
-    let cancelled = false;
-    (async () => {
-      /** 빠른 응답이면 "불러오는 중" 문구를 잠깐도 보이지 않게 해 첫 로드 불안 완화 */
-      let hasLocalSeed = false;
-      let loadingTimer = window.setTimeout(() => {
-        if (!cancelled) {
-          setFavSyncStatus("syncing");
-          setFavSyncMessage("즐겨찾기 불러오는 중...");
-        }
-      }, 420);
-      let fromLocal = [];
-      try {
-        const raw = window.localStorage.getItem("alloyFavorites");
-        if (raw) {
-          fromLocal = normalizeFavorites(JSON.parse(raw));
-        }
-      } catch {
-        // ignore
-      }
-
-      if (fromLocal.length > 0 && !cancelled) {
-        hasLocalSeed = true;
-        setFavorites(fromLocal);
-        setFavSyncStatus("syncing");
-        setFavSyncMessage("저장된 즐겨찾기를 먼저 표시하고 서버와 동기화 중...");
-      }
-
-      if (hasLocalSeed && loadingTimer) {
-        window.clearTimeout(loadingTimer);
-        loadingTimer = null;
-      }
-
-      const getAc = new AbortController();
-      const getT = window.setTimeout(() => getAc.abort(), FAVORITES_FETCH_TIMEOUT_MS);
-      try {
-        const res = await fetch(apiUrl("/api/favorites"), { signal: getAc.signal });
-        window.clearTimeout(loadingTimer);
-        loadingTimer = null;
-        if (res.ok) {
-          const j = await res.json();
-          const fromServer = normalizeFavorites(j.favorites);
-          if (cancelled) return;
-          if (fromServer.length > 0) {
-            setFavorites(fromServer);
-            saveFavoritesLocal(fromServer);
-            setFavSyncStatus("ok");
-            setFavSyncMessage("서버 즐겨찾기 로드 완료");
-            return;
-          }
-          if (fromLocal.length > 0) {
-            await syncFavoritesToServer(fromLocal, { silent: false });
-            return;
-          }
-          setFavorites([]);
-          setFavSyncStatus("ok");
-          setFavSyncMessage("저장된 즐겨찾기가 없습니다.");
-          return;
-        }
-        // HTTP 오류: 아래에서 로컬 폴백
-      } catch {
-        // 네트워크·타임아웃(Abort)·JSON 오류 등 → 아래에서 로컬 폴백
-      } finally {
-        window.clearTimeout(getT);
-        if (loadingTimer) window.clearTimeout(loadingTimer);
-      }
-      if (cancelled) return;
-      setFavorites(fromLocal);
-      if (fromLocal.length > 0) {
-        setFavSyncStatus("offline");
-        setFavSyncMessage("오프라인 모드: 브라우저 저장소 즐겨찾기 사용 중");
-      } else {
-        setFavSyncStatus("offline");
-        setFavSyncMessage("오프라인 모드: 저장된 즐겨찾기가 없습니다.");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    let fromLocal = [];
+    try {
+      const raw = window.localStorage.getItem("alloyFavorites");
+      if (raw) fromLocal = normalizeFavorites(JSON.parse(raw));
+    } catch {
+      // ignore malformed or unavailable browser storage
+    }
+    setFavorites(fromLocal);
+    setFavSyncStatus("local");
+    setFavSyncMessage(
+      fromLocal.length > 0
+        ? "현재 브라우저의 즐겨찾기를 불러왔습니다."
+        : "현재 브라우저에만 안전하게 저장됩니다."
+    );
   }, []);
 
   useEffect(() => {
@@ -1816,7 +1700,7 @@ export default function App() {
     return "#f97316";
   };
   const favSyncColor =
-    favSyncStatus === "ok"
+    favSyncStatus === "ok" || favSyncStatus === "local"
       ? "#22c55e"
       : favSyncStatus === "syncing"
         ? "#60a5fa"
@@ -1824,7 +1708,7 @@ export default function App() {
           ? "#fb7185"
           : "#f59e0b";
 
-  const saveFavoriteA = async () => {
+  const saveFavoriteA = () => {
     const clean = Object.fromEntries(
       Object.entries(comp)
         .filter(([_, v]) => v !== "" && !Number.isNaN(Number(v)))
@@ -1843,8 +1727,7 @@ export default function App() {
     );
     setFavorites(next);
     setSelectedFavoriteName(fav.name);
-    saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false });
+    persistFavoritesLocal(next);
   };
 
   const loadFavoriteToA = (name) => {
@@ -1861,18 +1744,17 @@ export default function App() {
     );
   };
 
-  const deleteFavoriteA = async () => {
+  const deleteFavoriteA = () => {
     if (!selectedFavoriteName) return;
     const removed = selectedFavoriteName;
     const next = favorites.filter((f) => f.name !== removed);
     setFavorites(next);
     setSelectedFavoriteName("");
     if (selectedFavoriteNameB === removed) setSelectedFavoriteNameB("");
-    saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false, allowEmpty: true });
+    persistFavoritesLocal(next);
   };
 
-  const saveFavoriteB = async () => {
+  const saveFavoriteB = () => {
     const clean = Object.fromEntries(
       Object.entries(compB)
         .filter(([_, v]) => v !== "" && !Number.isNaN(Number(v)))
@@ -1891,8 +1773,7 @@ export default function App() {
     );
     setFavorites(next);
     setSelectedFavoriteNameB(fav.name);
-    saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false });
+    persistFavoritesLocal(next);
   };
 
   const loadFavoriteToB = (name) => {
@@ -1909,15 +1790,14 @@ export default function App() {
     );
   };
 
-  const deleteFavoriteB = async () => {
+  const deleteFavoriteB = () => {
     if (!selectedFavoriteNameB) return;
     const removed = selectedFavoriteNameB;
     const next = favorites.filter((f) => f.name !== removed);
     setFavorites(next);
     setSelectedFavoriteNameB("");
     if (selectedFavoriteName === removed) setSelectedFavoriteName("");
-    saveFavoritesLocal(next);
-    await syncFavoritesToServer(next, { silent: false, allowEmpty: true });
+    persistFavoritesLocal(next);
   };
 
   const toggleSection = (key) => {
@@ -2585,27 +2465,10 @@ export default function App() {
               </div>
             )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              {(favSyncStatus === "syncing" || favSyncStatus === "offline" || favSyncStatus === "error") && (
+              {favSyncStatus === "local" && (
               <span style={{ fontSize: 13, color: favSyncColor }}>
                 즐겨찾기 상태: {favSyncMessage}
               </span>
-              )}
-              {(favSyncStatus === "offline" || favSyncStatus === "error") && (
-                <TactileButton
-                  onClick={() => syncFavoritesToServer(favorites, { silent: false })}
-                  style={{
-                    minHeight: 44,
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    border: "1px solid #334155",
-                    background: "var(--bg-table-head)",
-                    color: "var(--text-soft)",
-                    fontSize: 13,
-                    cursor: "pointer"
-                  }}
-                >
-                  동기화 재시도
-                </TactileButton>
               )}
             </div>
             </div>
