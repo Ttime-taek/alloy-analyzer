@@ -51,13 +51,18 @@ def test_docker_uses_hashed_lock_and_runs_as_non_root() -> None:
 # Report: .gstack/security-reports/2026-08-12-155000.json
 def test_ci_actions_are_sha_pinned_with_read_only_contents() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci_lock = (ROOT / "requirements-ci.lock").read_text(encoding="utf-8")
 
     assert "permissions:\n  contents: read" in workflow
     assert workflow.count(f"actions/checkout@{CHECKOUT_SHA}") == 2
     assert f"actions/setup-python@{SETUP_PYTHON_SHA}" in workflow
     assert f"actions/setup-node@{SETUP_NODE_SHA}" in workflow
     assert not re.search(r"uses:\s+actions/[^@\s]+@v\d+", workflow)
-    assert "pip install --require-hashes -r requirements-fastapi.lock" in workflow
+    assert "cache-dependency-path: requirements-ci.lock" in workflow
+    assert "pip install --require-hashes -r requirements-ci.lock" in workflow
+    assert "run: python -m pytest tests -q" in workflow
+    assert "pytest==" in ci_lock
+    assert "--hash=sha256:" in ci_lock
 
 
 # Regression: SECURITY-008 — workflow changes had no repository owner rule.

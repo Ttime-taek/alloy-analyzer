@@ -21,9 +21,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: requirements-fastapi.lock
+          cache-dependency-path: requirements-ci.lock
       - name: Install dependencies
-        run: pip install --require-hashes -r requirements-fastapi.lock
+        run: pip install --require-hashes -r requirements-ci.lock
+      - name: Python tests
+        run: python -m pytest tests -q
       - name: Regression check
         run: python regression_check.py
       - name: Syntax check
