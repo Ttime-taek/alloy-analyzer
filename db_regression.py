@@ -276,16 +276,11 @@ def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, 
 
 
 def predict_from_db(input_comp):
-    candidates = []
-
-    for row in SOLDER_PROPERTIES_DB:
-        db_comp = parse_alloy(row["alloy"])
-        if not db_comp:
-            continue
-        dist = composition_distance(input_comp, db_comp)
-        candidates.append((row["alloy"], dist))
-
-    candidates.sort(key=lambda x: x[1])
+    by_name = _unique_alloy_candidates(input_comp)
+    candidates = sorted(
+        ((name, float(item["dist"])) for name, item in by_name.items()),
+        key=lambda x: x[1],
+    )
     top = candidates[:5]
 
     predictions = {}
@@ -319,14 +314,14 @@ def predict_from_db_with_detail(input_comp):
     predict_from_db()와 동일한 가중 예측 + 상위 유사 합금 목록(거리).
     analyzer.analyze_all 의 물성 DB 블렌딩·evidence에 사용.
     """
-    candidates = []
-    for row in SOLDER_PROPERTIES_DB:
-        db_comp = parse_alloy(row["alloy"])
-        if not db_comp:
-            continue
-        dist = composition_distance(input_comp, db_comp)
-        candidates.append({"alloy": row["alloy"], "dist": float(dist)})
-    candidates.sort(key=lambda x: x["dist"])
+    by_name = _unique_alloy_candidates(input_comp)
+    candidates = sorted(
+        (
+            {"alloy": name, "dist": float(item["dist"])}
+            for name, item in by_name.items()
+        ),
+        key=lambda x: x["dist"],
+    )
     top = candidates[:5]
     pred = predict_from_db(input_comp)
     return {"pred": pred or {}, "top": top}
