@@ -178,12 +178,16 @@ def predict_shear_from_db(input_comp, max_dist=_SHEAR_IDW_MAX_DIST):
     if not by_name:
         return None
 
-    exact = [v for v in by_name.values() if float(v["dist"]) <= 1e-4]
+    exact = [
+        (name, item)
+        for name, item in by_name.items()
+        if float(item["dist"]) <= 1e-4
+    ]
     if exact:
         weighted_values = []
         weights = []
-        for item in exact:
-            stats = get_statistics(item["alloy"])
+        for name, item in exact:
+            stats = get_statistics(name)
             if not stats or not stats.get("shear"):
                 continue
             mean = float(stats["shear"]["mean"])
