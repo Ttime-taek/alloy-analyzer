@@ -45,9 +45,11 @@ npm run build
 ```dotenv
 GEMINI_API_KEY=...
 CEREBRAS_API_KEY=...
+# 선택: 신뢰된 API 클라이언트의 공유 즐겨찾기 전용(32자 이상, 프론트엔드에 넣지 않음)
+ALLOY_FAVORITES_SYNC_TOKEN=...
 ```
 
-`.env`, `.env.local`, 기존 키 파일명은 `.gitignore`에 포함됩니다. 새 v1 핵심 예측 API는 키가 없어도 동작합니다.
+`.env`, `.env.local`, 기존 키 파일명은 `.gitignore`에 포함됩니다. 새 v1 핵심 예측 API는 키가 없어도 동작합니다. 공개 웹의 즐겨찾기는 서버 비밀 토큰을 노출하지 않도록 브라우저 `localStorage`에만 저장됩니다.
 
 ## 주요 API
 
