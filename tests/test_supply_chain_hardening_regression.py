@@ -49,6 +49,8 @@ def test_docker_uses_hashed_lock_and_runs_as_non_root() -> None:
         in dockerfile
     )
     assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
+    assert "docker run --rm -p 8000:8000 --env-file .env alloy-web" in dockerfile
+    assert "-e GEMINI_API_KEY=" not in dockerfile
     assert re.search(r"(?m)^USER alloy$", dockerfile)
     assert re.search(r"(?m)^\.cache/?$", dockerignore)
     ignored = set(dockerignore.splitlines())

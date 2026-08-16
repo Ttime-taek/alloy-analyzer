@@ -116,17 +116,39 @@ except ImportError:
     )
 
 
-# API 키는 저장소 파일이 아니라 .env/환경변수에서만 로드한다.
+# API 키와 서버 설정은 저장소 파일이 아니라 .env/환경변수에서만 로드한다.
+_API_ENV_KEYS = (
+    "GEMINI_API_KEY",
+    "CEREBRAS_API_KEY",
+    "AI_REMOTE_TIMEOUT_S",
+    "AI_CACHE_ENABLED",
+    "AI_DB_EXACT_MODE",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ALLOY_API_CORS",
+    "ALLOY_API_CORS_ORIGINS",
+    "ALLOY_API_HOST",
+    "ALLOY_API_PORT",
+    "ALLOY_EXPLANATION_RATE_LIMIT",
+    "ALLOY_EXPLANATION_RATE_WINDOW_SEC",
+    "ALLOY_EXPLANATION_CONCURRENCY",
+    "ALLOY_FAVORITES_SYNC_TOKEN",
+    "ALLOY_FAVORITES_PATH",
+    "ALLOY_LITERATURE_CACHE_PATH",
+    "ALLOY_STRICT_COMP_SUM",
+    "ALLOY_SERVE_STATIC",
+    "MELTING_ENSEMBLE_CONFIG",
+    "MELTING_KNN_TEMP_BAND_C",
+    "MELTING_KNN_TEMP_EXTRA_MAX",
+    "MELTING_CALPHAD_URL",
+    "MELTING_CALPHAD_TIMEOUT",
+    "MELTING_KNN_TEMP_WEIGHT",
+    "MELTING_KNN_D0_DECAY",
+)
+
 if load_env_keys:
     try:
-        load_env_keys(
-            [
-                "GEMINI_API_KEY",
-                "CEREBRAS_API_KEY",
-                "ALLOY_FAVORITES_SYNC_TOKEN",
-            ],
-            override=False,
-        )
+        load_env_keys(_API_ENV_KEYS, override=False)
     except Exception:
         pass
 

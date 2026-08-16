@@ -1,7 +1,7 @@
 # 합금 분석기: FastAPI + Vite 빌드 UI를 한 프로세스에서 제공 (웹사이트처럼 URL로 접속)
 #
 # 로컬 빌드:  docker build -t alloy-web .
-# 실행:       docker run --rm -p 8000:8000 -e GEMINI_API_KEY=여기에키 alloy-web
+# 실행:       docker run --rm -p 8000:8000 --env-file .env alloy-web
 # Render 등:  PORT 환경변수를 서비스가 넣어 주면 그 포트로 바인딩됩니다.
 
 # ── 1) 프론트 빌드 ─────────────────────────────────────────────
