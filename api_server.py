@@ -41,7 +41,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     from .ai_engine import AIEngine  # type: ignore
@@ -328,11 +328,30 @@ class ProcessConstraints(BaseModel):
 
 
 class AnalysisV1Request(CompositionRequest):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "comp": {"Sn": 96.5, "Ag": 3.0, "Cu": 0.5},
+                "mode": "eng",
+                "literature_mode": "fast",
+                "include_wetting_grid": False,
+            }
+        }
+    )
+
     process_constraints: ProcessConstraints | None = None
 
 
 class ExplanationV1Request(CompositionRequest):
     analysis_id: str = Field(..., min_length=8, max_length=80)
+
+
+class AnalysisV1Response(BaseModel):
+    analysis_id: str
+    prediction_contract: Dict[str, Any]
+    result: Dict[str, Any]
+    explanation: Dict[str, Any]
+    timing_ms: Dict[str, float]
 
 
 class AnalysisResponse(BaseModel):
@@ -1099,8 +1118,8 @@ def api_v1_models() -> Dict[str, Any]:
     }
 
 
-@app.post("/api/v1/analyses")
-def analyze_v1(req: AnalysisV1Request) -> Dict[str, Any]:
+@app.post("/api/v1/analyses", response_model=AnalysisV1Response)
+def analyze_v1(req: AnalysisV1Request) -> AnalysisV1Response:
     """외부 생성형 AI를 호출하지 않고 핵심 수치·검증 범위를 먼저 반환."""
     started = time.perf_counter()
     _engine, analyzer = _get_engine_bundle()
@@ -1143,13 +1162,13 @@ def analyze_v1(req: AnalysisV1Request) -> Dict[str, Any]:
         composition_notes=comp_notes,
         prediction_contract=contract,
     )
-    return {
-        "analysis_id": contract["analysis_id"],
-        "prediction_contract": contract,
-        "result": payload,
-        "explanation": {"status": "not_requested"},
-        "timing_ms": {"core": round((time.perf_counter() - started) * 1000.0, 2)},
-    }
+    return AnalysisV1Response(
+        analysis_id=contract["analysis_id"],
+        prediction_contract=contract,
+        result=payload,
+        explanation={"status": "not_requested"},
+        timing_ms={"core": round((time.perf_counter() - started) * 1000.0, 2)},
+    )
 
 
 @app.post("/api/v1/analyses/{analysis_id}/explanations")
