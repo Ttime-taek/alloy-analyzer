@@ -27,4 +27,3 @@ def test_google_genai_client_initializes_without_a_network_request() -> None:
 
     assert engine.available is True
     assert engine.client is not None
-    assert engine.model is None

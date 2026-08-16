@@ -118,7 +118,6 @@ class AIEngine:
 
     def __init__(self, api_key=None):
         self.available = False
-        self.model = None
         self.client = None
         self.status_detail = ""
         self.last_error_detail = ""
@@ -242,18 +241,13 @@ class AIEngine:
             return "AI 연결 오류: Gemini 초기화 실패"
 
         try:
-            if self.model:
-                res = self.model.generate_content(
-                    prompt,
-                    request_options={"timeout": self.request_timeout_s},
-                )
-            elif self.client:
+            if self.client:
                 res = self.client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
                 )
             else:
-                return "AI 연결 오류: Gemini 모델 미준비"
+                return "AI 연결 오류: Gemini 클라이언트 미준비"
 
             txt = res.text if hasattr(res, "text") else str(res)
             txt = normalize_subscript(txt)
