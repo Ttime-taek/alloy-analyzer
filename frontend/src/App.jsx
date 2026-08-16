@@ -756,19 +756,6 @@ export default function App() {
     );
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(apiUrl("/api/about"))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (!cancelled && j && typeof j === "object" && j.product) setAboutInfo(j);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // 프로필 저장
   useEffect(() => {
     if (!uiPrefsLoaded) return;
