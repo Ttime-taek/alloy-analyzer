@@ -29,6 +29,14 @@ RUN pip install --no-cache-dir --require-hashes -r /workspace/test7/requirements
 COPY . /workspace/test7/
 COPY --from=frontend /src/test7/frontend/dist /workspace/test7/frontend/dist
 
+# 애플리케이션 코드는 루트 소유로 유지하고, AI 캐시만 전용 계정에게 쓰기를 허용합니다.
+RUN groupadd --gid 10001 alloy \
+    && useradd --uid 10001 --gid alloy --create-home --home-dir /home/alloy \
+        --shell /usr/sbin/nologin alloy \
+    && install -d -o alloy -g alloy -m 0750 /workspace/test7/.cache/ai
+ENV HOME=/home/alloy
+USER alloy
+
 EXPOSE 8000
 # ALLOY_SERVE_STATIC=0 이면 API만 (정적 미마운트). 기본은 dist 있으면 UI+API.
 CMD ["sh", "-c", "exec uvicorn test7.api_server:app --host 0.0.0.0 --port ${PORT:-8000}"]
