@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -21,7 +22,17 @@ class ApiStaticSmokeTest(unittest.TestCase):
             from fastapi.testclient import TestClient
         except ImportError as e:
             raise unittest.SkipTest("httpx required for TestClient") from e
-        cls.client = TestClient(api_mod.app)
+        cls._favorites_token = "test-only-favorites-sync-token-32-chars"
+        cls._favorites_env = patch.dict(
+            os.environ,
+            {"ALLOY_FAVORITES_SYNC_TOKEN": cls._favorites_token},
+        )
+        cls._favorites_env.start()
+        cls.addClassCleanup(cls._favorites_env.stop)
+        cls.client = TestClient(
+            api_mod.app,
+            headers={"Authorization": f"Bearer {cls._favorites_token}"},
+        )
 
     def test_about_includes_recommend_melt(self) -> None:
         r = self.client.get("/api/about")
