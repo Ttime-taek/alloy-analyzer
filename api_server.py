@@ -280,6 +280,13 @@ class CompositionRequest(BaseModel):
         default=False,
         description="True면 분석 응답에 250–290℃ 온도별 젖음 표를 포함. 기본은 생략(별도 /api/wetting_grid 권장).",
     )
+    include_ai: bool = Field(
+        default=False,
+        description=(
+            "True를 명시한 요청만 Gemini/Cerebras 서술 생성을 허용합니다. "
+            "기본값 False에서는 수치 예측과 로컬 규칙 설명만 반환합니다."
+        ),
+    )
 
     @field_validator("comp")
     @classmethod
@@ -1317,6 +1324,7 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
             literature_mode=req.literature_mode or "fast",
             wetting_temp_c=req.wetting_temp_c,
             include_wetting_grid=bool(req.include_wetting_grid),
+            include_ai=bool(req.include_ai),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
