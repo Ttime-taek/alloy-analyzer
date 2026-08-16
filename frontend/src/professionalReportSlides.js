@@ -257,7 +257,7 @@ function wettingSlideContent(result) {
 
 
 
-function slideMeta(result, melt, profile) {
+function slideMeta(result, _melt, _profile) {
 
   const norm = getResultNorm(result);
 
@@ -484,8 +484,6 @@ function isMeltSummaryBullet(text) {
 }
 
 function summarySlideContent(result, meta) {
-
-  const ai = String(result?.ai_summary || "").trim();
 
   const eng = stripReportDecor(result?.eng_report || result?.eng_summary);
 

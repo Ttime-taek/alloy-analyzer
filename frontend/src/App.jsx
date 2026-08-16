@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
 import { createRoot } from "react-dom/client";
 import {
   TUNING_GOAL_OPTIONS,
@@ -185,14 +185,6 @@ function formatApiDetail(detail, status = 500) {
 /** 화면 총합(소수 둘째 자리 반올림)이 100.00%일 때만 분석 — 99.50% 등은 불가 */
 function compositionTotalIsComplete(total) {
   return Number(Number(total).toFixed(2)) === 100;
-}
-
-function cleanCompositionWt(src) {
-  return Object.fromEntries(
-    Object.entries(src)
-      .filter(([_, v]) => v !== "" && !Number.isNaN(Number(v)))
-      .map(([k, v]) => [k, Number(v)])
-  );
 }
 
 /** 조성 패널에 보이는 입력란(activeElems)만 합산·검증 — 주기율표만 눌러 comp에만 남은 값은 제외 */
@@ -1543,24 +1535,27 @@ export default function App() {
   );
 
   /** 비교 모드: 한쪽이라도 입력 중인 원소만 elemList 순 — 0%·미입력 placeholder 행 없음 */
-  const compareElemVisible = (el, side) => {
-    const active = side === "A" ? activeElemsA : activeElemsB;
-    const composition = side === "A" ? comp : compB;
-    if (!active.includes(el)) return false;
-    const v = composition[el];
-    if (v === "" || v === undefined) return true;
-    const n = Number(v);
-    return Number.isFinite(n) && n !== 0;
-  };
+  const compareElemVisible = useCallback(
+    (el, side) => {
+      const active = side === "A" ? activeElemsA : activeElemsB;
+      const composition = side === "A" ? comp : compB;
+      if (!active.includes(el)) return false;
+      const v = composition[el];
+      if (v === "" || v === undefined) return true;
+      const n = Number(v);
+      return Number.isFinite(n) && n !== 0;
+    },
+    [activeElemsA, activeElemsB, comp, compB]
+  );
 
   /** 비교 모드: 열마다 보이는 원소만 elemList 순 — 빈 칸·줄 맞춤 없이 아래로 붙임 */
   const compareVisibleElemsA = useMemo(
     () => elemList.filter((el) => compareElemVisible(el, "A")),
-    [activeElemsA, comp, elemList]
+    [compareElemVisible, elemList]
   );
   const compareVisibleElemsB = useMemo(
     () => elemList.filter((el) => compareElemVisible(el, "B")),
-    [activeElemsB, compB, elemList]
+    [compareElemVisible, elemList]
   );
 
   const panelWtA = useMemo(() => compositionWtForPanel(comp, activeElemsA), [comp, activeElemsA]);

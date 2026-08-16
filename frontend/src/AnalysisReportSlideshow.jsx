@@ -377,7 +377,7 @@ export default function AnalysisReportSlideshow({ open, onClose, payload }) {
     a.download = `alloy-report-${Date.now()}.html`;
     a.click();
     URL.revokeObjectURL(a.href);
-  }, [deckPayload]);
+  }, [deckPayload, payload?.result]);
 
   if (!open || !total || !meta) return null;
 
