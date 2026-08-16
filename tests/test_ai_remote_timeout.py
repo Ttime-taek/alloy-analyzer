@@ -34,3 +34,48 @@ def test_remote_timeout_is_clamped(monkeypatch) -> None:
     assert _remote_ai_timeout_s() == 60.0
     monkeypatch.setenv("AI_REMOTE_TIMEOUT_S", "0")
     assert _remote_ai_timeout_s() == 2.0
+
+
+def _engine_with_client(client) -> AIEngine:
+    engine = AIEngine.__new__(AIEngine)
+    engine.available = True
+    engine.client = client
+    engine._cerebras = None
+    engine.status_detail = ""
+    engine.last_error_detail = ""
+    engine.usage_stats = {}
+    return engine
+
+
+def test_google_genai_ask_uses_client_models_generate_content() -> None:
+    calls = []
+
+    class FakeModels:
+        @staticmethod
+        def generate_content(*, model, contents):
+            calls.append((model, contents))
+            return SimpleNamespace(text="OK")
+
+    engine = _engine_with_client(SimpleNamespace(models=FakeModels()))
+
+    assert engine.ask("Return exactly OK") == "OK"
+    assert calls == [("gemini-2.5-flash", "Return exactly OK")]
+    assert engine.usage_stats["ask_success"] == 1
+
+
+def test_google_genai_ask_reports_client_error_without_retrying_gemini() -> None:
+    calls = []
+
+    class FailingModels:
+        @staticmethod
+        def generate_content(*, model, contents):
+            calls.append((model, contents))
+            raise RuntimeError("test transport failure")
+
+    engine = _engine_with_client(SimpleNamespace(models=FailingModels()))
+
+    result = engine.ask("Return exactly OK")
+
+    assert result.startswith("AI 오류:")
+    assert calls == [("gemini-2.5-flash", "Return exactly OK")]
+    assert engine.usage_stats["ask_errors"] == 1
