@@ -29,6 +29,7 @@ so that GUI와 서버가 항상 동일한 엔진을 사용합니다.
 import json
 import math
 import os
+import secrets
 import threading
 import time
 from collections import defaultdict, deque
@@ -36,9 +37,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
@@ -117,7 +119,14 @@ except ImportError:
 # API 키는 저장소 파일이 아니라 .env/환경변수에서만 로드한다.
 if load_env_keys:
     try:
-        load_env_keys(["GEMINI_API_KEY", "CEREBRAS_API_KEY"], override=False)
+        load_env_keys(
+            [
+                "GEMINI_API_KEY",
+                "CEREBRAS_API_KEY",
+                "ALLOY_FAVORITES_SYNC_TOKEN",
+            ],
+            override=False,
+        )
     except Exception:
         pass
 
@@ -727,6 +736,38 @@ class WebFavoritesPayload(BaseModel):
         return v
 
 
+_favorites_sync_bearer = HTTPBearer(auto_error=False)
+
+
+def _favorites_sync_token() -> str:
+    """Return the server-only token that gates shared favorites storage."""
+    token = (os.getenv("ALLOY_FAVORITES_SYNC_TOKEN") or "").strip()
+    return token if len(token) >= 32 else ""
+
+
+def _require_favorites_sync_auth(
+    credentials: HTTPAuthorizationCredentials | None = Depends(
+        _favorites_sync_bearer
+    ),
+) -> None:
+    """Keep shared favorites inaccessible unless an env-only token is configured."""
+    expected = _favorites_sync_token()
+    if not expected:
+        # A disabled endpoint makes the existing web client use localStorage.
+        # Do not fall through to either the Supabase service role or server files.
+        raise HTTPException(
+            status_code=404,
+            detail="즐겨찾기 서버 동기화가 비활성화되어 있습니다.",
+        )
+    supplied = credentials.credentials if credentials is not None else ""
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="즐겨찾기 동기화 인증에 실패했습니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 def _web_favorites_path() -> Path:
     return Path(__file__).resolve().parent / "web_favorites.json"
 
@@ -1243,10 +1284,13 @@ async def api_about() -> Dict[str, Any]:
 
 
 @app.get("/api/favorites", response_model=WebFavoritesPayload)
-async def get_favorites() -> WebFavoritesPayload:
+async def get_favorites(
+    _authorized: None = Depends(_require_favorites_sync_auth),
+) -> WebFavoritesPayload:
     """
-    웹 즐겨찾기 목록. 서버 파일(web_favorites.json)에 저장되어
-    다른 PC·휴대폰에서 같은 주소로 접속해도 동일 목록을 불러올 수 있습니다.
+    인증된 웹 즐겨찾기 목록. ALLOY_FAVORITES_SYNC_TOKEN으로 보호하며,
+    토큰이 없으면 웹 UI는 브라우저 localStorage를 사용합니다.
+    인증된 요청은 서버 파일(web_favorites.json) 또는 Supabase의 공유 목록을 읽습니다.
     web이 비어 있으면 GUI용 favorites.json을 읽어 자동 이관합니다
     (localhost vs 192.168 접속 시 localStorage가 달라 비던 경우 대비).
     """
@@ -1272,8 +1316,11 @@ async def get_favorites() -> WebFavoritesPayload:
 
 
 @app.put("/api/favorites", response_model=WebFavoritesPayload)
-async def put_favorites(body: WebFavoritesPayload) -> WebFavoritesPayload:
-    """웹 즐겨찾기 전체 교체(최대 20개)."""
+async def put_favorites(
+    body: WebFavoritesPayload,
+    _authorized: None = Depends(_require_favorites_sync_auth),
+) -> WebFavoritesPayload:
+    """인증된 웹 즐겨찾기 전체 교체(최대 20개)."""
     items = [{"name": x.name, "comp": dict(x.comp)} for x in body.favorites]
     if supabase_configured():
         try:
