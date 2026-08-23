@@ -10,6 +10,9 @@ describe("refused reflow recommendations", () => {
   it("hides interactive process details when policy refuses the result", () => {
     expect(shouldShowReflowProcessDetails({ processAllowed: false })).toBe(false);
     expect(shouldShowReflowProcessDetails({ processAllowed: true })).toBe(true);
+    expect(shouldShowReflowProcessDetails({ processAllowed: "false" })).toBe(false);
+    expect(shouldShowReflowProcessDetails({ processAllowed: 1 })).toBe(false);
+    expect(shouldShowReflowProcessDetails({})).toBe(false);
   });
 
   it("replaces the report chart with explicit next actions", () => {

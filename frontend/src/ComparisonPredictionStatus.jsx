@@ -62,16 +62,19 @@ export default function ComparisonPredictionStatus({ a, b }) {
   return (
     <section
       className="compare-contract-status"
-      aria-label="비교 예측 사용 판정"
+      aria-label="융점·인장 비교 예측 사용 판정"
       role={refused ? "alert" : undefined}
     >
       <div className="compare-contract-status__title">
-        비교 예측 사용 판정
-        <span>DB 근접 신뢰도와 실제 사용 가능 판정은 다릅니다.</span>
+        융점·인장 비교 예측 사용 판정
+        <span>DB 근접 신뢰도와 실제 사용 가능 판정은 다릅니다. 전단·젖음은 이 판정에서 제외됩니다.</span>
       </div>
       <div className="compare-contract-status__grid">
         <ContractCard side="A" contract={contractA} />
         <ContractCard side="B" contract={contractB} />
+      </div>
+      <div className="compare-contract-card__warning">
+        전단·젖음·인장 값은 각 항목에 표시된 원출처와 검증 상태가 일치할 때만 B−A·우열·추천에 사용합니다.
       </div>
     </section>
   );

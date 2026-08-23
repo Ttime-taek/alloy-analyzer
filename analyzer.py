@@ -4,6 +4,7 @@
 # ============================================================
 
 from functools import lru_cache
+import math
 from .utils import composition_distance
 from .phase import PhasePredictor
 from .models import PropertyModels
@@ -16,6 +17,11 @@ from . import ai_cache
 
 # DB 정확 일치 판정 임계값 — melting_predictor와 동일한 기준.
 _DB_EXACT_EPS = 1e-4
+
+# Bump whenever cached narrative/report safety rules change.  Keeping this in
+# the cache key prevents an older recommendation or provenance claim from
+# reappearing after the deterministic policy has been tightened.
+_AI_REPORT_POLICY_VERSION = "property-provenance-v2-20260821"
 
 # DB 정확 일치 시 AI를 어떻게 다룰지 결정하는 플래그:
 #   "cache_first" (기본): 캐시에 기존 AI 응답이 있으면 재사용, 없으면 AI 1회 호출 → 영구 저장
@@ -57,6 +63,76 @@ def _property_db_weight(best_dist):
     if d0 <= 3.0:
         return max(0.0, min(0.80, 1.0 / (1.0 + d0 / 2.4)))
     return 0.0
+
+
+_MECHANICAL_PROPERTY_KEYS = (
+    "tensile_strength",
+    "yield_strength",
+    "elongation",
+    "shear_strength",
+)
+_LEGACY_MECHANICAL_MISSING_CONDITIONS = (
+    "source_identifier",
+    "test_standard",
+    "specimen_geometry",
+    "test_temperature",
+    "loading_rate",
+    "thermal_history",
+)
+
+
+def _mechanical_property_metadata(props, prop_sources, db_best_dist):
+    """Conservative provenance contract for displayed mechanical values."""
+    values = props if isinstance(props, dict) else {}
+    sources = prop_sources if isinstance(prop_sources, dict) else {}
+    try:
+        db_exact_hit = (
+            db_best_dist is not None
+            and float(db_best_dist) <= _DB_EXACT_EPS
+        )
+    except Exception:
+        db_exact_hit = False
+
+    out = {}
+    for key in _MECHANICAL_PROPERTY_KEYS:
+        if values.get(key) is None:
+            continue
+        source_label = str(sources.get(key) or "MODEL")
+        if source_label.startswith("DB("):
+            if "IDW" in source_label:
+                value_type = "idw_prediction"
+            elif db_exact_hit:
+                value_type = "legacy_measured_mean"
+            else:
+                value_type = "legacy_db_estimate"
+            source_type = "legacy_property_db"
+            provenance_status = "unconfirmed"
+            reason_code = "LEGACY_MECHANICAL_PROVENANCE_UNCONFIRMED"
+            missing_conditions = list(_LEGACY_MECHANICAL_MISSING_CONDITIONS)
+        elif source_label.startswith("LIT("):
+            value_type = "literature_reference"
+            source_type = "literature"
+            provenance_status = "reference_only"
+            reason_code = "LITERATURE_VALUE_NOT_CONDITION_NORMALIZED"
+            missing_conditions = []
+        else:
+            value_type = "model_prediction"
+            source_type = "model"
+            provenance_status = "derived"
+            reason_code = "MODEL_PREDICTION_NOT_MEASUREMENT_VERIFIED"
+            missing_conditions = []
+
+        out[key] = {
+            "value_type": value_type,
+            "source_type": source_type,
+            "source_label": source_label,
+            "provenance_status": provenance_status,
+            "verification_status": "unverified",
+            "comparison_allowed": False,
+            "reason_code": reason_code,
+            "missing_conditions": missing_conditions,
+        }
+    return out
 
 
 def _imc_line_to_plain_korean(s: str) -> str:
@@ -350,12 +426,26 @@ class AlloyAnalyzer:
         UI/리포트용 근거 블록. analyze_all 경로와 GUI _run_single 경로에서 공통 사용.
         """
         md = melting_detail if isinstance(melting_detail, dict) else {}
-        melting_src = "DB-direct" if md.get("forced_db") else "Hybrid"
+        forced_db = md.get("forced_db") is True
+        melting_src = "DB-direct" if forced_db else "Hybrid"
         melting_dist = md.get("best_dist", score)
         wet_neighbors = []
         if isinstance(props, dict) and isinstance(props.get("wetting_neighbors"), list):
             wet_neighbors = props.get("wetting_neighbors")
-        wet_src = "IDW(DB)" if wet_neighbors else "Heuristic"
+        wetting_metadata = (
+            dict(props.get("wetting_metadata"))
+            if isinstance(props, dict) and isinstance(props.get("wetting_metadata"), dict)
+            else {}
+        )
+        wetting_source_kind = str(wetting_metadata.get("source_kind") or "").strip()
+        wetting_value_type = str(wetting_metadata.get("value_type") or "").strip()
+        if wetting_source_kind == "measured_db" or wetting_value_type in {
+            "measured",
+            "direct_db_record",
+        }:
+            wet_src = "Measured(DB-exact)"
+        else:
+            wet_src = "IDW(DB)" if wet_neighbors else "Heuristic"
 
         unknown_elems, unknown_total = self._unknown_element_profile(norm)
         unknown_penalty = min(35.0, max(0.0, float(unknown_total)) * 0.7) if unknown_total > 0 else 0.0
@@ -387,17 +477,25 @@ class AlloyAnalyzer:
                 db_support_factor, db_support_n = None, None
 
         ps = dict(prop_sources) if isinstance(prop_sources, dict) else {}
+        mechanical_metadata = (
+            dict(props.get("mechanical_property_metadata"))
+            if isinstance(props, dict)
+            and isinstance(props.get("mechanical_property_metadata"), dict)
+            else _mechanical_property_metadata(props, ps, db_best_dist)
+        )
         return {
             "melting": {
                 "source": melting_src,
                 "best_dist": float(melting_dist) if melting_dist is not None else None,
-                "forced_db": bool(md.get("forced_db")) if isinstance(md, dict) else False,
+                "forced_db": forced_db,
             },
             "wetting": {
                 "source": wet_src,
                 "neighbors": wet_neighbors[:3] if isinstance(wet_neighbors, list) else [],
+                **wetting_metadata,
             },
             "props": ps,
+            "mechanical_properties": mechanical_metadata,
             "props_db": {
                 "best_dist": db_best_dist,
                 "use_db": bool(use_db),
@@ -485,8 +583,12 @@ class AlloyAnalyzer:
         melting_dist = md.get("best_dist", score)
         melting_conf = self._dist_conf(melting_dist)
         wet_neighbors = []
-        if isinstance(props, dict) and isinstance(props.get("wetting_neighbors"), list):
-            wet_neighbors = props.get("wetting_neighbors")
+        if isinstance(props, dict):
+            confidence_neighbors = props.get("wetting_confidence_neighbors")
+            if isinstance(confidence_neighbors, list) and confidence_neighbors:
+                wet_neighbors = confidence_neighbors
+            elif isinstance(props.get("wetting_neighbors"), list):
+                wet_neighbors = props.get("wetting_neighbors")
         wet_conf = self._wetting_conf_from_neighbors(wet_neighbors) if wet_neighbors else 0.0
         overall = 0.55 * float(conf or 0.0) + 0.30 * float(melting_conf or 0.0) + 0.15 * float(wet_conf or 0.0)
         # Penalize confidence when composition includes non-core (DB-poor) unknown metals.
@@ -766,7 +868,12 @@ class AlloyAnalyzer:
         # 공통 젖음 온도 선택은 결정론적 핵심 수치만 필요하다.
         # 원격 AI를 호출하면 비교 요청마다 불필요한 지연과 비결정성이 생긴다.
         _, liquidus, _, _, _ = self.calc_melting_with_detail(best, norm, include_ai=False)
-        return float(liquidus or 0.0)
+        if type(liquidus) is bool or liquidus is None:
+            raise ValueError("액상선 예측값이 없어 공통 젖음 온도를 계산할 수 없습니다.")
+        liquidus_value = float(liquidus)
+        if not math.isfinite(liquidus_value):
+            raise ValueError("액상선 예측값이 유한하지 않습니다.")
+        return liquidus_value
 
     def compare_wetting_temp_c(self, comp_a, comp_b, user_wetting_temp_c=None):
         """
@@ -855,9 +962,22 @@ class AlloyAnalyzer:
             wetting_temp_basis=wetting_temp_basis,
             include_wetting_grid=include_wetting_grid,
         )
+        # Preserve the untouched composition-model estimate before any DB blend.
+        # This is the fallback for genuinely unregistered/out-of-domain alloys.
+        try:
+            raw_model_tensile = props.get("tensile_strength")
+            if raw_model_tensile is not None:
+                props["tensile_strength_model_mpa"] = float(raw_model_tensile)
+        except Exception:
+            pass
+        props["density"] = None
         try:
             best_density = (best or {}).get("density")
-            if best_density is not None:
+            if (
+                best_density is not None
+                and score is not None
+                and float(score) <= _DB_EXACT_EPS
+            ):
                 props["density"] = float(best_density)
         except Exception:
             pass
@@ -939,21 +1059,6 @@ class AlloyAnalyzer:
                 props["tensile_strength_lit_mpa"] = float(strength_lit["tensile_mpa"])
                 if strength_lit.get("tensile_range"):
                     props["tensile_strength_lit_range_mpa"] = list(strength_lit["tensile_range"])
-                # DB가 멀 때만 문헌 참고치로 인장을 소폭 보정 (비교·신규 조성)
-                if db_w <= 0.1:
-                    try:
-                        d_lit = float(strength_lit.get("best_dist", 999.0))
-                        if d_lit <= 2.5:
-                            lit_w = min(0.25, 1.0 / (1.0 + d_lit / 1.2))
-                            tv = props.get("tensile_strength")
-                            lv = float(strength_lit["tensile_mpa"])
-                            if tv is not None and lit_w > 0.0:
-                                props["tensile_strength"] = float(tv) * (1.0 - lit_w) + lv * lit_w
-                                props["yield_strength"] = float(props["yield_strength"]) * (1.0 - lit_w) + lv * 0.78 * lit_w
-                                prop_sources["tensile_strength"] = f"LIT(blend,w={lit_w:.2f})"
-                                prop_sources["yield_strength"] = f"LIT(blend,w={lit_w:.2f})"
-                    except Exception:
-                        pass
         except Exception:
             strength_lit = None
 
@@ -983,16 +1088,10 @@ class AlloyAnalyzer:
         if str(prop_sources.get("yield_strength", "")).startswith("DB(blend"):
             props["yield_strength_basis"] = "db_blend"
 
-        # 인장: 근접 블렌드·문헌 소폭 보정 없으면 MODEL 대신 BD IDW(또는 문헌) 표시
-        try:
-            mdl_t = props.get("tensile_strength")
-            if mdl_t is not None:
-                props["tensile_strength_model_mpa"] = float(mdl_t)
-        except Exception:
-            pass
+        # 인장: exact는 DB 평균, 가까운 미등록 조성은 MODEL+DB 블렌드,
+        # 먼 미등록 조성은 조성 모델을 유지한다. 문헌값은 별도 참고치만 제공한다.
         tv = props.get("tensile_strength_db_mpa")
-        lv = props.get("tensile_strength_lit_mpa")
-        if tv is not None:
+        if tv is not None and db_exact_hit:
             try:
                 props["tensile_strength"] = float(tv)
                 props["tensile_strength_basis"] = "db_priority"
@@ -1002,15 +1101,10 @@ class AlloyAnalyzer:
                 )
             except Exception:
                 pass
-        elif lv is not None and prop_sources.get("tensile_strength") == "MODEL":
-            try:
-                props["tensile_strength"] = float(lv)
-                props["tensile_strength_basis"] = "lit_ref"
-                prop_sources["tensile_strength"] = "LIT(ref)"
-            except Exception:
-                pass
-        elif str(prop_sources.get("tensile_strength", "")).startswith("LIT"):
-            props["tensile_strength_basis"] = "lit_blend"
+        elif db_w > 0.0 and str(prop_sources.get("tensile_strength", "")).startswith("DB(blend"):
+            props["tensile_strength_basis"] = "db_blend"
+        else:
+            props["tensile_strength_basis"] = "model_prediction"
 
         # 최종 물리 제약: 항복강도는 인장강도를 넘지 않도록 정렬.
         try:
@@ -1027,14 +1121,25 @@ class AlloyAnalyzer:
         except Exception:
             pass
 
+        mechanical_metadata = _mechanical_property_metadata(
+            props, prop_sources, db_best_dist
+        )
+        props["mechanical_property_metadata"] = mechanical_metadata
+        if "shear_strength" in mechanical_metadata:
+            props["shear_metadata"] = dict(mechanical_metadata["shear_strength"])
+
         # Evidence/provenance for transparency in UI
         md = melting_detail if isinstance(melting_detail, dict) else {}
         melting_dist = md.get("best_dist", score)
         melting_conf = self._dist_conf(melting_dist)
 
         wet_neighbors = []
-        if isinstance(props, dict) and isinstance(props.get("wetting_neighbors"), list):
-            wet_neighbors = props.get("wetting_neighbors")
+        if isinstance(props, dict):
+            confidence_neighbors = props.get("wetting_confidence_neighbors")
+            if isinstance(confidence_neighbors, list) and confidence_neighbors:
+                wet_neighbors = confidence_neighbors
+            elif isinstance(props.get("wetting_neighbors"), list):
+                wet_neighbors = props.get("wetting_neighbors")
         wet_conf = self._wetting_conf_from_neighbors(wet_neighbors) if wet_neighbors else 0.0
 
         _, unknown_total = self._unknown_element_profile(norm)
@@ -1095,7 +1200,10 @@ class AlloyAnalyzer:
             norm,
             mode=mode,
             literature_mode=literature_mode,
-            extra=f"mv={_mv}|dbfp={getattr(self, '_solder_db_fingerprint', '') or ''}",
+            extra=(
+                f"mv={_mv}|dbfp={getattr(self, '_solder_db_fingerprint', '') or ''}"
+                f"|report_policy={_AI_REPORT_POLICY_VERSION}"
+            ),
         )
         db_exact_hit = (score is not None and float(score) <= _DB_EXACT_EPS)
 

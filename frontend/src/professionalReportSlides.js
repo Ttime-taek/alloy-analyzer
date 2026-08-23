@@ -6,12 +6,24 @@
 
 
 
+function optionalFiniteNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
 function fmtNum(v, digits = 1) {
+  const n = optionalFiniteNumber(v);
+  return n == null ? "N/A" : n.toFixed(digits);
+}
 
-  const n = Number(v);
-
-  return Number.isFinite(n) ? n.toFixed(digits) : "—";
-
+function fmtDeltaOrNA(a, b, digits = 1) {
+  const left = optionalFiniteNumber(a);
+  const right = optionalFiniteNumber(b);
+  return left == null || right == null ? "N/A" : (right - left).toFixed(digits);
 }
 
 
@@ -111,19 +123,221 @@ function extractEngBullets(engText, max = 6) {
 
 function techSummaryLead(result, meta) {
   const best = result?.best_name ? ` · DB 매칭: ${result.best_name}` : "";
-  const conf = Number.isFinite(Number(result?.confidence_overall))
-    ? ` · 종합 신뢰도 ${fmtNum(result?.confidence_overall, 0)}%`
+  const conf = optionalFiniteNumber(result?.confidence_overall) != null
+    ? ` · 조성·융점/젖음 근거 신뢰도 ${fmtNum(result?.confidence_overall, 0)}%`
     : "";
-  const s = Number(result?.solidus);
-  const l = Number(result?.liquidus);
-  const p = Number(result?.peak);
-  const range = Number.isFinite(s) && Number.isFinite(l) ? ` (Δ ${fmtNum(l - s, 1)} ℃)` : "";
+  const s = optionalFiniteNumber(result?.solidus);
+  const l = optionalFiniteNumber(result?.liquidus);
+  const p = optionalFiniteNumber(result?.peak);
+  const range = s != null && l != null ? ` (Δ ${fmtNum(l - s, 1)} ℃)` : "";
   return `조성 ${meta.composition} 기준 추정 융점: 고상선 ${fmtNum(s)} ℃, 액상선 ${fmtNum(l)} ℃${range}, 계산 피크(참고) ${fmtNum(p)} ℃.${best}${conf}`;
 }
 
 function fmtMaybe(v, digits = 1) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toFixed(digits) : null;
+  const n = optionalFiniteNumber(v);
+  return n == null ? null : n.toFixed(digits);
+}
+
+function reportOpaqueProvenanceField(metadata, names) {
+  const values = names
+    .filter((name) => Object.prototype.hasOwnProperty.call(metadata || {}, name))
+    .map((name) => (typeof metadata[name] === "string" ? metadata[name].trim() : ""));
+  if (!values.length || values.some((value) => !value)) return "";
+  return new Set(values).size === 1 ? values[0] : "";
+}
+
+function reportPlainMetadata(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function reportMechanicalDescriptor(result, key) {
+  const propsContainer = result?.props?.mechanical_property_metadata;
+  const evidenceContainer = result?.evidence?.mechanical_properties;
+  if (
+    (propsContainer != null && !reportPlainMetadata(propsContainer)) ||
+    (evidenceContainer != null && !reportPlainMetadata(evidenceContainer))
+  ) {
+    return null;
+  }
+  const propsRaw = propsContainer?.[key];
+  const evidenceRaw = evidenceContainer?.[key];
+  const shearRaw = key === "shear_strength" ? result?.props?.shear_metadata : null;
+  if (
+    (propsRaw != null && !reportPlainMetadata(propsRaw)) ||
+    (evidenceRaw != null && !reportPlainMetadata(evidenceRaw)) ||
+    (shearRaw != null && !reportPlainMetadata(shearRaw))
+  ) {
+    return null;
+  }
+  const propsMetadata = reportPlainMetadata(propsRaw);
+  const evidenceMetadata = reportPlainMetadata(evidenceRaw);
+  const shearMetadata = key === "shear_strength"
+    ? reportPlainMetadata(shearRaw)
+    : null;
+  const selected = propsMetadata || evidenceMetadata || shearMetadata;
+  if (!selected) return null;
+  const signature = (metadata) => ({
+    sourceType: reportOpaqueProvenanceField(metadata, ["source_type"]),
+    valueType: reportOpaqueProvenanceField(metadata, ["value_type"]),
+    status: reportOpaqueProvenanceField(metadata, ["verification_status"]),
+    allowed: metadata.comparison_allowed === true,
+    sourceId: reportOpaqueProvenanceField(metadata, ["source_identifier", "source_id", "test_series_id"]),
+    basis: reportOpaqueProvenanceField(metadata, ["comparison_basis", "test_standard", "test_method"])
+  });
+  const descriptor = signature(selected);
+  const signatures = [propsMetadata, evidenceMetadata, shearMetadata]
+    .filter(Boolean)
+    .map(signature);
+  if (signatures.some((item) => JSON.stringify(item) !== JSON.stringify(descriptor))) {
+    return null;
+  }
+  const allowedPairs = new Set([
+    "measured_db:measured",
+    "verified_property_db:verified_measured_mean",
+    "literature:literature_reference"
+  ]);
+  return {
+    ...descriptor,
+    metadata: selected,
+    verified:
+      descriptor.allowed &&
+      descriptor.status === "verified" &&
+      allowedPairs.has(`${descriptor.sourceType}:${descriptor.valueType}`) &&
+      Boolean(descriptor.sourceId && descriptor.basis)
+  };
+}
+
+function reportWettingDescriptor(result) {
+  const propsRaw = result?.props?.wetting_metadata;
+  const evidenceRaw = result?.evidence?.wetting;
+  if (
+    (propsRaw != null && !reportPlainMetadata(propsRaw)) ||
+    (evidenceRaw != null && !reportPlainMetadata(evidenceRaw))
+  ) {
+    return null;
+  }
+  const propsMetadata = reportPlainMetadata(propsRaw);
+  const evidenceMetadata = reportPlainMetadata(evidenceRaw);
+  const selected = propsMetadata || evidenceMetadata;
+  if (!selected) return null;
+  const signature = (metadata) => ({
+    kind: reportOpaqueProvenanceField(metadata, ["source_kind"]),
+    valueType: reportOpaqueProvenanceField(metadata, ["value_type"]),
+    status: reportOpaqueProvenanceField(metadata, ["verification_status"]),
+    allowed: metadata.comparison_allowed === true,
+    sourceId: reportOpaqueProvenanceField(metadata, ["source_identifier", "source_id", "dataset_id"]),
+    basis: reportOpaqueProvenanceField(metadata, ["comparison_basis", "basis"])
+  });
+  const descriptor = signature(selected);
+  if (propsMetadata && evidenceMetadata) {
+    if (JSON.stringify(descriptor) !== JSON.stringify(signature(evidenceMetadata))) return null;
+  }
+  const validPair =
+    (descriptor.kind === "measured_db" && ["measured", "direct_db_record"].includes(descriptor.valueType)) ||
+    (descriptor.kind === "idw_prediction" && descriptor.valueType === "idw_prediction");
+  const allowedBases = new Set(["auto_liq_plus_30", "compare_shared", "user"]);
+  const parentBasis = typeof result?.props?.wetting_temp_basis === "string"
+    ? result.props.wetting_temp_basis.trim()
+    : "";
+  const temperature = optionalFiniteNumber(result?.props?.wetting_temp_c);
+  const evidenceTemperature = optionalFiniteNumber(result?.evidence?.wetting?.temperature_c);
+  const metadataTemperatures = [propsMetadata, evidenceMetadata]
+    .filter(Boolean)
+    .map((metadata) => optionalFiniteNumber(metadata.temperature_c));
+  const temperatureCopiesAgree =
+    temperature != null &&
+    evidenceMetadata != null &&
+    evidenceTemperature != null &&
+    Math.abs(evidenceTemperature - temperature) < 1e-6 &&
+    metadataTemperatures.every(
+      (metadataTemperature) =>
+        metadataTemperature != null && Math.abs(metadataTemperature - temperature) < 1e-6
+    );
+  return {
+    ...descriptor,
+    metadata: selected,
+    verified:
+      descriptor.allowed &&
+      descriptor.status === "verified" &&
+      validPair &&
+      Boolean(descriptor.sourceId) &&
+      allowedBases.has(descriptor.basis) &&
+      parentBasis === descriptor.basis &&
+      temperatureCopiesAgree
+  };
+}
+
+function reportWettingSourceDescriptor(result) {
+  const propsRaw = result?.props?.wetting_metadata;
+  const evidenceRaw = result?.evidence?.wetting;
+  if (
+    (propsRaw != null && !reportPlainMetadata(propsRaw)) ||
+    (evidenceRaw != null && !reportPlainMetadata(evidenceRaw))
+  ) return null;
+  const copies = [reportPlainMetadata(propsRaw), reportPlainMetadata(evidenceRaw)].filter(Boolean);
+  if (!copies.length) return null;
+  const sourceSignature = (metadata) => ({
+    kind: reportOpaqueProvenanceField(metadata, ["source_kind"]),
+    valueType: reportOpaqueProvenanceField(metadata, ["value_type"])
+  });
+  const first = sourceSignature(copies[0]);
+  if (copies.some((metadata) => JSON.stringify(sourceSignature(metadata)) !== JSON.stringify(first))) {
+    return null;
+  }
+  const validPair =
+    (first.kind === "measured_db" && ["measured", "direct_db_record"].includes(first.valueType)) ||
+    (first.kind === "idw_prediction" && first.valueType === "idw_prediction");
+  return validPair ? first : null;
+}
+
+function reportWettingSourceKind(result) {
+  return reportWettingSourceDescriptor(result)?.kind || "legacy_unverified";
+}
+
+function reportWettingSourceLabel(result) {
+  const kind = reportWettingSourceKind(result);
+  if (kind === "measured_db") return "측정 DB";
+  if (kind === "idw_prediction") return "IDW 예측";
+  if (kind === "heuristic") return "휴리스틱 추정";
+  return "근거 미확인";
+}
+
+function reportWettingVerificationLabel(result) {
+  return reportWettingDescriptor(result)?.verified === true
+    ? "검증 완료"
+    : "검증 미완료 · 우열/추천 제외";
+}
+
+function reportMechanicalMetadata(result, key) {
+  return reportMechanicalDescriptor(result, key)?.metadata || null;
+}
+
+function reportMechanicalSourceLabel(result, key) {
+  const metadata = reportMechanicalMetadata(result, key) || {};
+  const normalize = (value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const valueType = normalize(metadata.value_type);
+  const sourceType = normalize(metadata.source_type);
+  const sourceLabel = String(metadata.source_label || "").trim().toLowerCase();
+  const basis = normalize(metadata.basis ?? result?.props?.[`${key}_basis`]);
+  const combined = `${valueType} ${sourceType} ${sourceLabel} ${basis}`;
+
+  if (valueType === "legacy_measured_mean") return "DB 평균(시험조건 미확인)";
+  if (combined.includes("idw")) return "DB IDW 예측";
+  if (valueType === "legacy_db_estimate" || sourceType === "legacy_property_db") {
+    return "DB 추정(시험조건 미확인)";
+  }
+  if (valueType === "measured" || valueType === "measured_db") return "DB 측정값";
+  if (combined.includes("lit") || sourceType === "literature") return "문헌 참고";
+  if (combined.includes("model") || sourceType === "model") return "모델 예측";
+  if (combined.includes("db")) return "DB 값(시험조건 미확인)";
+  return "근거 미확인";
+}
+
+function reportMechanicalWarning(result, key) {
+  const descriptor = reportMechanicalDescriptor(result, key);
+  if (!descriptor) return "시험조건·원출처 미확인/검증 미완료 · 참고 전용";
+  if (descriptor.verified) return "검증 완료";
+  return "시험조건·원출처 미확인/검증 미완료 · 참고 전용";
 }
 
 function shortWettingBasis(basis) {
@@ -143,41 +357,68 @@ function buildPropsKpis(result) {
   const t0 = fmtMaybe(props?.wetting_t0_pred_s, 2);
   const tc = fmtMaybe(props?.wetting_temp_c, 0);
   const basis = String(props?.wetting_temp_basis || "").trim();
+  const wettingSource = reportWettingSourceLabel(result);
+  const wettingVerification = reportWettingVerificationLabel(result);
   if (fmax) {
     let hint = "";
     if (t0) hint += `T0 ${t0}s`;
     if (tc) hint += `${hint ? " / " : ""}${tc}℃`;
     const sb = shortWettingBasis(basis);
     if (sb) hint += `${hint ? " · " : ""}${sb}`;
-    kpis.push({ label: "젖음", value: `Fmax ${fmax} mN`, hint: hint || undefined });
+    hint += `${hint ? " · " : ""}${wettingVerification}`;
+    kpis.push({ label: `젖음 (${wettingSource})`, value: `Fmax ${fmax} mN`, hint: hint || undefined });
+  } else {
+    kpis.push({ label: `젖음 (${wettingSource})`, value: "N/A", hint: wettingVerification });
   }
 
   const tensileBasis = props?.tensile_strength_basis;
   const tensile = fmtMaybe(props?.tensile_strength, 1);
   if (tensile) {
     let tLabel = "인장";
-    if (tensileBasis === "db_idw") tLabel = "인장 (BD유사)";
+    if (tensileBasis === "db_idw") tLabel = "인장 (DB유사)";
     else if (tensileBasis === "lit_ref") tLabel = "인장 (문헌)";
     else if (tensileBasis === "lit_blend") tLabel = "인장 (문헌보정)";
-    else if (tensileBasis === "db_blend") tLabel = "인장 (BD블렌드)";
-    kpis.push({ label: tLabel, value: `${tensile} MPa` });
+    else if (tensileBasis === "db_blend") tLabel = "인장 (DB블렌드)";
+    else if (tensileBasis === "model_prediction") tLabel = "인장 (조성 모델 예측)";
+    const tensileWarning = reportMechanicalWarning(result, "tensile_strength");
+    kpis.push({
+      label: `${tLabel}${tensileWarning && tensileWarning !== "검증 완료" ? " · 참고 전용" : ""}`,
+      value: `${tensile} MPa`,
+      hint: tensileWarning
+        ? `${reportMechanicalSourceLabel(result, "tensile_strength")} · ${tensileWarning}`
+        : undefined
+    });
   } else {
     const tdb = fmtMaybe(props?.tensile_strength_db_mpa, 1);
-    if (tdb) kpis.push({ label: "물성 DB 인장", value: `${tdb} MPa` });
+    kpis.push({
+      label: "물성 DB 인장 · 검증 미완료",
+      value: tdb ? `${tdb} MPa` : "N/A",
+      hint: "시험조건 미확인 · 비교/추천 제외"
+    });
   }
 
-  const shearBasis = props?.shear_strength_basis;
   const shear = fmtMaybe(props?.shear_strength, 1);
-  if (shear) {
-    const sLabel = shearBasis === "db_idw" ? "전단 (BD유사)" : "전단";
-    kpis.push({ label: sLabel, value: `${shear} MPa` });
-  }
+  const shearSource = reportMechanicalSourceLabel(result, "shear_strength");
+  const shearWarning = reportMechanicalWarning(result, "shear_strength");
+  kpis.push({
+    label: `전단 · ${shearSource}`,
+    value: shear ? `${shear} MPa` : "N/A",
+    hint: shearWarning || "검증 상태 미확인 · 비교/추천 제외"
+  });
 
   const ys = fmtMaybe(props?.yield_strength, 1);
-  if (ys) kpis.push({ label: "예측 항복", value: `${ys} MPa` });
+  kpis.push({
+    label: "항복강도 · 검증 미완료",
+    value: ys ? `${ys} MPa` : "N/A",
+    hint: "검증 미완료 · 시험조건 확인 필요"
+  });
 
   const el = fmtMaybe(props?.elongation, 1);
-  if (el) kpis.push({ label: "연신율", value: `${el} %` });
+  kpis.push({
+    label: "연신율 · 검증 미완료",
+    value: el ? `${el} %` : "N/A",
+    hint: "검증 미완료 · 시험조건 확인 필요"
+  });
 
   return kpis;
 }
@@ -228,12 +469,14 @@ function wettingSlideContent(result) {
   const rows = getWettingByTempRows(result);
   const notes = propsNotesBullets(result, 2);
   const repTc = fmtMaybe(result?.props?.wetting_temp_c, 0);
+  const sourceLabel = reportWettingSourceLabel(result);
+  const verificationLabel = reportWettingVerificationLabel(result);
 
   if (rows.length) {
     const blocks = [
       {
         type: "lead",
-        text: `IDW 젖음 예측(측정 DB 250–290℃). Fmax·인장·전단 등 KPI는 「핵심 지표 · 조성」 슬라이드${repTc ? ` (대표 ${repTc}℃)` : ""}에 있습니다.`
+        text: `${sourceLabel} 기반 젖음 값(250–290℃) · ${verificationLabel}. Fmax·인장과 검증 보류 전단은 「핵심 지표 · 조성」 슬라이드${repTc ? ` (대표 ${repTc}℃)` : ""}에 있습니다.`
       },
       { type: "html", html: renderWettingTableHtml(rows) }
     ];
@@ -434,17 +677,17 @@ function elementsSlideContent(result) {
 
 function inferenceSlideContent(result) {
   const inf = result?.alloy_inference;
-  if (!inf || inf.solidus == null) return { lead: "", bullets: [] };
+  if (!inf || optionalFiniteNumber(inf.solidus) == null) return { lead: "", bullets: [] };
 
-  const infS = Number(inf.solidus);
-  const infL = Number(inf.liquidus);
-  const infP = Number(inf.recommended_peak_c);
-  const engS = Number(result?.solidus);
-  const engL = Number(result?.liquidus);
-  const engP = Number(result?.peak);
+  const infS = optionalFiniteNumber(inf.solidus);
+  const infL = optionalFiniteNumber(inf.liquidus);
+  const infP = optionalFiniteNumber(inf.recommended_peak_c);
+  const engS = optionalFiniteNumber(result?.solidus);
+  const engL = optionalFiniteNumber(result?.liquidus);
+  const engP = optionalFiniteNumber(result?.peak);
 
   const lead =
-    Number.isFinite(engS) && Number.isFinite(engL)
+    engS != null && engL != null
       ? `핵심 하이브리드 엔진 계산값 — 고상 ${fmtNum(engS)} ℃ · 액상 ${fmtNum(engL)} ℃ · 계산 피크 ${fmtNum(engP)} ℃ · Δ ${fmtNum(engL - engS)} ℃`
       : "핵심 융점 계산은 하이브리드 엔진 값을 사용합니다.";
 
@@ -452,18 +695,19 @@ function inferenceSlideContent(result) {
   bullets.push(
     `교차확인 전용 — 유사 합금 DB 보간(3-NN 추론 모델): 고상 ${fmtNum(infS)} ℃ · 액상 ${fmtNum(infL)} ℃`
   );
-  if (Number.isFinite(engS) && Number.isFinite(engL)) {
+  if (infS != null && infL != null && engS != null && engL != null) {
     const dS = infS - engS;
     const dL = infL - engL;
-    const dP = infP - engP;
+    const dP = infP != null && engP != null ? infP - engP : null;
     const sign = (d) => (d >= 0 ? "+" : "");
+    const peakDelta = dP == null ? "N/A" : `${sign(dP)}${fmtNum(dP)}`;
     bullets.push(
-      `엔진 대비 (보간 − 엔진): 고상 ${sign(dS)}${fmtNum(dS)} ℃ · 액상 ${sign(dL)}${fmtNum(dL)} ℃ · 피크 ${sign(dP)}${fmtNum(dP)} ℃`
+      `엔진 대비 (보간 − 엔진): 고상 ${sign(dS)}${fmtNum(dS)} ℃ · 액상 ${sign(dL)}${fmtNum(dL)} ℃ · 피크 ${peakDelta} ℃`
     );
   }
 
   if (Array.isArray(inf.neighbors) && inf.neighbors.length) {
-    const top = inf.neighbors.filter((n) => Number(n?.weight) > 0.001).slice(0, 3);
+    const top = inf.neighbors.filter((n) => (optionalFiniteNumber(n?.weight) ?? 0) > 0.001).slice(0, 3);
     if (top.length) {
       bullets.push(`유사 DB: ${top.map((n) => `${n.name || "?"}(w=${fmtNum(n.weight, 3)})`).join(" · ")}`);
     }
@@ -536,7 +780,7 @@ export function buildProfessionalReportSlides(payload) {
 
 
 
-  const processAllowed = result?.prediction_contract?.process_recommendation?.allowed !== false;
+  const processAllowed = result?.prediction_contract?.process_recommendation?.allowed === true;
 
   const heroKpis = [
 
@@ -548,7 +792,7 @@ export function buildProfessionalReportSlides(payload) {
 
     {
 
-      label: "종합 신뢰도",
+      label: "조성·융점/젖음 근거 신뢰도",
 
       value: `${fmtNum(result?.confidence_overall, 0)} %`,
 
@@ -654,7 +898,7 @@ export function buildProfessionalReportSlides(payload) {
     ${propsKpis.length ? `<div class="pro-metrics-kpis">${renderKpiCellsHtml(propsKpis.slice(0, 6))}</div>` : ""}
   </div>
 
-  <div class="pro-callout">융점 창: ${fmtNum(result?.solidus)} – ${fmtNum(result?.liquidus)} ℃ · Δ ${fmtNum(Number(result?.liquidus) - Number(result?.solidus))} ℃</div>
+  <div class="pro-callout">융점 창: ${fmtNum(result?.solidus)} – ${fmtNum(result?.liquidus)} ℃ · Δ ${fmtDeltaOrNA(result?.solidus, result?.liquidus)} ℃</div>
 
 </div>`
 
@@ -724,7 +968,7 @@ export function buildProfessionalReportSlides(payload) {
 
 
 
-  const meltRecap = `고상 ${fmtNum(result?.solidus)} – 액상 ${fmtNum(result?.liquidus)} ℃ · Δ ${fmtNum(Number(result?.liquidus) - Number(result?.solidus))} ℃ · 신뢰도 ${fmtNum(result?.confidence_overall, 0)}%`;
+  const meltRecap = `고상 ${fmtNum(result?.solidus)} – 액상 ${fmtNum(result?.liquidus)} ℃ · Δ ${fmtDeltaOrNA(result?.solidus, result?.liquidus)} ℃ · 조성·융점/젖음 근거 신뢰도 ${fmtNum(result?.confidence_overall, 0)}%`;
 
   slides.push({
     id: "closing",

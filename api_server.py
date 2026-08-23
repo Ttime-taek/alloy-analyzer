@@ -396,9 +396,9 @@ class AnalysisResponse(BaseModel):
     confidence: float
     confidence_overall: float
 
-    solidus: float
-    liquidus: float
-    peak: float
+    solidus: float | None
+    liquidus: float | None
+    peak: float | None
 
     phase: str
     imc: list[str]
@@ -441,6 +441,10 @@ class AnalysisResponse(BaseModel):
         default_factory=dict,
         description="3-NN IDW+릿지 기반 고상/액상 추정, 권장 피크, 공정 주의 리포트",
     )
+    prediction_contract: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="공정 추천 허용 여부와 예측 사용 범위를 명시하는 계약",
+    )
 
     @field_validator(
         "phase",
@@ -474,7 +478,7 @@ class CompareRequest(BaseModel):
     comp_b: Dict[str, float]
     wetting_temp_c: float | None = Field(
         default=None,
-        description="젖음 대표 온도(℃). 생략 시 A·B 공통: 각 액상선+30℃ 스냅값 중 더 높은 BD 격자 온도.",
+        description="젖음 대표 온도(℃). 생략 시 A·B 공통: 각 액상선+30℃ 스냅값 중 더 높은 DB 격자 온도.",
     )
     include_wetting_grid: bool = Field(
         default=False,
@@ -507,9 +511,9 @@ class CompareRequest(BaseModel):
 class CompareOne(BaseModel):
     name: str | None
     confidence: float
-    solidus: float
-    liquidus: float
-    peak: float
+    solidus: float | None
+    liquidus: float | None
+    peak: float | None
     props: Dict[str, Any]
     imc_line: str = Field(
         default="",
@@ -1081,6 +1085,21 @@ def _source_strings(value: Any) -> list[str]:
     return out
 
 
+def _optional_finite_float(value: Any) -> float | None:
+    """Preserve missing temperatures instead of fabricating a physical 0 ℃ value."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (dict, list, tuple, set)):
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _core_result_payload(
     result: Dict[str, Any],
     *,
@@ -1096,9 +1115,9 @@ def _core_result_payload(
         "score": float(result.get("score", 0.0) or 0.0),
         "confidence": float(result.get("confidence", 0.0) or 0.0),
         "confidence_overall": float(result.get("confidence_overall", 0.0) or 0.0),
-        "solidus": float(result.get("solidus", 0.0) or 0.0),
-        "liquidus": float(result.get("liquidus", 0.0) or 0.0),
-        "peak": float(result.get("peak", 0.0) or 0.0),
+        "solidus": _optional_finite_float(result.get("solidus")),
+        "liquidus": _optional_finite_float(result.get("liquidus")),
+        "peak": _optional_finite_float(result.get("peak")),
         "phase": _coerce_response_str(result.get("phase")),
         "imc": [str(x) for x in (result.get("imc") or [])],
         "risk": [str(x) for x in (result.get("risk") or [])],
@@ -1321,14 +1340,16 @@ def explain_v1(
         knn = analyzer.find_knn(norm, k=3)
     except Exception:
         knn = []
+    report_result = dict(result)
+    report_result["prediction_contract"] = core_contract
     try:
-        eng_report = engine.build_eng_report(comp_str, result, knn)
+        eng_report = engine.build_eng_report(comp_str, report_result, knn)
     except Exception:
         eng_report = ""
     lab_report = ""
     if (req.mode or "eng").strip().lower() == "lab":
         try:
-            lab_report = engine.build_lab_report(comp_str, result, knn)
+            lab_report = engine.build_lab_report(comp_str, report_result, knn)
         except Exception:
             lab_report = ""
     source = str(result.get("ai_source") or "local")
@@ -1467,6 +1488,17 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
 
     best = result.get("best") or {}
     norm = result.get("norm") or {}
+    contract = _prediction_contract_builder()(
+        result,
+        {},
+        _analysis_context_for_contract(
+            result,
+            mode=req.mode,
+            literature_mode=req.literature_mode,
+        ),
+    )
+    report_result = dict(result)
+    report_result["prediction_contract"] = contract
     # GUI와 동일한 형태의 엔지니어 보고서 텍스트 생성
     try:
         comp_str = ", ".join(
@@ -1479,13 +1511,13 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
     except Exception:
         knn = []
     try:
-        eng_report = _ai_engine.build_eng_report(comp_str, result, knn)
+        eng_report = _ai_engine.build_eng_report(comp_str, report_result, knn)
     except Exception:
         eng_report = ""
     lab_report = ""
     if (req.mode or "eng").strip().lower() == "lab":
         try:
-            lab_report = _ai_engine.build_lab_report(comp_str, result, knn)
+            lab_report = _ai_engine.build_lab_report(comp_str, report_result, knn)
         except Exception:
             lab_report = ""
     return AnalysisResponse(
@@ -1494,9 +1526,9 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
         score=float(result.get("score", 0.0) or 0.0),
         confidence=float(result.get("confidence", 0.0) or 0.0),
         confidence_overall=float(result.get("confidence_overall", 0.0) or 0.0),
-        solidus=float(result.get("solidus", 0.0) or 0.0),
-        liquidus=float(result.get("liquidus", 0.0) or 0.0),
-        peak=float(result.get("peak", 0.0) or 0.0),
+        solidus=_optional_finite_float(result.get("solidus")),
+        liquidus=_optional_finite_float(result.get("liquidus")),
+        peak=_optional_finite_float(result.get("peak")),
         phase=result.get("phase") or "",
         imc=[str(x) for x in (result.get("imc") or [])],
         risk=[str(x) for x in (result.get("risk") or [])],
@@ -1534,6 +1566,7 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
         comp_input_wt_sum=float(sum_in),
         composition_notes=list(comp_notes),
         alloy_inference=result.get("alloy_inference") or {},
+        prediction_contract=contract,
     )
 
 
@@ -1766,9 +1799,9 @@ async def compare(req: CompareRequest) -> CompareResponse:
         return CompareOne(
             name=best.get("name"),
             confidence=float(r.get("confidence", 0.0) or 0.0),
-            solidus=float(r.get("solidus", 0.0) or 0.0),
-            liquidus=float(r.get("liquidus", 0.0) or 0.0),
-            peak=float(r.get("peak", 0.0) or 0.0),
+            solidus=_optional_finite_float(r.get("solidus")),
+            liquidus=_optional_finite_float(r.get("liquidus")),
+            peak=_optional_finite_float(r.get("peak")),
             props=r.get("props") or {},
             imc_line=_one_line(imc_list, "IMC 요약 없음"),
             risk_line=_one_line(risk_list, "리스크 특이사항 없음"),

@@ -18,7 +18,7 @@ except ImportError:
     from test7.solder_db import SOLDER_DB_FINGERPRINT, classify_family
 
 
-CONTRACT_VERSION = "1.1"
+CONTRACT_VERSION = "1.2"
 POLICY_VERSION = "prediction-use-policy-v1"
 
 STATE_ORDER = {
@@ -65,15 +65,65 @@ REASON_LABEL_KO = {
     "PROCESS_RECOMMENDATION_REFUSED": "예측 근거가 약하거나 DB 범위 밖이라 리플로우 권장값을 내지 않습니다.",
     "PROCESS_LIMIT_EXCEEDED": "피크와 오븐 편차를 반영하면 부품 허용온도를 넘습니다.",
     "INVALID_MELTING_ORDER": "고상선·액상선·피크의 물리적 순서가 맞지 않습니다.",
+    "MECHANICAL_PROVENANCE_UNVERIFIED": (
+        "원 시험 출처·시험법·조건이 확인되지 않아 합금 간 정량 비교에 사용할 수 없습니다."
+    ),
 }
 
 
 def _finite_float(value: Any) -> float | None:
+    if type(value) is bool or isinstance(value, (dict, list, tuple, set)):
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
     try:
         out = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return out if out == out and abs(out) != float("inf") else None
+
+
+def _consistent_provenance_alias(mapping: Dict[str, Any], names: Iterable[str]) -> str:
+    """Return one real nonempty string only when every supplied alias agrees."""
+    values: list[str] = []
+    for name in names:
+        if name not in mapping:
+            continue
+        value = mapping.get(name)
+        if type(value) is not str or not value.strip():
+            return ""
+        values.append(value.strip())
+    return values[0] if values and len(set(values)) == 1 else ""
+
+
+def _verified_tensile_provenance_signature(value: Any) -> tuple[str, str, str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    source_type = value.get("source_type")
+    value_type = value.get("value_type")
+    source_identifier = _consistent_provenance_alias(
+        value, ("source_identifier", "source_id", "test_series_id")
+    )
+    comparison_basis = _consistent_provenance_alias(
+        value, ("comparison_basis", "test_standard", "test_method")
+    )
+    pair = (source_type, value_type)
+    if (
+        value.get("comparison_allowed") is not True
+        or value.get("verification_status") != "verified"
+        or type(source_type) is not str
+        or type(value_type) is not str
+        or pair
+        not in {
+            ("measured_db", "measured"),
+            ("verified_property_db", "verified_measured_mean"),
+            ("literature", "literature_reference"),
+        }
+        or not source_identifier
+        or not comparison_basis
+    ):
+        return None
+    return source_type, value_type, source_identifier, comparison_basis
 
 
 def _worst_state(states: Iterable[str]) -> str:
@@ -177,6 +227,9 @@ def _property_result(
         exact=bool(exact and point_f is not None),
         unsupported_elements=unsupported_elements,
     )
+    if point_f is None:
+        state = "unavailable"
+        reasons = ["NO_VALIDATION_DATA"]
     return {
         "point": round(point_f, 3) if point_f is not None else None,
         "unit": unit,
@@ -257,7 +310,9 @@ def build_prediction_contract(
     canonical_context = _canonical_analysis_context(result, analysis_context)
     neighbors = list((result.get("alloy_inference") or {}).get("neighbors") or [])[:3]
 
-    melting_exact = bool(melting_ev.get("forced_db")) or (
+    # Only the literal boolean True can assert a forced DB hit.  Strings such as
+    # "false" are untrusted payload data and must not become truthy exact matches.
+    melting_exact = melting_ev.get("forced_db") is True or (
         melting_distance is not None and melting_distance <= DB_EXACT_MATCH_EPS
     )
     tensile_exact = tensile_distance is not None and tensile_distance <= DB_EXACT_MATCH_EPS
@@ -302,6 +357,62 @@ def build_prediction_contract(
             },
         ),
     }
+
+    # 예측 거리/교차검증 상태와 원 측정값의 provenance는 서로 다른 축이다.
+    # 등록 조성의 exact hit이라도 시험 방법·조건이 없으면 B−A 비교를 허용하지 않는다.
+    mechanical_meta = props.get("mechanical_property_metadata")
+    tensile_meta_raw = (
+        mechanical_meta.get("tensile_strength")
+        if isinstance(mechanical_meta, dict)
+        else None
+    )
+    tensile_meta = tensile_meta_raw if isinstance(tensile_meta_raw, dict) else {}
+    verification_status = tensile_meta.get("verification_status")
+    evidence_mechanical_meta = evidence.get("mechanical_properties")
+    evidence_copy_present = bool(
+        ("mechanical_properties" in evidence and evidence_mechanical_meta is not None)
+        and (
+            not isinstance(evidence_mechanical_meta, dict)
+            or "tensile_strength" in evidence_mechanical_meta
+        )
+    )
+    evidence_tensile_raw = (
+        evidence_mechanical_meta.get("tensile_strength")
+        if isinstance(evidence_mechanical_meta, dict)
+        else None
+    )
+    props_signature = _verified_tensile_provenance_signature(tensile_meta_raw)
+    evidence_signature = (
+        _verified_tensile_provenance_signature(evidence_tensile_raw)
+        if evidence_copy_present
+        else props_signature
+    )
+    tensile_result = property_results["tensile_strength_mpa"]
+    comparison_allowed = bool(
+        tensile_result.get("point") is not None
+        and props_signature is not None
+        and evidence_signature == props_signature
+    )
+    tensile_result.update(
+        {
+            "provenance_status": str(
+                tensile_meta.get("provenance_status") or "unknown"
+            ),
+            "verification_status": str(verification_status or "unverified"),
+            "comparison_allowed": comparison_allowed,
+            "comparison_label_ko": (
+                "정량 비교 가능"
+                if comparison_allowed
+                else "시험조건 확인 전까지 정량 비교 금지"
+            ),
+        }
+    )
+    tensile_result["evidence"]["provenance"] = dict(tensile_meta)
+    if not comparison_allowed:
+        code = "MECHANICAL_PROVENANCE_UNVERIFIED"
+        if code not in tensile_result["reason_codes"]:
+            tensile_result["reason_codes"].append(code)
+            tensile_result["reason_labels_ko"].append(REASON_LABEL_KO[code])
 
     melting_state = _worst_state(
         [property_results["solidus_c"]["state"], property_results["liquidus_c"]["state"]]
@@ -404,6 +515,7 @@ def build_prediction_contract(
         },
         "disclaimer_ko": (
             "예측 구간은 현재 DB의 그룹 홀드아웃 잔차로 계산한 경험적 90% 범위입니다. "
+            "인장 DB 등록값도 원 시험출처·조건이 확인되기 전에는 합금 간 정량 비교에 사용하지 않습니다. "
             "공인 시험·DSC·인장 시험과 사내 공정 승인을 대체하지 않습니다."
         ),
     }

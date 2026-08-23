@@ -124,26 +124,30 @@ class StrengthPredictionTest(unittest.TestCase):
         self.assertLess(mdl["tensile_strength"], 82.0)
         self.assertLess(blend["tensile_strength"], 82.0)
         lit = nearest_strength_literature(norm)
-        self.assertIsNotNone(lit)
-        self.assertAlmostEqual(lit["tensile_mpa"], 65.0, delta=2.0)
+        self.assertIsNone(lit)
 
-    def test_far_properties_db_still_prioritizes_db_tensile(self):
+    def test_far_properties_db_keeps_the_composition_model_tensile(self):
         """물성 DB가 먼 조성은 DB를 덮어쓰지 않고 모델값을 유지해야 한다."""
         comp = {"Sn": 96.1, "Ag": 1.1, "Cu": 0.7, "Bi": 1.8, "Ni": 0.3}
         blend, mdl, _, _, _ = self._predict(comp)
         self.assertAlmostEqual(blend["shear_strength"], mdl["shear_strength"], delta=0.01)
         r = self.analyzer.analyze_all(comp)
-        self.assertEqual(r["props"].get("tensile_strength_basis"), "db_priority")
+        self.assertEqual(r["props"].get("tensile_strength_basis"), "model_prediction")
         self.assertEqual(r["props"].get("shear_strength_basis"), None)
         self.assertAlmostEqual(
             r["props"].get("tensile_strength"),
-            r["props"].get("tensile_strength_db_mpa"),
+            r["props"].get("tensile_strength_model_mpa"),
             delta=1e-6,
         )
-        self.assertNotAlmostEqual(r["props"].get("tensile_strength"), mdl["tensile_strength"], delta=0.5)
+        self.assertNotAlmostEqual(
+            r["props"].get("tensile_strength"),
+            r["props"].get("tensile_strength_db_mpa"),
+            delta=0.5,
+        )
+        self.assertAlmostEqual(r["props"].get("tensile_strength"), mdl["tensile_strength"], delta=0.5)
         self.assertAlmostEqual(r["props"].get("shear_strength"), mdl["shear_strength"], delta=0.5)
         self.assertGreater(r["props"].get("tensile_strength_model_mpa", 0), 65.0)
-        self.assertIn("DB(priority", r.get("evidence", {}).get("props", {}).get("tensile_strength", ""))
+        self.assertEqual(r.get("evidence", {}).get("props", {}).get("tensile_strength"), "MODEL")
         neighbors = r["props"].get("shear_neighbors") or []
         self.assertTrue(any("Bi" in str(n.get("alloy", "")) for n in neighbors))
 
@@ -155,12 +159,17 @@ class StrengthPredictionTest(unittest.TestCase):
         self.assertLess(r["props"].get("tensile_strength", 0), 105.0)
         self.assertGreater(r["props"].get("shear_strength", 0), 20.0)
         self.assertLess(r["props"].get("shear_strength", 0), 40.0)
-        self.assertEqual(r["props"].get("tensile_strength_basis"), "db_priority")
+        self.assertEqual(r["props"].get("tensile_strength_basis"), "model_prediction")
         self.assertEqual(r["props"].get("shear_strength_basis"), None)
         self.assertAlmostEqual(
             r["props"].get("tensile_strength", 0),
-            r["props"].get("tensile_strength_db_mpa", 0),
+            r["props"].get("tensile_strength_model_mpa", 0),
             delta=1e-6,
+        )
+        self.assertNotAlmostEqual(
+            r["props"].get("tensile_strength", 0),
+            r["props"].get("tensile_strength_db_mpa", 0),
+            delta=0.5,
         )
 
     def test_high_bi_anchor_near_literature(self):
@@ -173,7 +182,8 @@ class StrengthPredictionTest(unittest.TestCase):
         self.assertLess(r["props"].get("shear_strength", 0), 42.0)
         lit = nearest_strength_literature(comp)
         self.assertIsNotNone(lit)
-        self.assertAlmostEqual(float(lit["tensile_mpa"]), 110.0, delta=10.0)
+        self.assertAlmostEqual(float(lit["tensile_mpa"]), 58.7, delta=1e-6)
+        self.assertEqual(lit["refs"][0]["doi"], "10.3390/met9040462")
 
     def test_pure_snbi58_not_overestimated(self):
         """Ag가 거의 없는 Sn58Bi는 과거 고Bi A=80 곡선 과대평가를 피해야 한다."""

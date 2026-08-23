@@ -32,6 +32,7 @@ from .analyzer import AlloyAnalyzer
 from .ai_engine import AIEngine
 from .app_meta import about_text_gui, header_banner_text, window_title
 from .db_regression import predict_from_db
+from .prediction_contract import build_prediction_contract
 from .report import ReportBuilder
 from .utils import composition_to_string, log_exception
 
@@ -58,6 +59,475 @@ ROHS_DB = {
     "Se": {"name": "셀레늄 (Selenium)",    "limit_ppm": None, "regulation": "REACH 환경 모니터링"},
     "Te": {"name": "텔루륨 (Tellurium)",   "limit_ppm": None, "regulation": "REACH 환경 모니터링"},
 }
+
+_RADAR_PROPERTY_AXES = (
+    ("tensile_strength", "인장강도\n(MPa)", 150.0),
+    ("yield_strength", "항복강도\n(MPa)", 120.0),
+    ("elongation", "연신율\n(%)", 60.0),
+    ("shear_strength", "전단강도\n(MPa)", 150.0),
+    ("wetting_fmax_pred_mn", "Fmax\n(mN)", 3.0),
+)
+
+_MECHANICAL_SOURCE_TYPES = frozenset(
+    {
+        "legacy_property_db",
+        "model",
+        "literature",
+        "measured_db",
+        "verified_property_db",
+    }
+)
+_MECHANICAL_VALUE_TYPES = frozenset(
+    {
+        "legacy_measured_mean",
+        "idw_prediction",
+        "legacy_db_estimate",
+        "model_prediction",
+        "literature_reference",
+        "measured",
+        "verified_measured_mean",
+    }
+)
+_MECHANICAL_COMPARABLE_SOURCE_VALUE_PAIRS = frozenset(
+    {
+        ("measured_db", "measured"),
+        ("verified_property_db", "verified_measured_mean"),
+        ("literature", "literature_reference"),
+    }
+)
+_WETTING_SOURCE_VALUE_PAIRS = frozenset(
+    {
+        ("measured_db", "direct_db_record"),
+        ("measured_db", "measured"),
+        ("idw_prediction", "idw_prediction"),
+    }
+)
+_WETTING_TEMPERATURE_BASES = frozenset(
+    {"auto_liq_plus_30", "compare_shared", "user"}
+)
+_PROVENANCE_SOURCE_IDENTIFIER_FIELDS = (
+    "source_identifier",
+    "source_id",
+    "test_series_id",
+    "dataset_id",
+)
+_MECHANICAL_COMPARISON_BASIS_FIELDS = (
+    "comparison_basis",
+    "test_standard",
+    "test_method",
+)
+_WETTING_COMPARISON_BASIS_FIELDS = (
+    "comparison_basis",
+    "basis",
+    "test_standard",
+    "test_method",
+)
+
+
+def _strict_enum_string(mapping, key, allowed):
+    """Return only an explicitly allowed, real string metadata value."""
+    if not isinstance(mapping, dict):
+        return None
+    value = mapping.get(key)
+    if type(value) is not str or value not in allowed:
+        return None
+    return value
+
+
+def _metadata_string_alias(mapping, names):
+    """Read one nonempty alias value; reject malformed or conflicting copies."""
+    if not isinstance(mapping, dict):
+        return None
+    values = []
+    for name in names:
+        if name not in mapping:
+            continue
+        value = mapping.get(name)
+        if type(value) is not str:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        values.append(value)
+    if not values or any(value != values[0] for value in values[1:]):
+        return None
+    return values[0]
+
+
+def _optional_finite_float(value):
+    """Return a real numeric value without turning missing data into zero."""
+    if value is None:
+        return None
+    if type(value) is bool:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _process_recommendation_state(result):
+    """Read the process contract without coercion; missing/malformed always fails closed."""
+    result = result if isinstance(result, dict) else {}
+    contract = result.get("prediction_contract")
+    if not isinstance(contract, dict):
+        return False, None
+    process = contract.get("process_recommendation")
+    if not isinstance(process, dict) or process.get("allowed") is not True:
+        return False, None
+    recommended = _optional_finite_float(process.get("recommended_peak_c"))
+    raw_peak = _optional_finite_float(result.get("peak"))
+    return True, recommended if recommended is not None else raw_peak
+
+
+def _process_peak_display(result, digits=1):
+    """Return a recommendation label only for an explicitly allowed process contract."""
+    allowed, recommended = _process_recommendation_state(result)
+    value = recommended if allowed else _optional_finite_float(
+        result.get("peak") if isinstance(result, dict) else None
+    )
+    value_text = f"{value:.{int(digits)}f}℃" if value is not None else "N/A"
+    label = "권장 피크" if allowed else "엔진 참고 피크 · 추천 보류"
+    return f"{label} {value_text}"
+
+
+def _safe_reflow_profile_for_result(result):
+    """Return a derived IPC profile only when the process contract explicitly allows it."""
+    result = result if isinstance(result, dict) else {}
+    allowed, recommended = _process_recommendation_state(result)
+    solidus = _optional_finite_float(result.get("solidus"))
+    liquidus = _optional_finite_float(result.get("liquidus"))
+    if not allowed or solidus is None or liquidus is None or recommended is None:
+        return {
+            "allowed": False,
+            "solidus": solidus,
+            "liquidus": liquidus,
+            "peak": _optional_finite_float(result.get("peak")),
+            "profile": None,
+        }
+    return {
+        "allowed": True,
+        "solidus": solidus,
+        "liquidus": liquidus,
+        "peak": recommended,
+        "profile": calc_reflow_profile(solidus, liquidus, recommended),
+    }
+
+
+def _mechanical_metadata_copies(props, evidence, key):
+    """Collect every mechanical provenance copy that can drive the GUI."""
+    props = props if isinstance(props, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    copies = []
+    prop_meta = props.get("mechanical_property_metadata")
+    if prop_meta is not None and not isinstance(prop_meta, dict):
+        return None
+    if isinstance(prop_meta, dict) and prop_meta.get(key) is not None:
+        if not isinstance(prop_meta.get(key), dict):
+            return None
+        copies.append(dict(prop_meta[key]))
+    shear_meta = props.get("shear_metadata") if key == "shear_strength" else None
+    if shear_meta is not None:
+        if not isinstance(shear_meta, dict):
+            return None
+        copies.append(dict(shear_meta))
+    evidence_meta = evidence.get("mechanical_properties")
+    if evidence_meta is not None and not isinstance(evidence_meta, dict):
+        return None
+    if isinstance(evidence_meta, dict) and evidence_meta.get(key) is not None:
+        if not isinstance(evidence_meta.get(key), dict):
+            return None
+        copies.append(dict(evidence_meta[key]))
+    return copies
+
+
+def _mechanical_metadata_for(props, evidence, key):
+    """Read the primary mechanical provenance copy for display labeling."""
+    copies = _mechanical_metadata_copies(props, evidence, key)
+    return copies[0] if isinstance(copies, list) and copies else {}
+
+
+def _mechanical_source_label(props, evidence, key):
+    meta = _mechanical_metadata_for(props, evidence, key)
+    identity = _mechanical_source_identity(meta)
+    if identity is None:
+        return "출처 미확인"
+    _source_type, value_type = identity
+    labels = {
+        "legacy_measured_mean": "DB 평균",
+        "idw_prediction": "DB IDW 예측",
+        "legacy_db_estimate": "DB 추정",
+        "model_prediction": "모델 예측",
+        "literature_reference": "문헌 참고",
+        "measured": "DB 측정값",
+        "verified_measured_mean": "DB 검증 평균",
+    }
+    return labels.get(value_type, "출처 미확인")
+
+
+def _mechanical_source_identity(meta):
+    if not isinstance(meta, dict):
+        return None
+    source_type = _strict_enum_string(
+        meta,
+        "source_type",
+        _MECHANICAL_SOURCE_TYPES,
+    )
+    value_type = _strict_enum_string(
+        meta,
+        "value_type",
+        _MECHANICAL_VALUE_TYPES,
+    )
+    if source_type is None or value_type is None:
+        return None
+    return source_type, value_type
+
+
+def _mechanical_comparison_signature(meta):
+    identity = _mechanical_source_identity(meta)
+    if identity is None:
+        return None
+    source_type, value_type = identity
+    if identity not in _MECHANICAL_COMPARABLE_SOURCE_VALUE_PAIRS:
+        return None
+    if (
+        type(meta.get("comparison_allowed")) is not bool
+        or meta.get("comparison_allowed") is not True
+        or type(meta.get("verification_status")) is not str
+        or meta.get("verification_status") != "verified"
+    ):
+        return None
+    source_identifier = _metadata_string_alias(
+        meta, _PROVENANCE_SOURCE_IDENTIFIER_FIELDS
+    )
+    comparison_basis = _metadata_string_alias(
+        meta, _MECHANICAL_COMPARISON_BASIS_FIELDS
+    )
+    if source_identifier is None or comparison_basis is None:
+        return None
+    return source_type, value_type, source_identifier, comparison_basis
+
+
+def _mechanical_result_comparison_signature(props, evidence, key):
+    copies = _mechanical_metadata_copies(props, evidence, key)
+    if not isinstance(copies, list) or not copies:
+        return None
+    signatures = [_mechanical_comparison_signature(meta) for meta in copies]
+    first = signatures[0]
+    if first is None or any(signature != first for signature in signatures[1:]):
+        return None
+    return first
+
+
+def _mechanical_pair_comparison_allowed(props_a, props_b, evidence_a, evidence_b, key):
+    """Allow a raw mechanical comparison only when both sides explicitly permit it."""
+    if not isinstance(props_a, dict) or not isinstance(props_b, dict):
+        return False
+    if _optional_finite_float(props_a.get(key)) is None:
+        return False
+    if _optional_finite_float(props_b.get(key)) is None:
+        return False
+    signature_a = _mechanical_result_comparison_signature(props_a, evidence_a, key)
+    signature_b = _mechanical_result_comparison_signature(props_b, evidence_b, key)
+    return signature_a is not None and signature_a == signature_b
+
+
+def _mechanical_provenance_text(props, evidence, key):
+    source = _mechanical_source_label(props, evidence, key)
+    if _mechanical_result_comparison_signature(props, evidence, key) is not None:
+        return f"{source} · 검증됨"
+    return f"{source} · 시험조건·출처 미확인/검증 보류 · 상대비교·추천 제외"
+
+
+def _wetting_metadata_copies(props, evidence):
+    """Collect props/evidence wetting provenance copies for consistency checks."""
+    props = props if isinstance(props, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    copies = []
+    props_meta = props.get("wetting_metadata")
+    if props_meta is not None:
+        if not isinstance(props_meta, dict):
+            return None
+        copies.append(dict(props_meta))
+    wet_evidence = evidence.get("wetting")
+    if wet_evidence is not None:
+        if not isinstance(wet_evidence, dict):
+            return None
+        copies.append(dict(wet_evidence))
+    return copies
+
+
+def _wetting_metadata_for(props, evidence):
+    """Read the primary wetting provenance copy for display labeling."""
+    copies = _wetting_metadata_copies(props, evidence)
+    return copies[0] if isinstance(copies, list) and copies else {}
+
+
+def _wetting_source_label(props, evidence):
+    meta = _wetting_metadata_for(props, evidence)
+    identity = _wetting_source_identity(meta)
+    if identity is None:
+        return "출처 미확인"
+    source_kind, _value_type = identity
+    verified = _wetting_result_comparison_signature(props, evidence) is not None
+    if source_kind == "measured_db":
+        return (
+            "측정 DB"
+            if verified
+            else "측정 DB(시험조건 미확인)"
+        )
+    if source_kind == "idw_prediction":
+        return (
+            "IDW 예측"
+            if verified
+            else "IDW 예측(검증 보류)"
+        )
+    return "출처 미확인"
+
+
+def _wetting_source_identity(meta):
+    if not isinstance(meta, dict):
+        return None
+    source_kind = _strict_enum_string(
+        meta,
+        "source_kind",
+        {pair[0] for pair in _WETTING_SOURCE_VALUE_PAIRS},
+    )
+    value_type = _strict_enum_string(
+        meta,
+        "value_type",
+        {pair[1] for pair in _WETTING_SOURCE_VALUE_PAIRS},
+    )
+    identity = (source_kind, value_type)
+    return identity if identity in _WETTING_SOURCE_VALUE_PAIRS else None
+
+
+def _wetting_comparison_signature(meta):
+    identity = _wetting_source_identity(meta)
+    if identity is None:
+        return None
+    if (
+        type(meta.get("comparison_allowed")) is not bool
+        or meta.get("comparison_allowed") is not True
+        or type(meta.get("verification_status")) is not str
+        or meta.get("verification_status") != "verified"
+    ):
+        return None
+    source_identifier = _metadata_string_alias(
+        meta, _PROVENANCE_SOURCE_IDENTIFIER_FIELDS
+    )
+    comparison_basis = _metadata_string_alias(
+        meta, _WETTING_COMPARISON_BASIS_FIELDS
+    )
+    if (
+        source_identifier is None
+        or comparison_basis not in _WETTING_TEMPERATURE_BASES
+    ):
+        return None
+    return identity[0], identity[1], source_identifier, comparison_basis
+
+
+def _wetting_result_comparison_signature(props, evidence):
+    copies = _wetting_metadata_copies(props, evidence)
+    if not isinstance(copies, list) or not copies:
+        return None
+    signatures = [_wetting_comparison_signature(meta) for meta in copies]
+    first = signatures[0]
+    if first is None or any(signature != first for signature in signatures[1:]):
+        return None
+    return first
+
+
+def _wetting_context_temperature(props, evidence, expected_basis):
+    props = props if isinstance(props, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    wet_evidence = evidence.get("wetting") if isinstance(evidence.get("wetting"), dict) else {}
+    for basis in (
+        props.get("wetting_temp_basis"),
+        wet_evidence.get("temperature_basis"),
+    ):
+        if basis is None:
+            continue
+        if (
+            type(basis) is not str
+            or basis not in _WETTING_TEMPERATURE_BASES
+            or basis != expected_basis
+        ):
+            return None
+    temp = _optional_finite_float(props.get("wetting_temp_c"))
+    if temp is None:
+        return None
+    if wet_evidence.get("temperature_c") is not None:
+        evidence_temp = _optional_finite_float(wet_evidence.get("temperature_c"))
+        if evidence_temp is None or abs(evidence_temp - temp) > 1e-9:
+            return None
+    return temp
+
+
+def _wetting_display_verified(props, evidence):
+    signature = _wetting_result_comparison_signature(props, evidence)
+    if signature is None:
+        return False
+    return _wetting_context_temperature(props, evidence, signature[3]) is not None
+
+
+def _wetting_pair_comparison_allowed(props_a, props_b, evidence_a, evidence_b):
+    """Gate Fmax/T0 deltas on measurement type, verification, and temperature basis."""
+    if not isinstance(props_a, dict) or not isinstance(props_b, dict):
+        return False
+    for props in (props_a, props_b):
+        if _optional_finite_float(props.get("wetting_fmax_pred_mn")) is None:
+            return False
+        if _optional_finite_float(props.get("wetting_t0_pred_s")) is None:
+            return False
+    signature_a = _wetting_result_comparison_signature(props_a, evidence_a)
+    signature_b = _wetting_result_comparison_signature(props_b, evidence_b)
+    if signature_a is None or signature_a != signature_b:
+        return False
+    temp_a = _wetting_context_temperature(props_a, evidence_a, signature_a[3])
+    temp_b = _wetting_context_temperature(props_b, evidence_b, signature_b[3])
+    return bool(
+        temp_a is not None
+        and temp_b is not None
+        and abs(temp_a - temp_b) <= 1e-9
+    )
+
+
+def _wetting_provenance_text(props, evidence):
+    source = _wetting_source_label(props, evidence)
+    if _wetting_display_verified(props, evidence):
+        return f"{source} · 검증됨"
+    return f"{source} · 시험조건·출처 미확인/검증 보류 · 상대비교·추천 제외"
+
+
+def _reflow_property_info(props, evidence):
+    """Build provenance-safe property lines for the reflow graph popup."""
+    props = props if isinstance(props, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+
+    def _value_text(key, unit, decimals=1):
+        value = _optional_finite_float(props.get(key))
+        return f"{value:.{decimals}f} {unit}" if value is not None else "N/A"
+
+    lines = []
+    for label, key, unit, decimals in (
+        ("인장강도", "tensile_strength", "MPa", 1),
+        ("항복강도", "yield_strength", "MPa", 1),
+        ("연신율", "elongation", "%", 1),
+        ("전단강도", "shear_strength", "MPa", 1),
+    ):
+        lines.append(f"{label:<6}: {_value_text(key, unit, decimals)}")
+        lines.append(f"{label} 근거: {_mechanical_provenance_text(props, evidence, key)}")
+
+    lines.append(f"젖음 Fmax : {_value_text('wetting_fmax_pred_mn', 'mN', 2)}")
+    lines.append(f"젖음 T0   : {_value_text('wetting_t0_pred_s', 's', 2)}")
+    lines.append(f"젖음 근거 : {_wetting_provenance_text(props, evidence)}")
+    db_tensile = _value_text("tensile_strength_db_mpa", "MPa")
+    lines.append(f"물성DB인장: {db_tensile} (참고값·검증 보류)")
+    return "\n".join(lines)
 
 
 def calc_reflow_profile(solidus, liquidus, peak):
@@ -467,10 +937,20 @@ class AlloyGUI:
         """결과 1건에서 TAL/S~L/Peak-5 체류시간 지표를 계산."""
         try:
             r = result if isinstance(result, dict) else {}
-            solidus = float(r.get("solidus", 0.0) or 0.0)
-            liquidus = float(r.get("liquidus", 0.0) or 0.0)
-            peak = float(r.get("peak", 0.0) or 0.0)
-            prof = self._build_peak_profile_curve(r)
+            process_allowed, recommended_peak = _process_recommendation_state(r)
+            solidus = _optional_finite_float(r.get("solidus"))
+            liquidus = _optional_finite_float(r.get("liquidus"))
+            if (
+                not process_allowed
+                or recommended_peak is None
+                or solidus is None
+                or liquidus is None
+            ):
+                return {}
+            peak = recommended_peak
+            profile_result = dict(r)
+            profile_result["peak"] = recommended_peak
+            prof = self._build_peak_profile_curve(profile_result)
             tal_thr, tal_ref = self._get_tal_threshold_c(liquidus)
             tal = self._calc_tal_above_liquidus(prof["time"], prof["temp"], tal_thr)
             tsl = self._calc_time_in_range(prof["time"], prof["temp"], solidus, liquidus)
@@ -2128,10 +2608,8 @@ class AlloyGUI:
 
     @staticmethod
     def _fmt_num(v, nd=1, default="N/A"):
-        try:
-            return f"{float(v):.{nd}f}"
-        except Exception:
-            return default
+        number = _optional_finite_float(v)
+        return f"{number:.{nd}f}" if number is not None else default
 
     def _render_result_text(self, raw_text, summary=None):
         """
@@ -2164,18 +2642,21 @@ class AlloyGUI:
             if summary.get("type") == "compare":
                 a = summary.get("A", {})
                 b = summary.get("B", {})
-                _row("합금 A", f"{a.get('name','N/A')}   (신뢰도 {self._fmt_num(a.get('confidence'),0)}% / 종합 {self._fmt_num(a.get('confidence_overall'),0)}%)")
-                _row("합금 B", f"{b.get('name','N/A')}   (신뢰도 {self._fmt_num(b.get('confidence'),0)}% / 종합 {self._fmt_num(b.get('confidence_overall'),0)}%)")
+                _row("합금 A", f"{a.get('name','N/A')}   (조성 근접 {self._fmt_num(a.get('confidence'),0)}% / 조성·융점·젖음 근거 {self._fmt_num(a.get('confidence_overall'),0)}%)")
+                _row("합금 B", f"{b.get('name','N/A')}   (조성 근접 {self._fmt_num(b.get('confidence'),0)}% / 조성·융점·젖음 근거 {self._fmt_num(b.get('confidence_overall'),0)}%)")
                 _row("융점", f"A {self._fmt_num(a.get('solidus'),1)}~{self._fmt_num(a.get('liquidus'),1)}℃   |   "
                             f"B {self._fmt_num(b.get('solidus'),1)}~{self._fmt_num(b.get('liquidus'),1)}℃")
-                _row("피크", f"A {self._fmt_num(a.get('peak'),1)}℃   |   B {self._fmt_num(b.get('peak'),1)}℃")
+                _row(
+                    "공정 피크",
+                    f"A {_process_peak_display(a, 1)}   |   B {_process_peak_display(b, 1)}",
+                )
                 ain = a.get("alloy_inference") if isinstance(a.get("alloy_inference"), dict) else {}
                 binf = b.get("alloy_inference") if isinstance(b.get("alloy_inference"), dict) else {}
                 if (ain.get("liquidus") is not None) or (binf.get("liquidus") is not None):
                     _row(
                         "데이터 추론 L/피크",
-                        f"A L {self._fmt_num(ain.get('liquidus'),1)}℃ ≈피크 {self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   "
-                        f"B L {self._fmt_num(binf.get('liquidus'),1)}℃ ≈피크 {self._fmt_num(binf.get('recommended_peak_c'),1)}℃",
+                        f"A L {self._fmt_num(ain.get('liquidus'),1)}℃ · 추론 참고피크 {self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   "
+                        f"B L {self._fmt_num(binf.get('liquidus'),1)}℃ · 추론 참고피크 {self._fmt_num(binf.get('recommended_peak_c'),1)}℃",
                         tag_label="KEY",
                     )
                 pma = a.get("profile_metrics") if isinstance(a.get("profile_metrics"), dict) else {}
@@ -2194,9 +2675,17 @@ class AlloyGUI:
                 if isinstance(a.get("props"), dict) or isinstance(b.get("props"), dict):
                     pa = a.get("props") if isinstance(a.get("props"), dict) else {}
                     pb = b.get("props") if isinstance(b.get("props"), dict) else {}
-                    if pa.get("wetting_fmax_pred_mn") or pb.get("wetting_fmax_pred_mn"):
+                    ea = a.get("evidence") if isinstance(a.get("evidence"), dict) else {}
+                    eb = b.get("evidence") if isinstance(b.get("evidence"), dict) else {}
+                    if (
+                        _optional_finite_float(pa.get("wetting_fmax_pred_mn")) is not None
+                        or _optional_finite_float(pb.get("wetting_fmax_pred_mn")) is not None
+                    ):
                         na = pa.get("wetting_neighbors", []) if isinstance(pa.get("wetting_neighbors", []), list) else []
                         nb = pb.get("wetting_neighbors", []) if isinstance(pb.get("wetting_neighbors", []), list) else []
+                        source_a = _wetting_source_label(pa, ea)
+                        source_b = _wetting_source_label(pb, eb)
+                        wetting_comparable = _wetting_pair_comparison_allowed(pa, pb, ea, eb)
                         def _nei_txt(neis):
                             out = []
                             for x in (neis or [])[:3]:
@@ -2210,12 +2699,13 @@ class AlloyGUI:
                                     out.append(f"{name}(d={self._fmt_num(dist,2)})")
                             return ", ".join(out)
                         _row(
-                            "젖음(예측)",
-                            f"A fMAX {self._fmt_num(pa.get('wetting_fmax_pred_mn'),2)} mN / "
+                            "젖음",
+                            f"A [{source_a}] fMAX {self._fmt_num(pa.get('wetting_fmax_pred_mn'),2)} mN / "
                             f"T0 {self._fmt_num(pa.get('wetting_t0_pred_s'),2)} s @ {self._fmt_num(pa.get('wetting_temp_c'),0)}℃"
                             f"   |   "
-                            f"B fMAX {self._fmt_num(pb.get('wetting_fmax_pred_mn'),2)} mN / "
+                            f"B [{source_b}] fMAX {self._fmt_num(pb.get('wetting_fmax_pred_mn'),2)} mN / "
                             f"T0 {self._fmt_num(pb.get('wetting_t0_pred_s'),2)} s @ {self._fmt_num(pb.get('wetting_temp_c'),0)}℃"
+                            f"   |   비교: {'가능' if wetting_comparable else '검증 보류'}"
                             f"   |   근접DB A: {_nei_txt(na) if na else 'N/A'} / B: {_nei_txt(nb) if nb else 'N/A'}",
                             tag_label="KEY",
                         )
@@ -2226,7 +2716,11 @@ class AlloyGUI:
                 # Overall confidence + provenance (DB/Model/AI)
                 conf_overall = summary.get("confidence_overall", None)
                 if conf_overall is not None:
-                    _row("신뢰도(종합)", f"{self._fmt_num(conf_overall,0)}%", tag_label="KEY")
+                    _row(
+                        "신뢰도(조성·융점·젖음 근거)",
+                        f"{self._fmt_num(conf_overall,0)}%",
+                        tag_label="KEY",
+                    )
 
                 ev = summary.get("evidence") if isinstance(summary.get("evidence"), dict) else {}
                 if ev:
@@ -2347,8 +2841,8 @@ class AlloyGUI:
                     if dist is not None:
                         _row("DB 직접 일치", f"forced={forced}   best_dist={self._fmt_num(dist,3)}")
                 _row("융점", f"Solidus {self._fmt_num(summary.get('solidus'),1)}℃   /   "
-                           f"Liquidus {self._fmt_num(summary.get('liquidus'),1)}℃   /   "
-                           f"Peak {self._fmt_num(summary.get('peak'),1)}℃")
+                           f"Liquidus {self._fmt_num(summary.get('liquidus'),1)}℃")
+                _row("공정 피크", _process_peak_display(summary, 1))
                 ain = summary.get("alloy_inference") if isinstance(summary.get("alloy_inference"), dict) else {}
                 if ain.get("solidus") is not None and ain.get("liquidus") is not None:
                     nei = ain.get("neighbors") if isinstance(ain.get("neighbors"), list) else []
@@ -2362,25 +2856,44 @@ class AlloyGUI:
                     _row(
                         "데이터 추론(3-NN)",
                         f"S {self._fmt_num(ain.get('solidus'),1)}℃ / L {self._fmt_num(ain.get('liquidus'),1)}℃ / "
-                        f"권장피크≈{self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   이웃: {nei_txt}",
+                        f"추론 참고피크≈{self._fmt_num(ain.get('recommended_peak_c'),1)}℃   |   이웃: {nei_txt}",
                         tag_label="KEY",
                     )
                     _row("액상선 민감도(℃/wt%·근사)", wtxt, tag_label="KEY")
-                    try:
-                        ds = float(ain.get("solidus", 0)) - float(summary.get("solidus", 0) or 0)
-                        dl = float(ain.get("liquidus", 0)) - float(summary.get("liquidus", 0) or 0)
-                        rpk = ain.get("recommended_peak_c")
-                        pk = summary.get("peak")
-                        dpp = ""
-                        if rpk is not None and pk is not None:
-                            dpp = f" · 권장피크(추)−엔진피크 {float(rpk) - float(pk):+.1f}℃"
-                        _row("추론−하이브리드 Δ", f"고상 {ds:+.2f}℃ · 액상 {dl:+.2f}℃{dpp}", tag_label="KEY")
-                    except Exception:
-                        pass
+                    process_allowed, process_peak = _process_recommendation_state(summary)
+                    inf_solidus = _optional_finite_float(ain.get("solidus"))
+                    inf_liquidus = _optional_finite_float(ain.get("liquidus"))
+                    base_solidus = _optional_finite_float(summary.get("solidus"))
+                    base_liquidus = _optional_finite_float(summary.get("liquidus"))
+                    inference_peak = _optional_finite_float(ain.get("recommended_peak_c"))
+                    if (
+                        process_allowed
+                        and process_peak is not None
+                        and inf_solidus is not None
+                        and inf_liquidus is not None
+                        and base_solidus is not None
+                        and base_liquidus is not None
+                    ):
+                        ds = inf_solidus - base_solidus
+                        dl = inf_liquidus - base_liquidus
+                        dpp = (
+                            f" · 추론참고피크−계약권장피크 {inference_peak - process_peak:+.1f}℃"
+                            if inference_peak is not None
+                            else ""
+                        )
+                        _row(
+                            "추론−하이브리드 Δ",
+                            f"고상 {ds:+.2f}℃ · 액상 {dl:+.2f}℃{dpp}",
+                            tag_label="KEY",
+                        )
+                    else:
+                        _row("추론−하이브리드 Δ", "추천 보류", tag_label="KEY")
                     pr = str(ain.get("process_report") or "").strip()
-                    if pr:
+                    if pr and process_allowed:
                         box.insert(tk.END, "\n", "SEP")
                         box.insert(tk.END, pr + "\n", "MUTED")
+                    elif pr:
+                        box.insert(tk.END, "\n공정 추론 상세: 추천 보류 (계약 미허용)\n", "MUTED")
                 pm = summary.get("profile_metrics") if isinstance(summary.get("profile_metrics"), dict) else {}
                 if pm:
                     _row(
@@ -2394,8 +2907,25 @@ class AlloyGUI:
                     _row("물성", f"인장 {self._fmt_num(props.get('tensile_strength'),1)} MPa   |   "
                                f"전단 {self._fmt_num(props.get('shear_strength'),1)} MPa   |   "
                                f"연신 {self._fmt_num(props.get('elongation'),1)} %")
-                    if props.get("wetting_fmax_pred_mn"):
+                    for property_label, property_key in (
+                        ("인장", "tensile_strength"),
+                        ("항복", "yield_strength"),
+                        ("연신", "elongation"),
+                        ("전단", "shear_strength"),
+                    ):
+                        _row(
+                            f"{property_label} 근거",
+                            _mechanical_provenance_text(props, ev, property_key),
+                            tag_label="KEY",
+                        )
+                    if _optional_finite_float(props.get("wetting_fmax_pred_mn")) is not None:
                         neis = props.get("wetting_neighbors", []) if isinstance(props.get("wetting_neighbors", []), list) else []
+                        wetting_source = _wetting_source_label(props, ev)
+                        wetting_status = (
+                            "검증됨"
+                            if _wetting_display_verified(props, ev)
+                            else "시험조건·출처 미확인/검증 보류 · 상대비교·추천 제외"
+                        )
                         def _nei_txt(neis):
                             out = []
                             for x in (neis or [])[:3]:
@@ -2411,7 +2941,7 @@ class AlloyGUI:
                         _wt_basis = ""
                         if props.get("wetting_temp_basis") == "auto_liq_plus_30" and props.get("wetting_temp_target_c") is not None:
                             _wt_basis = (
-                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→측정 DB "
+                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→시험 온도 격자 "
                                 f"{self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
                         elif props.get("wetting_temp_basis") == "compare_shared":
@@ -2419,12 +2949,13 @@ class AlloyGUI:
                                 f"   |   기준: 비교 공통 {self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
                         elif props.get("wetting_temp_basis") == "user":
-                            _wt_basis = "   |   기준: 선택 온도(측정 DB 맞춤)"
+                            _wt_basis = "   |   기준: 선택 온도(시험 온도 격자)"
                         _row(
-                            "젖음(예측)",
+                            f"젖음({wetting_source})",
                             f"fMAX {self._fmt_num(props.get('wetting_fmax_pred_mn'),2)} mN   /   "
                             f"T0 {self._fmt_num(props.get('wetting_t0_pred_s'),2)} s   @ {self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             f"{_wt_basis}"
+                            f"   |   {wetting_status}"
                             f"   |   근접DB: {_nei_txt(neis) if neis else 'N/A'}",
                             tag_label="KEY",
                         )
@@ -2515,13 +3046,19 @@ class AlloyGUI:
                         "name": ((self.last_result.get("best") or {}).get("name", "합금 A") if isinstance(self.last_result, dict) else "합금 A"),
                         "confidence": (self.last_result.get("confidence", 0) if isinstance(self.last_result, dict) else 0),
                         "confidence_overall": (self.last_result.get("confidence_overall", 0) if isinstance(self.last_result, dict) else 0),
-                        "solidus": (self.last_result.get("solidus", 0) if isinstance(self.last_result, dict) else 0),
-                        "liquidus": (self.last_result.get("liquidus", 0) if isinstance(self.last_result, dict) else 0),
-                        "peak": (self.last_result.get("peak", 0) if isinstance(self.last_result, dict) else 0),
+                        "solidus": (self.last_result.get("solidus") if isinstance(self.last_result, dict) else None),
+                        "liquidus": (self.last_result.get("liquidus") if isinstance(self.last_result, dict) else None),
+                        "peak": (self.last_result.get("peak") if isinstance(self.last_result, dict) else None),
                         "profile_metrics": (self._profile_metrics_for_result(self.last_result) if isinstance(self.last_result, dict) else {}),
                         "props": (self.last_result.get("props") if isinstance(self.last_result, dict) else {}),
+                        "evidence": (self.last_result.get("evidence") if isinstance(self.last_result, dict) else {}),
                         "alloy_inference": (
                             self.last_result.get("alloy_inference")
+                            if isinstance(self.last_result, dict)
+                            else {}
+                        ),
+                        "prediction_contract": (
+                            self.last_result.get("prediction_contract")
                             if isinstance(self.last_result, dict)
                             else {}
                         ),
@@ -2530,13 +3067,19 @@ class AlloyGUI:
                         "name": ((self.compare_result.get("best") or {}).get("name", "합금 B") if isinstance(self.compare_result, dict) else "합금 B"),
                         "confidence": (self.compare_result.get("confidence", 0) if isinstance(self.compare_result, dict) else 0),
                         "confidence_overall": (self.compare_result.get("confidence_overall", 0) if isinstance(self.compare_result, dict) else 0),
-                        "solidus": (self.compare_result.get("solidus", 0) if isinstance(self.compare_result, dict) else 0),
-                        "liquidus": (self.compare_result.get("liquidus", 0) if isinstance(self.compare_result, dict) else 0),
-                        "peak": (self.compare_result.get("peak", 0) if isinstance(self.compare_result, dict) else 0),
+                        "solidus": (self.compare_result.get("solidus") if isinstance(self.compare_result, dict) else None),
+                        "liquidus": (self.compare_result.get("liquidus") if isinstance(self.compare_result, dict) else None),
+                        "peak": (self.compare_result.get("peak") if isinstance(self.compare_result, dict) else None),
                         "profile_metrics": (self._profile_metrics_for_result(self.compare_result) if isinstance(self.compare_result, dict) else {}),
                         "props": (self.compare_result.get("props") if isinstance(self.compare_result, dict) else {}),
+                        "evidence": (self.compare_result.get("evidence") if isinstance(self.compare_result, dict) else {}),
                         "alloy_inference": (
                             self.compare_result.get("alloy_inference")
+                            if isinstance(self.compare_result, dict)
+                            else {}
+                        ),
+                        "prediction_contract": (
+                            self.compare_result.get("prediction_contract")
                             if isinstance(self.compare_result, dict)
                             else {}
                         ),
@@ -2565,16 +3108,60 @@ class AlloyGUI:
         if not isinstance(r, dict) or not isinstance(details, dict):
             return
         props = r.get("props") if isinstance(r.get("props"), dict) else {}
-        props["wetting_temp_c"] = float(details.get("wetting_temp_c", 0.0) or 0.0)
-        props["wetting_fmax_pred_mn"] = float(details.get("fmax_pred_mn", 0.0) or 0.0)
-        props["wetting_t0_pred_s"] = float(details.get("t0_pred_s", 0.0) or 0.0)
+        for source_key, prop_key in (
+            ("wetting_temp_c", "wetting_temp_c"),
+            ("fmax_pred_mn", "wetting_fmax_pred_mn"),
+            ("t0_pred_s", "wetting_t0_pred_s"),
+        ):
+            if source_key in details:
+                props[prop_key] = _optional_finite_float(details.get(source_key))
         if isinstance(details.get("neighbors"), list):
             props["wetting_neighbors"] = details.get("neighbors")
+        if isinstance(details.get("confidence_neighbors"), list):
+            props["wetting_confidence_neighbors"] = details.get("confidence_neighbors")
+        wetting_metadata = details.get("wetting_metadata")
+        if isinstance(wetting_metadata, dict) and wetting_metadata:
+            wetting_metadata = dict(wetting_metadata)
+        else:
+            wetting_metadata = {
+                "source_kind": "unknown",
+                "value_type": "unknown",
+                "provenance_status": "unknown",
+                "verification_status": "unverified",
+                "comparison_allowed": False,
+                "reason_code": "WETTING_PROVENANCE_MISSING",
+                "missing_conditions": [
+                    "source_identifier",
+                    "test_standard",
+                    "substrate_and_finish",
+                    "test_atmosphere",
+                    "flux_amount",
+                    "replicate_count",
+                ],
+            }
+        props["wetting_metadata"] = dict(wetting_metadata)
         if details.get("wetting_temp_basis"):
             props["wetting_temp_basis"] = details.get("wetting_temp_basis")
         if details.get("wetting_temp_target_c") is not None:
-            props["wetting_temp_target_c"] = float(details.get("wetting_temp_target_c"))
+            props["wetting_temp_target_c"] = _optional_finite_float(
+                details.get("wetting_temp_target_c")
+            )
         r["props"] = props
+
+        # Keep the evidence block in lockstep with the display override. Without
+        # this, the GUI could show a newly recomputed value with stale provenance.
+        evidence = r.get("evidence") if isinstance(r.get("evidence"), dict) else {}
+        wet_evidence = dict(wetting_metadata)
+        source_identity = _wetting_source_identity(wetting_metadata)
+        wet_evidence["source"] = {
+            ("measured_db", "direct_db_record"): "Measured(DB-exact)",
+            ("idw_prediction", "idw_prediction"): "IDW(DB)",
+        }.get(source_identity, "Unknown")
+        wet_evidence["neighbors"] = list(props.get("wetting_neighbors") or [])
+        wet_evidence["temperature_basis"] = props.get("wetting_temp_basis")
+        wet_evidence["temperature_c"] = props.get("wetting_temp_c")
+        evidence["wetting"] = wet_evidence
+        r["evidence"] = evidence
 
     def _apply_compare_shared_wetting(self, r_a, r_b):
         """비교 모드: A·B 동일 젖음 온도로 props만 갱신 (단일 조성별 auto 금지)."""
@@ -2730,6 +3317,22 @@ class AlloyGUI:
                 r["knn"] = self.analyzer.find_knn(norm, k=3)
             except Exception:
                 r["knn"] = []
+        # GUI 보고서·비교·리플로우 팝업이 모두 같은 공정 추천 계약을 사용한다.
+        try:
+            props = r.get("props") if isinstance(r.get("props"), dict) else {}
+            r["prediction_contract"] = build_prediction_contract(
+                r,
+                {},
+                {
+                    "mode": self.mode,
+                    "literature_mode": lit_mode or "fast",
+                    "wetting_temp_c": props.get("wetting_temp_c"),
+                    "wetting_temp_basis": props.get("wetting_temp_basis"),
+                },
+            )
+        except Exception:
+            # 계약 생성 실패는 raw peak 추천으로 폴백하지 않고 추천 보류로 닫는다.
+            r["prediction_contract"] = {}
         return r
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -2787,9 +3390,9 @@ class AlloyGUI:
             "best_name": (r.get("best") or {}).get("name", "N/A") if isinstance(r, dict) else "N/A",
             "confidence": (r.get("confidence", 0) if isinstance(r, dict) else 0),
             "confidence_overall": (r.get("confidence_overall", 0) if isinstance(r, dict) else 0),
-            "solidus": (r.get("solidus", 0) if isinstance(r, dict) else 0),
-            "liquidus": (r.get("liquidus", 0) if isinstance(r, dict) else 0),
-            "peak": (r.get("peak", 0) if isinstance(r, dict) else 0),
+            "solidus": (r.get("solidus") if isinstance(r, dict) else None),
+            "liquidus": (r.get("liquidus") if isinstance(r, dict) else None),
+            "peak": (r.get("peak") if isinstance(r, dict) else None),
             "profile_metrics": (self._profile_metrics_for_result(r) if isinstance(r, dict) else {}),
             "props": (r.get("props") if isinstance(r, dict) else {}),
             "melting_detail": (r.get("melting_detail") if isinstance(r, dict) else {}),
@@ -2799,6 +3402,7 @@ class AlloyGUI:
             "retrieved_candidates": (r.get("retrieved_candidates") if isinstance(r, dict) else []),
             "ai_used_this_request": (r.get("ai_used_this_request", False) if isinstance(r, dict) else False),
             "alloy_inference": (r.get("alloy_inference") if isinstance(r, dict) else {}),
+            "prediction_contract": (r.get("prediction_contract") if isinstance(r, dict) else {}),
         }
         self._render_result_text(final_output, summary=summary)
 
@@ -2924,23 +3528,27 @@ class AlloyGUI:
                 "name": ((r_a.get("best") or {}).get("name", "합금 A") if isinstance(r_a, dict) else "합금 A"),
                 "confidence": (r_a.get("confidence", 0) if isinstance(r_a, dict) else 0),
                 "confidence_overall": (r_a.get("confidence_overall", 0) if isinstance(r_a, dict) else 0),
-                "solidus": (r_a.get("solidus", 0) if isinstance(r_a, dict) else 0),
-                "liquidus": (r_a.get("liquidus", 0) if isinstance(r_a, dict) else 0),
-                "peak": (r_a.get("peak", 0) if isinstance(r_a, dict) else 0),
+                "solidus": (r_a.get("solidus") if isinstance(r_a, dict) else None),
+                "liquidus": (r_a.get("liquidus") if isinstance(r_a, dict) else None),
+                "peak": (r_a.get("peak") if isinstance(r_a, dict) else None),
                 "profile_metrics": (self._profile_metrics_for_result(r_a) if isinstance(r_a, dict) else {}),
                 "props": (r_a.get("props") if isinstance(r_a, dict) else {}),
+                "evidence": (r_a.get("evidence") if isinstance(r_a, dict) else {}),
                 "alloy_inference": (r_a.get("alloy_inference") if isinstance(r_a, dict) else {}),
+                "prediction_contract": (r_a.get("prediction_contract") if isinstance(r_a, dict) else {}),
             },
             "B": {
                 "name": ((r_b.get("best") or {}).get("name", "합금 B") if isinstance(r_b, dict) else "합금 B"),
                 "confidence": (r_b.get("confidence", 0) if isinstance(r_b, dict) else 0),
                 "confidence_overall": (r_b.get("confidence_overall", 0) if isinstance(r_b, dict) else 0),
-                "solidus": (r_b.get("solidus", 0) if isinstance(r_b, dict) else 0),
-                "liquidus": (r_b.get("liquidus", 0) if isinstance(r_b, dict) else 0),
-                "peak": (r_b.get("peak", 0) if isinstance(r_b, dict) else 0),
+                "solidus": (r_b.get("solidus") if isinstance(r_b, dict) else None),
+                "liquidus": (r_b.get("liquidus") if isinstance(r_b, dict) else None),
+                "peak": (r_b.get("peak") if isinstance(r_b, dict) else None),
                 "profile_metrics": (self._profile_metrics_for_result(r_b) if isinstance(r_b, dict) else {}),
                 "props": (r_b.get("props") if isinstance(r_b, dict) else {}),
+                "evidence": (r_b.get("evidence") if isinstance(r_b, dict) else {}),
                 "alloy_inference": (r_b.get("alloy_inference") if isinstance(r_b, dict) else {}),
+                "prediction_contract": (r_b.get("prediction_contract") if isinstance(r_b, dict) else {}),
             },
         }
         self._render_result_text(output, summary=summary)
@@ -3015,7 +3623,7 @@ class AlloyGUI:
             base = f"{base_k} ({float(base_v or 0.0):.1f}%)"
             return f"기지/메인: {base} | 상위: " + ", ".join(parts)
 
-        def _property_notes(norm, props):
+        def _property_notes(norm, props, evidence):
             norm = _sd(norm)
             props = _sd(props)
             bi = float(norm.get("Bi", 0.0) or 0.0)
@@ -3043,51 +3651,58 @@ class AlloyGUI:
             if ni > 0:
                 notes.append("Ni 미량: 계면 IMC 안정화 및 열피로 저항에 도움 가능")
 
-            fmax = float(props.get("wetting_fmax_pred_mn", 0.0) or 0.0)
+            fmax = _optional_finite_float(props.get("wetting_fmax_pred_mn"))
             tdb = props.get("tensile_strength_db_mpa")
-            if fmax > 0:
-                notes.append(f"젖음 Fmax(예측): {fmax:.2f} mN (높을수록 유리)")
+            if fmax is not None:
+                notes.append(
+                    f"젖음 Fmax({_wetting_source_label(props, evidence)}): {fmax:.2f} mN (참고값)"
+                )
             if tdb is not None:
                 try:
-                    notes.append(f"물성 DB 인장: {float(tdb):.1f} MPa")
+                    notes.append(
+                        f"물성 DB 인장 참고값: {float(tdb):.1f} MPa "
+                        f"({_mechanical_provenance_text(props, evidence, 'tensile_strength')})"
+                    )
                 except Exception:
                     pass
 
             return notes[:6] if notes else ["N/A"]
 
         def _fmt_cell(v, unit=""):
-            try:
-                return f"{float(v):.2f}{unit}"
-            except Exception:
-                s = str(v).strip()
-                return (s + unit) if s else "N/A"
+            number = _optional_finite_float(v)
+            return f"{number:.2f}{unit}" if number is not None else "N/A"
 
         def _winner_mark(va, vb, hi="high"):
-            try:
-                fa, fb = float(va), float(vb)
-                if hi == "high":
-                    return ("▲", "") if fa > fb else ("", "▲") if fb > fa else ("", "")
-                return ("▲", "") if fa < fb else ("", "▲") if fb < fa else ("", "")
-            except Exception:
+            fa = _optional_finite_float(va)
+            fb = _optional_finite_float(vb)
+            if fa is None or fb is None:
                 return "", ""
+            if hi == "high":
+                return ("▲", "") if fa > fb else ("", "▲") if fb > fa else ("", "")
+            return ("▲", "") if fa < fb else ("", "▲") if fb < fa else ("", "")
 
         def _trow(label, a, b, d=""):
             # tab-separated row (tabs are pixel-aligned in result_box)
             return f"{label}\t{a}\t{b}\t{d}\n"
 
-        def _trow_num(label, va, vb, unit="", hi="high"):
-            ma, mb = _winner_mark(va, vb, hi=hi)
+        def _trow_num(label, va, vb, unit="", hi="high", allow_compare=True, blocked="검증 보류"):
+            ma, mb = _winner_mark(va, vb, hi=hi) if allow_compare else ("", "")
             a = _fmt_cell(va, unit) + (f" {ma}" if ma else "")
             b = _fmt_cell(vb, unit) + (f" {mb}" if mb else "")
-            try:
-                delta = float(vb) - float(va)
+            fa = _optional_finite_float(va)
+            fb = _optional_finite_float(vb)
+            if allow_compare and fa is not None and fb is not None:
+                delta = fb - fa
                 d = f"{delta:+.2f}{unit}"
-            except Exception:
+            elif not allow_compare:
+                d = blocked
+            else:
                 d = "N/A"
             return _trow(label, a, b, d)
 
         ra, rb = _sd(r_a), _sd(r_b)
         pa, pb = _sd(ra.get("props")), _sd(rb.get("props"))
+        ea, eb = _sd(ra.get("evidence")), _sd(rb.get("evidence"))
 
         sep = "─" * 68
         o = f"{'='*68}\n"
@@ -3109,47 +3724,101 @@ class AlloyGUI:
         o += f"  합금 B: {_matrix_summary(rb.get('norm'))}\n"
 
         o += f"\n  {sep}\n  [특성 방향성(조성 기반 요약)]\n  {sep}\n"
-        o += "  합금 A:\n" + _fmt_bullets(_property_notes(ra.get("norm"), pa))
-        o += "  합금 B:\n" + _fmt_bullets(_property_notes(rb.get("norm"), pb))
+        o += "  합금 A:\n" + _fmt_bullets(_property_notes(ra.get("norm"), pa, ea))
+        o += "  합금 B:\n" + _fmt_bullets(_property_notes(rb.get("norm"), pb, eb))
 
         o += f"\n  {sep}\n  [온도 프로파일]\n  {sep}\n"
-        sa = float(ra.get("solidus", 0.0) or 0.0)
-        la = float(ra.get("liquidus", 0.0) or 0.0)
-        pk_a = float(ra.get("peak", 0.0) or 0.0)
-        sb = float(rb.get("solidus", 0.0) or 0.0)
-        lb = float(rb.get("liquidus", 0.0) or 0.0)
-        pk_b = float(rb.get("peak", 0.0) or 0.0)
-        o += _trow_num("Solidus (℃)", sa, sb, " ℃", "low")
-        o += _trow_num("Liquidus (℃)", la, lb, " ℃", "low")
-        o += _trow_num("ΔT (℃)", la - sa, lb - sb, " ℃", "low")
-        o += _trow_num("권장 피크 (℃)", pk_a, pk_b, " ℃", "low")
+        sa = _optional_finite_float(ra.get("solidus"))
+        la = _optional_finite_float(ra.get("liquidus"))
+        sb = _optional_finite_float(rb.get("solidus"))
+        lb = _optional_finite_float(rb.get("liquidus"))
+        allowed_a, recommended_a = _process_recommendation_state(ra)
+        allowed_b, recommended_b = _process_recommendation_state(rb)
+        process_pair_allowed = allowed_a and allowed_b
+        pk_a = recommended_a if allowed_a else _optional_finite_float(ra.get("peak"))
+        pk_b = recommended_b if allowed_b else _optional_finite_float(rb.get("peak"))
+        delta_t_a = la - sa if la is not None and sa is not None else None
+        delta_t_b = lb - sb if lb is not None and sb is not None else None
+        o += (
+            "  ※ 공정 Δ·우열·피크 범위는 A·B 모두 process_recommendation.allowed=true일 때만 표시합니다.\n"
+        )
+        o += _trow_num(
+            "Solidus (℃)", sa, sb, " ℃", "low",
+            allow_compare=process_pair_allowed, blocked="추천 보류",
+        )
+        o += _trow_num(
+            "Liquidus (℃)", la, lb, " ℃", "low",
+            allow_compare=process_pair_allowed, blocked="추천 보류",
+        )
+        o += _trow_num(
+            "ΔT (℃)", delta_t_a, delta_t_b, " ℃", "low",
+            allow_compare=process_pair_allowed, blocked="추천 보류",
+        )
+        peak_label = (
+            "권장 피크 (℃)"
+            if process_pair_allowed
+            else "엔진 참고 피크 · 추천 보류 (℃)"
+        )
+        o += _trow_num(
+            peak_label, pk_a, pk_b, " ℃", "low",
+            allow_compare=process_pair_allowed, blocked="추천 보류",
+        )
 
-        o += f"\n  {sep}\n  [물성 비교]  ▲ = 해당 항목 우위\n  {sep}\n"
-        def _tensile_row_label(props):
-            basis = (props or {}).get("tensile_strength_basis")
-            if basis == "db_idw":
-                return "인장 (BD유사) (MPa)"
-            if basis == "lit_ref":
-                return "인장 (문헌) (MPa)"
-            if basis == "lit_blend":
-                return "인장 (문헌보정) (MPa)"
-            return "인장강도 (MPa)"
-
-        def _shear_row_label(props):
-            basis = (props or {}).get("shear_strength_basis")
-            return "전단 (BD유사) (MPa)" if basis == "db_idw" else "전단강도 (MPa)"
-
-        o += _trow_num(_tensile_row_label(pa), pa.get("tensile_strength", 0), pb.get("tensile_strength", 0), " MPa")
-        o += _trow_num("항복강도 (MPa)", pa.get("yield_strength", 0), pb.get("yield_strength", 0), " MPa")
-        o += _trow_num("연신율 (%)", pa.get("elongation", 0), pb.get("elongation", 0), "%")
-        o += _trow_num(_shear_row_label(pa), pa.get("shear_strength"), pb.get("shear_strength"), " MPa")
-        o += _trow_num("젖음 Fmax (mN)", pa.get("wetting_fmax_pred_mn", 0), pb.get("wetting_fmax_pred_mn", 0), " mN")
+        o += f"\n  {sep}\n  [물성 참고값 / 검증된 비교]\n  {sep}\n"
+        o += (
+            "  ※ raw 기계물성은 시험조건·출처 미확인 시 검증 보류: "
+            "숫자만 참고하고 Δ(B-A)·우열·추천에는 사용하지 않습니다.\n"
+            "  ※ 젖음은 측정/IDW·검증 상태·시험 온도 기준이 모두 같을 때만 비교합니다.\n"
+        )
+        for label, key, unit in (
+            (
+                f"인장강도 (A {_mechanical_source_label(pa, ea, 'tensile_strength')} / "
+                f"B {_mechanical_source_label(pb, eb, 'tensile_strength')}) (MPa)",
+                "tensile_strength",
+                " MPa",
+            ),
+            (
+                f"항복강도 (A {_mechanical_source_label(pa, ea, 'yield_strength')} / "
+                f"B {_mechanical_source_label(pb, eb, 'yield_strength')}) (MPa)",
+                "yield_strength",
+                " MPa",
+            ),
+            (
+                f"연신율 (A {_mechanical_source_label(pa, ea, 'elongation')} / "
+                f"B {_mechanical_source_label(pb, eb, 'elongation')}) (%)",
+                "elongation",
+                "%",
+            ),
+            (
+                f"전단강도 (A {_mechanical_source_label(pa, ea, 'shear_strength')} / "
+                f"B {_mechanical_source_label(pb, eb, 'shear_strength')}) (MPa)",
+                "shear_strength",
+                " MPa",
+            ),
+        ):
+            o += _trow_num(
+                label,
+                pa.get(key),
+                pb.get(key),
+                unit,
+                allow_compare=_mechanical_pair_comparison_allowed(pa, pb, ea, eb, key),
+            )
+        wetting_comparable = _wetting_pair_comparison_allowed(pa, pb, ea, eb)
+        o += _trow_num(
+            f"젖음 Fmax (A {_wetting_source_label(pa, ea)} / B {_wetting_source_label(pb, eb)})",
+            pa.get("wetting_fmax_pred_mn"),
+            pb.get("wetting_fmax_pred_mn"),
+            " mN",
+            allow_compare=wetting_comparable,
+            blocked="비교 보류",
+        )
         if pa.get("tensile_strength_basis") != "db_idw" or pb.get("tensile_strength_basis") != "db_idw":
             o += _trow_num(
-                "물성 DB 인장 (MPa)",
+                "물성 DB 인장 참고값 (MPa)",
                 None if pa.get("tensile_strength_basis") == "db_idw" else pa.get("tensile_strength_db_mpa"),
                 None if pb.get("tensile_strength_basis") == "db_idw" else pb.get("tensile_strength_db_mpa"),
                 " MPa",
+                allow_compare=False,
             )
 
         # ── 비교 기반 도펀트 추천 ───────────────────────────────────────────
@@ -3197,8 +3866,11 @@ class AlloyGUI:
 
         def _estimate_effects(base_norm, base_props, elem, add_pct):
             """
-            Return short numeric delta string using existing melting + property models.
-            This is a heuristic estimate based on current internal models.
+            Return only the modeled melting range for a hypothetical dopant.
+
+            Mechanical and wetting deltas are deliberately omitted: those model
+            outputs do not carry verified test conditions and must not be used as
+            quantitative recommendation evidence.
             """
             new_norm = _simulate_add(base_norm, elem, add_pct)
             if not new_norm:
@@ -3213,44 +3885,12 @@ class AlloyGUI:
             except Exception:
                 s2 = l2 = p2 = None
 
-            # Property prediction
-            try:
-                props2 = self.analyzer.model_properties(new_norm, s2 or 0.0, l2 or 0.0, peak=p2 or 0.0)
-            except Exception:
-                props2 = {}
-
-            base_props = _sd(base_props)
-            def d(key, nd=1):
-                try:
-                    return float(props2.get(key, 0.0) or 0.0) - float(base_props.get(key, 0.0) or 0.0)
-                except Exception:
-                    return 0.0
-
             parts = []
-            # temperatures
-            try:
-                bs = float(sa)  # for A by default; caller can override by passing base temps if needed
-            except Exception:
-                bs = None
-            try:
-                # if base_norm is from B, sa isn't correct; skip base temp deltas in that case.
-                pass
-            except Exception:
-                pass
-            # We can still show absolute new temps, plus property deltas.
             if s2 is not None and l2 is not None:
                 parts.append(f"예상 융점 {s2:.1f}~{l2:.1f}℃")
+            return (" | " + " / ".join(parts)) if parts else ""
 
-            dt = d("tensile_strength")
-            ds = d("shear_strength")
-            dfm = d("wetting_fmax_pred_mn")
-            parts.append(f"Δ인장 {dt:+.1f}MPa")
-            parts.append(f"Δ전단 {ds:+.1f}MPa")
-            parts.append(f"ΔFmax {dfm:+.2f}mN")
-
-            return " | " + " / ".join(parts)
-
-        def _dopant_reco(norm, props, other_props, label="A"):
+        def _dopant_reco(norm, props, other_props, evidence, other_evidence, label="A"):
             norm = _sd(norm)
             props = _sd(props)
             other_props = _sd(other_props)
@@ -3259,21 +3899,32 @@ class AlloyGUI:
             ag = float(norm.get("Ag", 0.0) or 0.0)
             in_ = float(norm.get("In", 0.0) or 0.0)
 
-            t = float(props.get("tensile_strength", 0.0) or 0.0)
-            sh = float(props.get("shear_strength", 0.0) or 0.0)
-            fmax = float(props.get("wetting_fmax_pred_mn", 0.0) or 0.0)
-            t2 = float(other_props.get("tensile_strength", 0.0) or 0.0)
-            sh2 = float(other_props.get("shear_strength", 0.0) or 0.0)
-            fmax2 = float(other_props.get("wetting_fmax_pred_mn", 0.0) or 0.0)
-
             goal = (self.reco_goal.get() or "균형").strip()
 
             # deficits: positive means "needs improvement to match other"
             def _def(a, b):
-                return (b - a) if (b > 0) else 0.0
+                fa = _optional_finite_float(a)
+                fb = _optional_finite_float(b)
+                return max(0.0, fb - fa) if fa is not None and fb is not None else 0.0
 
-            d_strength = max(_def(t, t2), _def(sh, sh2))
-            d_wetting = _def(fmax, fmax2)
+            strength_deficits = []
+            for key in ("tensile_strength", "shear_strength"):
+                if _mechanical_pair_comparison_allowed(
+                    props, other_props, evidence, other_evidence, key
+                ):
+                    strength_deficits.append(_def(props.get(key), other_props.get(key)))
+            d_strength = max(strength_deficits) if strength_deficits else 0.0
+            wetting_comparable_for_reco = _wetting_pair_comparison_allowed(
+                props, other_props, evidence, other_evidence
+            )
+            d_wetting = (
+                _def(
+                    props.get("wetting_fmax_pred_mn"),
+                    other_props.get("wetting_fmax_pred_mn"),
+                )
+                if wetting_comparable_for_reco
+                else 0.0
+            )
 
             # Goal weighting (크리프 지표 제거 — Fmax 기반 젖음만)
             w_strength, w_wet, w_low = 1.0, 1.0, 0.0
@@ -3314,9 +3965,19 @@ class AlloyGUI:
 
             # Wetting / Low-melting actions
             if in_ < 1.0:
-                add_rec(max(score_wet, score_low), "In", "2.0", "젖음성 개선 + 융점 하향 방향")
+                in_text = (
+                    "젖음성 개선 + 융점 하향 방향"
+                    if wetting_comparable_for_reco
+                    else "융점 하향 방향"
+                )
+                add_rec(max(score_wet, score_low), "In", "2.0", in_text)
             if bi < 3.0:
-                add_rec(max(score_wet * 0.9, score_low * 0.9), "Bi", "2.0", "젖음성/저융점화 도움 (취성 리스크 주의)")
+                bi_text = (
+                    "젖음성/저융점화 도움 (취성 리스크 주의)"
+                    if wetting_comparable_for_reco
+                    else "저융점화 도움 (취성 리스크 주의)"
+                )
+                add_rec(max(score_wet * 0.9, score_low * 0.9), "Bi", "2.0", bi_text)
 
             # 고온 강도(Sb): 강도 목표일 때만 가중
             sb_score = score_strength * (1.4 if goal == "강도" else 0.35)
@@ -3332,11 +3993,18 @@ class AlloyGUI:
 
             rec.sort(key=lambda x: x[0], reverse=True)
             texts = [t for _s, t in rec if t]
-            return texts[:6] if texts else ["(비교 기준) 큰 열세 항목이 없어 도펀트보단 공정조건 최적화 권장"]
+            return texts[:6] if texts else [
+                "검증 가능한 비교 지표에서 열세가 확인되지 않아 물성 기반 도펀트 추천을 보류합니다."
+            ]
 
-        o += f"\n  {sep}\n  [추천 원소(도펀트) 및 기대 효과(간단 수치 추정 포함) - 비교 기반]\n  {sep}\n"
-        o += "  합금 A 추천:\n" + _fmt_bullets(_dopant_reco(ra.get("norm"), pa, pb, label="A"), width=92)
-        o += "  합금 B 추천:\n" + _fmt_bullets(_dopant_reco(rb.get("norm"), pb, pa, label="B"), width=92)
+        o += f"\n  {sep}\n  [추천 원소(도펀트) - 검증된 비교 근거만 사용]\n  {sep}\n"
+        o += "  시험조건·출처 미확인 물성과 비교 보류 젖음값은 추천 점수에서 제외합니다.\n"
+        o += "  합금 A 추천:\n" + _fmt_bullets(
+            _dopant_reco(ra.get("norm"), pa, pb, ea, eb, label="A"), width=92
+        )
+        o += "  합금 B 추천:\n" + _fmt_bullets(
+            _dopant_reco(rb.get("norm"), pb, pa, eb, ea, label="B"), width=92
+        )
 
         roles_a = (ra.get("element_roles") or "").strip()
         roles_b = (rb.get("element_roles") or "").strip()
@@ -3364,6 +4032,49 @@ class AlloyGUI:
         if not self.last_result:
             messagebox.showwarning("경고", "먼저 분석을 실행하세요.")
             return
+        radar_keys = tuple(axis[0] for axis in _RADAR_PROPERTY_AXES)
+        pa = self.last_result.get("props") if isinstance(self.last_result.get("props"), dict) else {}
+        if any(_optional_finite_float(pa.get(key)) is None for key in radar_keys):
+            messagebox.showwarning(
+                "N/A 물성 포함",
+                "누락 물성을 실제 0으로 그리지 않기 위해 레이더 차트를 제공하지 않습니다. "
+                "핵심 요약과 비교 보고서에서 N/A를 확인하세요.",
+            )
+            return
+        ea = self.last_result.get("evidence") if isinstance(self.last_result.get("evidence"), dict) else {}
+        if self.compare_result:
+            pb = self.compare_result.get("props") if isinstance(self.compare_result.get("props"), dict) else {}
+            if any(_optional_finite_float(pb.get(key)) is None for key in radar_keys):
+                messagebox.showwarning(
+                    "N/A 물성 포함",
+                    "누락 물성을 실제 0으로 그리지 않기 위해 A/B 레이더 차트를 제공하지 않습니다. "
+                    "비교 보고서에서 N/A를 확인하세요.",
+                )
+                return
+            eb = self.compare_result.get("evidence") if isinstance(self.compare_result.get("evidence"), dict) else {}
+            mechanical_safe = all(
+                _mechanical_pair_comparison_allowed(pa, pb, ea, eb, key)
+                for key in ("tensile_strength", "yield_strength", "elongation", "shear_strength")
+            )
+            if not mechanical_safe or not _wetting_pair_comparison_allowed(pa, pb, ea, eb):
+                messagebox.showwarning(
+                    "검증 보류",
+                    "시험조건·출처가 확인되지 않은 raw 물성 또는 서로 다른 젖음 근거가 포함되어 "
+                    "A/B 레이더 상대 비교를 제공하지 않습니다. 비교 보고서의 참고값과 provenance를 확인하세요.",
+                )
+                return
+        else:
+            mechanical_safe = all(
+                _mechanical_result_comparison_signature(pa, ea, key) is not None
+                for key in ("tensile_strength", "yield_strength", "elongation", "shear_strength")
+            )
+            if not mechanical_safe or not _wetting_display_verified(pa, ea):
+                messagebox.showwarning(
+                    "검증 보류",
+                    "시험조건·원출처가 검증되지 않은 물성은 참고 전용입니다. "
+                    "단일 합금 레이더 차트를 제공하지 않으며, 핵심 요약의 근거·검증 상태를 확인하세요.",
+                )
+                return
 
         def _draw():
             try:
@@ -3382,17 +4093,21 @@ class AlloyGUI:
                 if bold: p.set_weight("bold")
                 return {"fontproperties": p}
 
-            labels = ["인장강도\n(MPa)", "항복강도\n(MPa)", "연신율\n(%)",
-                      "전단강도\n(MPa)", "Fmax\n(mN)",   "DB인장\n(MPa)"]
-            keys   = ["tensile_strength", "yield_strength", "elongation",
-                      "shear_strength",   "wetting_fmax_pred_mn",  "tensile_strength_db_mpa"]
-            maxval = [150, 120, 60, 150, 3.0, 150]
+            keys = [axis[0] for axis in _RADAR_PROPERTY_AXES]
+            labels = [axis[1] for axis in _RADAR_PROPERTY_AXES]
+            maxval = [axis[2] for axis in _RADAR_PROPERTY_AXES]
             n      = len(labels)
             theta  = [2 * math.pi * i / n for i in range(n)]
 
             def get_vals(res):
                 p = res["props"]
-                return [min(p.get(k, 0) / m, 1.0) for k, m in zip(keys, maxval)]
+                values = []
+                for key, maximum in zip(keys, maxval):
+                    value = _optional_finite_float(p.get(key))
+                    values.append(
+                        math.nan if value is None else min(max(value / maximum, 0.0), 1.0)
+                    )
+                return values
 
             fig, ax = plt.subplots(figsize=(8, 7), subplot_kw={"polar": True})
             fig.patch.set_facecolor("#1f2937")
@@ -3417,8 +4132,9 @@ class AlloyGUI:
             # 실제값 주석 (합금 A)
             pa = self.last_result["props"]
             for i, (k, m) in enumerate(zip(keys, maxval)):
+                value = _optional_finite_float(pa.get(k))
                 ax.text(theta[i], va[i] + 0.10,
-                        f"{pa.get(k,0):.1f}", color="#93c5fd",
+                        f"{value:.1f}" if value is not None else "N/A", color="#93c5fd",
                         ha="center", va="center", fontsize=7)
 
             # 합금 B (비교 모드)
@@ -3429,7 +4145,7 @@ class AlloyGUI:
                 ax.fill(t_closed, vb_closed, color="#f87171", alpha=0.15)
 
             best_a = self.last_result.get("best", {}).get("name", "합금 A")
-            ax.set_title(f"물성 레이더 차트 — {best_a}",
+            ax.set_title(f"물성 레이더 차트(검증된 근거만) — {best_a}",
                          color="#e5e7eb", pad=20, **kfp(13, bold=True))
 
             legend = ax.legend(loc="upper right", bbox_to_anchor=(1.32, 1.12),
@@ -3531,7 +4247,18 @@ class AlloyGUI:
             messagebox.showwarning("경고", "먼저 분석을 실행하세요."); return
 
         r  = self.last_result
-        pf = calc_reflow_profile(r["solidus"], r["liquidus"], r["peak"])
+        process_allowed, _ = _process_recommendation_state(r)
+        if not process_allowed:
+            messagebox.showinfo(
+                "추천 보류",
+                "공정 추천 계약이 검증되지 않아 리플로우 조건을 계산하지 않습니다.\n"
+                "융점·피크 근거를 확인한 뒤 다시 시도하세요.",
+            )
+            return
+        pf = _safe_reflow_profile_for_result(r)
+        if not pf.get("allowed"):
+            messagebox.showinfo("추천 보류", "리플로우 근거가 부족해 추천을 표시할 수 없습니다.")
+            return
         best_name = r.get("best", {}).get("name", "N/A")
 
         win = tk.Toplevel(self.root)
@@ -4343,22 +5070,13 @@ class AlloyGUI:
 
             best_name = best.get("name", "N/A")
             delta_t   = liquidus - solidus
-            _tdb_v = props.get("tensile_strength_db_mpa")
-            try:
-                _tdb_txt = f"{float(_tdb_v):.1f} MPa" if _tdb_v is not None else "N/A"
-            except Exception:
-                _tdb_txt = "N/A"
+            evidence = r.get("evidence") if isinstance(r.get("evidence"), dict) else {}
             info = (
-                f"최적 일치 : {best_name}\n신뢰도    : {conf:.0f} %\n"
+                f"최적 일치 : {best_name}\n조성 근접 : {conf:.0f} %\n"
                 f"Solidus   : {solidus:.1f} \u2103\nLiquidus  : {liquidus:.1f} \u2103\n"
                 f"\u0394T        : {delta_t:.1f} \u2103\nPeak      : {peak:.1f} \u2103\n"
                 f"{'─'*22}\n"
-                f"인장강도  : {props.get('tensile_strength',0):.1f} MPa\n"
-                f"항복강도  : {props.get('yield_strength',  0):.1f} MPa\n"
-                f"연신율    : {props.get('elongation',      0):.1f} %\n"
-                f"전단강도  : {props.get('shear_strength',  0):.1f} MPa\n"
-                f"젖음 Fmax : {props.get('wetting_fmax_pred_mn', 0):.2f} mN\n"
-                f"물성DB인장: {_tdb_txt}"
+                f"{_reflow_property_info(props, evidence)}"
             )
             txt_kw = {"fontproperties": fm.FontProperties(fname=kf.get_file())} if kf else {}
             ax.text(0.01, 0.99, info, transform=ax.transAxes,

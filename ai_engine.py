@@ -7,6 +7,7 @@ Gemini 기반 AI 분석 엔진
 """
 
 import json
+import math
 import os
 import re
 import time
@@ -30,6 +31,32 @@ except Exception:
 _NO_LITERATURE_SOURCE_LINE = (
     "(자동 문헌 검색 결과 없음: 사내 방화벽/프록시 또는 API 제한 가능 — "
     "Crossref·Semantic Scholar 호출을 확인하세요.)"
+)
+
+_MECHANICAL_VERIFIED_SOURCE_VALUE_PAIRS = frozenset(
+    {
+        ("measured_db", "measured"),
+        ("verified_property_db", "verified_measured_mean"),
+        ("literature", "literature_reference"),
+    }
+)
+_WETTING_VERIFIED_SOURCE_VALUE_PAIRS = frozenset(
+    {
+        ("measured_db", "measured"),
+        ("measured_db", "direct_db_record"),
+        ("idw_prediction", "idw_prediction"),
+    }
+)
+_WETTING_VERIFIED_COMPARISON_BASES = frozenset(
+    {"auto_liq_plus_30", "compare_shared", "user"}
+)
+_PROPERTY_REFERENCE_NOTE = (
+    "인장·전단·항복·연신·젖음 수치는 원출처·시험조건 검증 전까지 참고 전용이며, "
+    "합금 간 정량 비교·우열·개선률·추천 근거에서 제외합니다."
+)
+_DOPANT_REFERENCE_NOTE = (
+    "첨가 후보는 조성·상규칙에 따른 탐색용이며, 위 미검증 물성값을 근거로 한 "
+    "생산 추천이 아닙니다. 적용 전 동일 시험법으로 실험 승인이 필요합니다."
 )
 
 
@@ -293,6 +320,336 @@ class AIEngine:
         return [str(x)]
 
     @staticmethod
+    def _format_optional_measurement(value, digits: int, unit: str) -> str:
+        """Format report measurements without turning missing values into a real zero."""
+        number = AIEngine._optional_report_number(value)
+        if number is None:
+            return "N/A"
+        return f"{number:.{int(digits)}f} {unit}".rstrip()
+
+    @staticmethod
+    def _optional_report_number(value):
+        """Return a strict finite report number while preserving a real numeric zero."""
+        if isinstance(value, bool) or isinstance(value, (dict, list, tuple, set)):
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            if not value or not re.fullmatch(
+                r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?",
+                value,
+            ):
+                return None
+        elif not isinstance(value, (int, float)):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(number):
+            return None
+        return number
+
+    @staticmethod
+    def _process_peak_report_line(result, *, digits: int = 2, approximate: bool = False) -> str:
+        """Label a peak as recommended only when the prediction contract explicitly allows it."""
+        r = result if isinstance(result, dict) else {}
+        contract = r.get("prediction_contract")
+        contract = contract if isinstance(contract, dict) else {}
+        process = contract.get("process_recommendation")
+        process = process if isinstance(process, dict) else {}
+        allowed = process.get("allowed") is True
+        raw_peak = AIEngine._optional_report_number(r.get("peak"))
+        recommended_peak = AIEngine._optional_report_number(
+            process.get("recommended_peak_c")
+        )
+        value = (recommended_peak if recommended_peak is not None else raw_peak) if allowed else raw_peak
+        value_text = (
+            AIEngine._format_optional_measurement(value, digits, "℃")
+            if value is not None
+            else "N/A"
+        )
+        prefix = "약 " if approximate and value_text != "N/A" else ""
+        label = "권장 피크 온도" if allowed else "엔진 참고 피크 · 추천 보류"
+        return f"{label}: {prefix}{value_text}"
+
+    @staticmethod
+    def _strict_metadata_token(meta, names):
+        """Read aliased provenance fields without coercing malformed values."""
+        if not isinstance(meta, dict):
+            return None
+        values = []
+        for name in names:
+            if name not in meta:
+                continue
+            value = meta.get(name)
+            if type(value) is not str or not value.strip():
+                return None
+            values.append(value.strip())
+        if not values or any(value != values[0] for value in values[1:]):
+            return None
+        return values[0]
+
+    @staticmethod
+    def _mechanical_metadata_signature(meta):
+        if not isinstance(meta, dict):
+            return None
+        source_type = meta.get("source_type")
+        value_type = meta.get("value_type")
+        if type(source_type) is not str or type(value_type) is not str:
+            return None
+        pair = (source_type.strip(), value_type.strip())
+        if pair not in _MECHANICAL_VERIFIED_SOURCE_VALUE_PAIRS:
+            return None
+        source_id = AIEngine._strict_metadata_token(
+            meta,
+            ("source_identifier", "source_id", "dataset_id", "test_series_id"),
+        )
+        comparison_basis = AIEngine._strict_metadata_token(
+            meta,
+            ("comparison_basis", "test_standard", "test_method"),
+        )
+        if not source_id or not comparison_basis:
+            return None
+        if type(meta.get("verification_status")) is not str:
+            return None
+        if meta.get("verification_status") != "verified":
+            return None
+        if type(meta.get("comparison_allowed")) is not bool:
+            return None
+        if meta.get("comparison_allowed") is not True:
+            return None
+        return pair + (source_id, comparison_basis)
+
+    @staticmethod
+    def _wetting_metadata_signature(meta):
+        if not isinstance(meta, dict):
+            return None
+        source_kind = meta.get("source_kind")
+        value_type = meta.get("value_type")
+        if type(source_kind) is not str or type(value_type) is not str:
+            return None
+        pair = (source_kind.strip(), value_type.strip())
+        if pair not in _WETTING_VERIFIED_SOURCE_VALUE_PAIRS:
+            return None
+        source_id = AIEngine._strict_metadata_token(
+            meta,
+            ("source_identifier", "source_id", "dataset_id"),
+        )
+        comparison_basis = AIEngine._strict_metadata_token(
+            meta,
+            ("comparison_basis", "test_standard", "test_method"),
+        )
+        if not source_id or not comparison_basis:
+            return None
+        if comparison_basis not in _WETTING_VERIFIED_COMPARISON_BASES:
+            return None
+        if type(meta.get("verification_status")) is not str:
+            return None
+        if meta.get("verification_status") != "verified":
+            return None
+        if type(meta.get("comparison_allowed")) is not bool:
+            return None
+        if meta.get("comparison_allowed") is not True:
+            return None
+        return pair + (source_id, comparison_basis)
+
+    @staticmethod
+    def _metadata_copies_agree(metas, signature_reader) -> bool:
+        """Fail closed when props and evidence carry conflicting provenance."""
+        present = [meta for meta in metas if meta is not None]
+        if not present:
+            return False
+        if any(not isinstance(meta, dict) for meta in present):
+            return False
+        signatures = [signature_reader(meta) for meta in present]
+        return bool(
+            all(signature is not None for signature in signatures)
+            and all(signature == signatures[0] for signature in signatures[1:])
+        )
+
+    @staticmethod
+    def _mechanical_report_provenance(result, key: str) -> str:
+        """Describe source and verification without trusting status flags alone."""
+        result = result if isinstance(result, dict) else {}
+        props = result.get("props") if isinstance(result.get("props"), dict) else {}
+        evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+        metadata = props.get("mechanical_property_metadata")
+        props_meta = metadata.get(key) if isinstance(metadata, dict) else None
+        ev_metadata = evidence.get("mechanical_properties")
+        evidence_meta = ev_metadata.get(key) if isinstance(ev_metadata, dict) else None
+        shear_meta = props.get("shear_metadata") if key == "shear_strength" else None
+        meta_candidates = [props_meta, evidence_meta, shear_meta]
+        meta = next((item for item in meta_candidates if isinstance(item, dict)), {})
+
+        value_type = meta.get("value_type") if isinstance(meta.get("value_type"), str) else ""
+        source_type = meta.get("source_type") if isinstance(meta.get("source_type"), str) else ""
+        source_label = meta.get("source_label") if isinstance(meta.get("source_label"), str) else ""
+        normalized = f"{value_type} {source_type} {source_label}".lower()
+        source_value_pair = (source_type.strip(), value_type.strip())
+        if source_value_pair in {
+            ("measured_db", "measured"),
+            ("verified_property_db", "verified_measured_mean"),
+        }:
+            label = "측정 DB"
+        elif source_value_pair == ("literature", "literature_reference"):
+            label = "문헌 참고"
+        elif value_type == "legacy_measured_mean":
+            label = "DB 평균(시험조건 미확인)"
+        elif "idw" in normalized:
+            label = "DB IDW 예측"
+        elif value_type == "legacy_db_estimate" or source_type == "legacy_property_db":
+            label = "DB 추정(시험조건 미확인)"
+        elif "lit" in normalized or source_type == "literature":
+            label = "문헌 참고"
+        elif "model" in normalized or source_type == "model":
+            label = "모델 예측"
+        else:
+            label = "출처 미확인"
+
+        malformed_container = bool(
+            (metadata is not None and not isinstance(metadata, dict))
+            or (ev_metadata is not None and not isinstance(ev_metadata, dict))
+        )
+        verified = bool(
+            not malformed_container
+            and AIEngine._metadata_copies_agree(
+                meta_candidates,
+                AIEngine._mechanical_metadata_signature,
+            )
+        )
+        if verified:
+            return f"{label} · 검증됨"
+        return f"{label} · 원출처·시험조건 미확인/검증 보류 · 비교·추천 제외"
+
+    @staticmethod
+    def _wetting_report_provenance(result) -> str:
+        result = result if isinstance(result, dict) else {}
+        props = result.get("props") if isinstance(result.get("props"), dict) else {}
+        evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+        props_meta = props.get("wetting_metadata")
+        evidence_meta = evidence.get("wetting")
+        meta_candidates = [props_meta, evidence_meta]
+        meta = next((item for item in meta_candidates if isinstance(item, dict)), {})
+        source_kind = meta.get("source_kind") if isinstance(meta.get("source_kind"), str) else ""
+        value_type = meta.get("value_type") if isinstance(meta.get("value_type"), str) else ""
+        source_value_pair = (source_kind.strip(), value_type.strip())
+        if source_value_pair in {
+            ("measured_db", "measured"),
+            ("measured_db", "direct_db_record"),
+        }:
+            label = "측정 DB"
+        elif source_value_pair == ("idw_prediction", "idw_prediction"):
+            label = "IDW 예측"
+        else:
+            label = "출처 미확인"
+        verified = AIEngine._metadata_copies_agree(
+            meta_candidates,
+            AIEngine._wetting_metadata_signature,
+        )
+        if verified:
+            signature = AIEngine._wetting_metadata_signature(meta)
+            comparison_basis = signature[-1] if signature else None
+            parent_basis = props.get("wetting_temp_basis")
+
+            def strict_temperature(value):
+                if isinstance(value, bool) or isinstance(value, (dict, list, tuple, set)):
+                    return None
+                if isinstance(value, str):
+                    value = value.strip()
+                    if not value or not re.fullmatch(
+                        r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?",
+                        value,
+                    ):
+                        return None
+                elif not isinstance(value, (int, float)):
+                    return None
+                try:
+                    number = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    return None
+                return number if math.isfinite(number) else None
+
+            props_temperature = strict_temperature(props.get("wetting_temp_c"))
+            evidence_temperature = strict_temperature(
+                evidence_meta.get("temperature_c")
+                if isinstance(evidence_meta, dict)
+                else None
+            )
+            verified = bool(
+                type(parent_basis) is str
+                and parent_basis == comparison_basis
+                and props_temperature is not None
+                and evidence_temperature is not None
+                and abs(props_temperature - evidence_temperature) < 1e-6
+            )
+        if verified:
+            return f"{label} · 검증됨"
+        if label == "측정 DB":
+            label = "측정 DB(시험조건 미확인)"
+        elif label == "IDW 예측":
+            label = "IDW 예측(검증 보류)"
+        return f"{label} · 검증 보류 · 비교·추천 제외"
+
+    @staticmethod
+    def _append_safety_note(text, note: str) -> str:
+        value = AIEngine.stringify_ai_text(text)
+        if note in value:
+            return value
+        return f"{value}\n{note}".strip()
+
+    @staticmethod
+    def _strip_unverified_property_claims(text) -> str:
+        """Remove remote prose that attempts to restate core numbers or recommendations."""
+        value = AIEngine.stringify_ai_text(text)
+        if not value:
+            return ""
+        unsafe_terms = (
+            "고상선",
+            "액상선",
+            "피크",
+            "인장",
+            "전단",
+            "항복",
+            "연신",
+            "젖음",
+            "fmax",
+            "t₀",
+            "강도",
+            "권장",
+            "추천",
+            "우열",
+            "개선률",
+        )
+        pieces = re.split(r"(?<=[.!?。])\s+|\n+", value)
+        kept = [
+            piece.strip()
+            for piece in pieces
+            if piece.strip()
+            and not any(term in piece.lower() for term in unsafe_terms)
+        ]
+        return "\n".join(kept)
+
+    @staticmethod
+    def _enforce_ai_property_safety(data):
+        """Fail closed on remote numeric/property/recommendation claims."""
+        if not isinstance(data, dict):
+            return data
+        for field in ("phase", "roles", "summary"):
+            cleaned = AIEngine._strip_unverified_property_claims(data.get(field))
+            if field == "summary" and not cleaned:
+                cleaned = "원격 서술의 수치·물성·추천 주장은 검증되지 않아 제외했습니다."
+            data[field] = cleaned
+        data["summary"] = AIEngine._append_safety_note(
+            data.get("summary"),
+            _PROPERTY_REFERENCE_NOTE,
+        )
+        # Remote dopant prose is inherently a recommendation.  Only the
+        # deterministic local rule path may supply candidates; the model output
+        # is replaced with the experiment-only boundary note.
+        data["dopant"] = _DOPANT_REFERENCE_NOTE
+        return data
+
+    @staticmethod
     def stringify_ai_text(val, list_sep: str = "\n") -> str:
         """
         Gemini JSON에서 phase/summary/roles/dopant가 가끔 list로 올 때 API(str)와 맞춘다.
@@ -405,6 +762,12 @@ class AIEngine:
 [summary]
 {str(fb.get("summary", ""))[:4200]}
 
+[PROPERTY_PROVENANCE_SAFETY — 반드시 유지]
+- {_PROPERTY_REFERENCE_NOTE}
+- {_DOPANT_REFERENCE_NOTE}
+- 미검증 인장·전단·항복·연신·젖음 수치로 합금 간 대소·순위·승자·개선률을 새로 만들지 말라.
+- 물성값을 근거로 첨가제·공정·생산 적용을 권장하지 말고 동일 시험법 실험을 요구하라.
+
 출력 규칙: 마크다운·코드펜스 금지. 한국어 JSON 한 개만 출력한다.
 {{"phase":"...","imc":["..."],"roles":"...","dopant":"...","summary":"...","sources":[]}}
 sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
@@ -421,7 +784,7 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
             )
         except Exception:
             pass
-        return data
+        return AIEngine._enforce_ai_property_safety(data)
 
     @staticmethod
     def _fmt_bullets(items, default="N/A"):
@@ -811,9 +1174,8 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         best_name = best.get("name", "N/A")
         score = r.get("score", 0.0)
         conf = r.get("confidence", 0.0)
-        s = r.get("solidus", 0.0)
-        l = r.get("liquidus", 0.0)
-        p = r.get("peak", 0.0)
+        s = r.get("solidus")
+        l = r.get("liquidus")
         m = (mode or "eng").strip().lower()
 
         if m == "eng":
@@ -872,7 +1234,10 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         extra_lines = []
         if co is not None:
             try:
-                extra_lines.append(f"- 종합 신뢰도(가중): {float(co):.1f}%")
+                extra_lines.append(
+                    f"- 조성·융점·젖음 근거 신뢰도(가중): {float(co):.1f}% "
+                    "(기계물성 검증률이 아님)"
+                )
             except Exception:
                 pass
         if stage is not None:
@@ -896,16 +1261,13 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
             for x in risks[:8]:
                 extra_lines.append(f"  · {x}")
         if props:
-            try:
-                extra_lines.append(
-                    "- 물성(모델/혼합): "
-                    f"전단 {float(props.get('shear_strength', 0) or 0):.1f} MPa, "
-                    f"인장 {float(props.get('tensile_strength', 0) or 0):.1f} MPa, "
-                    f"연신 {float(props.get('elongation', 0) or 0):.1f} %, "
-                    f"젖음 Fmax {float(props.get('wetting_fmax_pred_mn', 0) or 0):.2f} mN"
-                )
-            except Exception:
-                pass
+            extra_lines.append(
+                "- 물성 참고값(원출처·시험조건 확인 전 비교·추천 제외): "
+                f"전단 {self._format_optional_measurement(props.get('shear_strength'), 1, 'MPa')}, "
+                f"인장 {self._format_optional_measurement(props.get('tensile_strength'), 1, 'MPa')}, "
+                f"연신 {self._format_optional_measurement(props.get('elongation'), 1, '%')}, "
+                f"젖음 Fmax {self._format_optional_measurement(props.get('wetting_fmax_pred_mn'), 2, 'mN')}"
+            )
 
         lit_block = ""
         if lit_lines:
@@ -919,12 +1281,16 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
             if co is not None:
                 try:
                     eng_extra.append(
-                        f"- 이 결과는 참고용입니다. 한 번에 믿기보다는 대략 {float(co):.0f}% 정도 맞을 수 있다고 생각하시면 됩니다."
+                        f"- 조성·융점·젖음 근거 적합도는 대략 {float(co):.0f}%입니다. "
+                        "이 수치는 인장·전단 등 기계물성의 검증률이 아닙니다."
                     )
                 except Exception:
                     eng_extra.append("- 이 결과는 참고용입니다.")
             eng_extra.append(
-                f"- 녹기 시작·완전히 녹는 온도·대략의 피크: 약 {float(s or 0):.0f}℃ / {float(l or 0):.0f}℃ / {float(p or 0):.0f}℃"
+                "- 녹기 시작·완전히 녹는 온도·피크 상태: "
+                f"{self._format_optional_measurement(s, 0, '℃')} / "
+                f"{self._format_optional_measurement(l, 0, '℃')} / "
+                f"{self._process_peak_report_line(r, digits=0, approximate=True)}"
             )
             if knn_txt and knn_txt != "비슷한 예가 없음":
                 eng_extra.append(f"- 비슷한 조성 이름(참고): {knn_txt}")
@@ -934,7 +1300,8 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
                     eng_extra.append(f"  · {x}")
             if props:
                 eng_extra.append(
-                    "- 강도·잘 스며드는 정도 등은 숫자로도 나오지만, 세부 해석은 제조사 자료나 전문가에게 맡기는 것이 좋습니다."
+                    "- 인장·전단·항복·연신·젖음 값은 원출처·시험조건이 확인되기 전에는 "
+                    "참고 전용이며 합금 간 비교·우열·추천에 쓰면 안 됩니다."
                 )
             lit_block_eng = ""
             if lit_lines:
@@ -953,7 +1320,10 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
             summary = (
                 "[로컬 하이브리드 요약]\n"
                 f"- 최적 일치 합금: {best_name} (거리={float(score or 0):.3f}, 신뢰도={float(conf or 0):.1f}%)\n"
-                f"- 온도 프로파일: 고상선 {float(s or 0):.2f}℃ / 액상선 {float(l or 0):.2f}℃ / 권장 피크 {float(p or 0):.2f}℃\n"
+                "- 온도 프로파일: "
+                f"고상선 {self._format_optional_measurement(s, 2, '℃')} / "
+                f"액상선 {self._format_optional_measurement(l, 2, '℃')} / "
+                f"{self._process_peak_report_line(r, digits=2)}\n"
                 f"- KNN 유사 합금: {knn_txt}\n"
                 "- Gemini 미연결 시에도 규칙·DB·자동 문헌 검색 후보를 함께 제공합니다 (GUI와 동일한 문헌 파이프라인).\n"
                 + (("[추가 수치·근거]\n" + "\n".join(extra_lines) + "\n") if extra_lines else "")
@@ -998,6 +1368,13 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         best = self._safe_dict(r.get("best"))
 
         lit_lines = self._collect_literature_lines(norm, max_lines=10, literature_mode=literature_mode)
+        process_peak_line = self._process_peak_report_line(r, digits=2)
+        final_solidus = self._format_optional_measurement(
+            r.get("solidus"), 2, "℃"
+        )
+        final_liquidus = self._format_optional_measurement(
+            r.get("liquidus"), 2, "℃"
+        )
 
         body = f"""
 [입력 조성]
@@ -1006,11 +1383,20 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 [정규화 조성]
 {r.get('norm', norm)}
 
-[DB 최적 일치]
+[최근접 DB 참고 합금 — 최종 예측과 구분]
 - 이름: {best.get('name', 'N/A')}
 - 고상선: {best.get('solidus', 'N/A')}
 - 액상선: {best.get('liquidus', 'N/A')}
 - 거리: {float(r.get('score', 0.0) or 0.0):.3f}
+
+[최종 예측 온도 — 엄격한 유한값, 누락은 N/A]
+- 고상선: {final_solidus}
+- 액상선: {final_liquidus}
+- {process_peak_line}
+
+[공정 피크 신뢰 경계]
+- {process_peak_line}
+- prediction_contract.process_recommendation.allowed가 명시적으로 true가 아니면 피크를 권장·추천 온도라고 부르지 말라.
 
 [KNN 유사 합금 (참고)]
 """
@@ -1033,6 +1419,20 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 """
         body += json.dumps(lit_lines or [], ensure_ascii=False)
         body += "\n[END_UNTRUSTED_RETRIEVED_METADATA_JSON]\n"
+        body += f"""
+
+[PROPERTY_PROVENANCE_SAFETY — 출력에 반드시 유지]
+- {_PROPERTY_REFERENCE_NOTE}
+- {_DOPANT_REFERENCE_NOTE}
+- 전단 근거: {self._mechanical_report_provenance(r, 'shear_strength')}
+- 인장 근거: {self._mechanical_report_provenance(r, 'tensile_strength')}
+- 항복 근거: {self._mechanical_report_provenance(r, 'yield_strength')}
+- 연신 근거: {self._mechanical_report_provenance(r, 'elongation')}
+- 젖음 근거: {self._wetting_report_provenance(r)}
+- 검증되지 않은 물성으로 대소·순위·승자·개선률을 생성하지 말라.
+- 검증되지 않은 물성으로 첨가제·공정·생산 적용을 추천하지 말라.
+- [공정 피크 신뢰 경계]의 라벨을 바꾸지 말고, 추천 보류 상태를 공정 권장으로 승격하지 말라.
+"""
 
         if m == "lab":
             prompt = f"""
@@ -1056,7 +1456,7 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
  "imc": ["IMC1", "IMC2", "IMC3"],
  "roles": "원소 역할 상세 설명",
  "dopant": "미량 첨가(도핑) 권장(강도·젖음·취성 영향 포함)",
- "summary": "통합 결론(필수): 최소 10문장 이상. (1) 고상선·액상선·피크 온도가 공정에 주는 의미 (2) DB 유사도·신뢰도 해석 (3) 전단·인장·연신·젖음 등 물성 수치의 정성적 의미와 한계 (4) 주요 IMC·리스크가 신뢰성에 미치는 영향 (5) 권장 리플로우/열관리 방향. 불릿만 나열하지 말고 서술형으로 쓴다.",
+ "summary": "통합 결론(필수): 최소 10문장 이상. (1) 고상선·액상선·피크 온도가 공정에 주는 의미 (2) DB 유사도·조성·융점·젖음 근거 신뢰도 해석(기계물성 검증률로 표현 금지) (3) 전단·인장·항복·연신·젖음은 개별 출처·시험조건을 확인하고, 미검증이면 수치 해석·비교·우열·추천을 하지 않는다 (4) 주요 IMC·리스크가 신뢰성에 미치는 영향 (5) 리플로우/열관리는 융점·표준·실험 근거로만 제안한다. 불릿만 나열하지 말고 서술형으로 쓴다.",
  "sources": ["인용한 DOI/URL 문자열(예: DOI:10.... 또는 URL:https://...)"]
 }}
 """
@@ -1071,6 +1471,8 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 - 고상선/액상선은 "녹기 시작하는 온도", "완전히 액체가 되는 온도"처럼 풀어써라.
 - 문장은 짧게. 전체 분량은 비전문가가 2~3분 안에 읽도록 제한.
 - 문헌을 인용하면 DOI/URL이 있을 때만 sources에 넣어라. 없으면 비워도 된다.
+- 미검증 물성값으로 합금 간 비교·순위·승자·개선률을 말하거나 첨가제·생산 적용을 추천하지 말라.
+- 신뢰도는 '조성·융점·젖음 근거 신뢰도'로 한정하고 기계물성 검증률이라고 하지 말라.
 
 {body}
 반드시 한국어 JSON만 출력:
@@ -1168,6 +1570,12 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         if not data.get("imc"):
             fb = self._build_local_fallback(norm, result, knn, literature_mode=literature_mode, mode=mode)
             data["imc"] = fb["imc"]
+
+        AIEngine._enforce_ai_property_safety(data)
+        data["summary"] = AIEngine._append_safety_note(
+            data.get("summary"),
+            f"공정 피크 상태: {process_peak_line}",
+        )
 
         try:
             if bool(data.get("ai_used_this_request", False)):
@@ -1367,7 +1775,12 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
                     lines.append(f"      - {label}: {ps[key]}")
         wet = evidence.get("wetting") if isinstance(evidence.get("wetting"), dict) else {}
         if wet:
-            lines.append(f"  · 젖음: source={wet.get('source')}")
+            lines.append(
+                f"  · 젖음: source={wet.get('source')}, "
+                f"source_kind={wet.get('source_kind')}, value_type={wet.get('value_type')}, "
+                f"verification={wet.get('verification_status')}, "
+                f"comparison_allowed={wet.get('comparison_allowed')}"
+            )
         unk = evidence.get("unknown_elements") if isinstance(evidence.get("unknown_elements"), dict) else {}
         if unk and (unk.get("names") or unk.get("total_pct")):
             lines.append(
@@ -1380,10 +1793,16 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         r = self._safe_dict(result)
         best = self._safe_dict(r.get("best"))
         props = self._safe_dict(r.get("props"))
-        solidus = float(r.get("solidus", 0.0) or 0.0)
-        liquidus = float(r.get("liquidus", 0.0) or 0.0)
-        peak = float(r.get("peak", 0.0) or 0.0)
-        delta_t = liquidus - solidus
+        solidus = self._optional_report_number(r.get("solidus"))
+        liquidus = self._optional_report_number(r.get("liquidus"))
+        solidus_s = self._format_optional_measurement(solidus, 2, "℃")
+        liquidus_s = self._format_optional_measurement(liquidus, 2, "℃")
+        delta_t_s = self._format_optional_measurement(
+            liquidus - solidus if liquidus is not None and solidus is not None else None,
+            2,
+            "℃",
+        )
+        process_peak_line = self._process_peak_report_line(r, digits=2)
         score = float(r.get("score", 0.0) or 0.0)
         conf = float(r.get("confidence", 0.0) or 0.0)
         overall = float(r.get("confidence_overall", 0.0) or 0.0)
@@ -1399,11 +1818,24 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         roles_raw = r.get("element_roles") or "N/A"
         dop_raw = r.get("dopant_rec") or "N/A"
 
-        _tdb_lab = props.get("tensile_strength_db_mpa")
-        try:
-            _tdb_lab_s = f"{float(_tdb_lab):.2f} MPa" if _tdb_lab is not None else "N/A"
-        except Exception:
-            _tdb_lab_s = "N/A"
+        shear_s = self._format_optional_measurement(props.get("shear_strength"), 2, "MPa")
+        tensile_s = self._format_optional_measurement(props.get("tensile_strength"), 2, "MPa")
+        yield_s = self._format_optional_measurement(props.get("yield_strength"), 2, "MPa")
+        elongation_s = self._format_optional_measurement(props.get("elongation"), 2, "%")
+        wetting_fmax_s = self._format_optional_measurement(
+            props.get("wetting_fmax_pred_mn"), 2, "mN"
+        )
+        wetting_t0_s = self._format_optional_measurement(
+            props.get("wetting_t0_pred_s"), 2, "s"
+        )
+        tensile_db_s = self._format_optional_measurement(
+            props.get("tensile_strength_db_mpa"), 2, "MPa"
+        )
+        shear_prov = self._mechanical_report_provenance(r, "shear_strength")
+        tensile_prov = self._mechanical_report_provenance(r, "tensile_strength")
+        yield_prov = self._mechanical_report_provenance(r, "yield_strength")
+        elongation_prov = self._mechanical_report_provenance(r, "elongation")
+        wetting_prov = self._wetting_report_provenance(r)
         hdr = (
             "\n"
             "────────────────────────────────────────────────────────────────────────────\n"
@@ -1436,7 +1868,8 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
   · 액상선 온도: {best.get('liquidus', 'N/A')} ℃
   · 조성 거리(유사도): {score:.4f}
   · 신뢰도(DB 일치): {conf:.1f} %
-  · 종합 신뢰도(가중·페널티 반영): {overall:.1f} %
+  · 조성·융점·젖음 근거 신뢰도(가중·페널티 반영): {overall:.1f} %
+    (인장·전단 등 기계물성 검증률이 아님)
 
 [4] KNN 유사 조성 (상위 참고)
 {knn_block}
@@ -1455,13 +1888,15 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 [7] 리스크 분석
 {self._fmt_bullets(r.get('risk', []))}
 
-[8] 물성 예측 (가중 보정 반영)
-  · 전단강도: {float(props.get('shear_strength', 0.0) or 0.0):.2f} MPa
-  · 인장강도: {float(props.get('tensile_strength', 0.0) or 0.0):.2f} MPa
-  · 항복강도: {float(props.get('yield_strength', 0.0) or 0.0):.2f} MPa
-  · 연신율: {float(props.get('elongation', 0.0) or 0.0):.2f} %
-  · 젖음 Fmax (IDW·측정 DB, mN): {float(props.get('wetting_fmax_pred_mn', 0.0) or 0.0):.2f}
-  · 물성 DB 인장: {_tdb_lab_s}
+[8] 물성 참고값 (원출처·시험조건 검증 전 정량 비교·추천 제외)
+  · 전단강도: {shear_s} [{shear_prov}]
+  · 인장강도: {tensile_s} [{tensile_prov}]
+  · 항복강도: {yield_s} [{yield_prov}]
+  · 연신율: {elongation_s} [{elongation_prov}]
+  · 젖음 Fmax: {wetting_fmax_s} [{wetting_prov}]
+  · 젖음 T₀: {wetting_t0_s} [{wetting_prov}]
+  · 물성 DB 인장: {tensile_db_s} [보조 DB 추정 · 원출처·시험조건 미확인 · 검증 보류]
+  · 해석 제한: {_PROPERTY_REFERENCE_NOTE}
   · 수치·혼합 근거(내부 엔진 라벨, 모델 vs properties DB 가중):
 {ev_block}
 
@@ -1469,17 +1904,18 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
   · 융점 추정 엔진 세부(하이브리드)
 {melting_lines}
 
-  · 고상선 온도(최종): {solidus:.2f} ℃
-  · 액상선 온도(최종): {liquidus:.2f} ℃
-  · 액상 구간(ΔT): {delta_t:.2f} ℃
-  · 권장 피크 온도: {peak:.2f} ℃
+  · 고상선 온도(최종): {solidus_s}
+  · 액상선 온도(최종): {liquidus_s}
+  · 액상 구간(ΔT): {delta_t_s}
+  · {process_peak_line}
   · 공정 해석: ΔT가 작을수록 융해 거동이 예민하므로 승온 속도와 피크 유지 시간을 엄격히 제어해야 함
 
 [10] 구성 원소 역할
 {AIEngine._indent_text_block(str(roles_raw), "  ")}
 
-[11] 미량 첨가(도핑) 권장 (강도·젖음·취성 영향)
+[11] 규칙 기반 미량 첨가(도핑) 후보 (실험 승인 전 생산 권장 아님)
 {AIEngine._indent_text_block(str(dop_raw), "  ")}
+  · {_DOPANT_REFERENCE_NOTE}
 
 [12] 통합 AI 요약 (온도·물성·문헌·신뢰도 서술, Gemini 또는 로컬 하이브리드)
 {AIEngine._indent_text_block(str(ai_summary_raw), "  ")}
@@ -1489,7 +1925,7 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 
 [*] 추가 실험·검증 제안
   · 리플로우·열사이클 시험 조건, 시편 준비, 기판·도금 조건 등을 간략히 정리한다.
-  · AI는 위 상변태·리스크·물성 결과를 바탕으로 필요한 경우에만 제안한다.
+  · 미검증 기계물성·젖음 수치는 실험·생산 추천 근거에서 제외하고, 조성·상규칙·융점·표준으로 시험 가설만 제안한다.
 {ftr}"""
         return txt
 
@@ -1498,14 +1934,31 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
         r = self._safe_dict(result)
         best = self._safe_dict(r.get("best"))
         props = self._safe_dict(r.get("props"))
-        solidus = float(r.get("solidus", 0.0) or 0.0)
-        liquidus = float(r.get("liquidus", 0.0) or 0.0)
-        peak = float(r.get("peak", 0.0) or 0.0)
+        solidus_s = self._format_optional_measurement(r.get("solidus"), 0, "℃")
+        liquidus_s = self._format_optional_measurement(r.get("liquidus"), 0, "℃")
+        process_peak_line = self._process_peak_report_line(
+            r, digits=0, approximate=True
+        )
         conf = float(r.get("confidence", 0.0) or 0.0)
         overall = float(r.get("confidence_overall", 0.0) or 0.0)
         knn_names = ", ".join([self._safe_dict(item).get("name", "N/A") for _, item in (knn or [])][:3])
         if not knn_names:
             knn_names = "없음"
+        shear_s = self._format_optional_measurement(props.get("shear_strength"), 0, "MPa")
+        tensile_s = self._format_optional_measurement(props.get("tensile_strength"), 0, "MPa")
+        yield_s = self._format_optional_measurement(props.get("yield_strength"), 0, "MPa")
+        elongation_s = self._format_optional_measurement(props.get("elongation"), 1, "%")
+        wetting_fmax_s = self._format_optional_measurement(
+            props.get("wetting_fmax_pred_mn"), 2, "mN"
+        )
+        wetting_t0_s = self._format_optional_measurement(
+            props.get("wetting_t0_pred_s"), 2, "s"
+        )
+        shear_prov = self._mechanical_report_provenance(r, "shear_strength")
+        tensile_prov = self._mechanical_report_provenance(r, "tensile_strength")
+        yield_prov = self._mechanical_report_provenance(r, "yield_strength")
+        elongation_prov = self._mechanical_report_provenance(r, "elongation")
+        wetting_prov = self._wetting_report_provenance(r)
 
         txt = f"""
 ============================================================
@@ -1516,13 +1969,13 @@ sources에는 인용한 DOI/URL 문자열만 넣고, 없으면 빈 배열.
 {comp_str}
 
 납땜 온도만 먼저
-- 녹기 시작(고상선): 약 {solidus:.0f} ℃
-- 완전히 녹음(액상선): 약 {liquidus:.0f} ℃
-- 오븐 피크를 맞출 때 참고할 온도: 약 {peak:.0f} ℃
+- 녹기 시작(고상선): {solidus_s}
+- 완전히 녹음(액상선): {liquidus_s}
+- {process_peak_line}
 
 DB에서 가장 비슷한 이름
-- {best.get('name', 'N/A')} (대략 맞을 가능성 {conf:.0f}% 정도로 이해하시면 됩니다)
-- 한 번에 믿기 어렵다면 종합 참고치 약 {overall:.0f}% 수준으로 보세요.
+- {best.get('name', 'N/A')} (조성 DB 일치 근거 {conf:.0f}% 정도로 이해하시면 됩니다)
+- 조성·융점·젖음 근거 신뢰도는 약 {overall:.0f}%입니다. 기계물성 검증률이 아닙니다.
 
 비슷한 조성 예시 이름
 - {knn_names}
@@ -1539,8 +1992,14 @@ DB에서 가장 비슷한 이름
 추가로 넣을 첨가가 필요할까?
 {(r.get('dopant_rec') or '이 조성만으로도 목적에 맞을 수 있습니다. 바꾸려면 제조사·전문가와 상의하세요.')}
 
-강도·잘 스며드는 정도(참고 숫자)
-- 전단·인장 등은 대략 {float(props.get('shear_strength', 0.0) or 0.0):.0f} / {float(props.get('tensile_strength', 0.0) or 0.0):.0f} MPa 수준으로만 이해하세요. 정확한 값은 데이터시트가 우선입니다.
+강도·연신·젖음(원출처·시험조건 검증 전 참고 전용)
+- 전단: {shear_s} [{shear_prov}]
+- 인장: {tensile_s} [{tensile_prov}]
+- 항복: {yield_s} [{yield_prov}]
+- 연신: {elongation_s} [{elongation_prov}]
+- 젖음 Fmax / T₀: {wetting_fmax_s} / {wetting_t0_s} [{wetting_prov}]
+- {_PROPERTY_REFERENCE_NOTE}
+- {_DOPANT_REFERENCE_NOTE}
 
 더 깊은 용어·문헌·KNN 거리가 필요하면 화면에서 「연구소 모드」로 분석을 다시 실행하세요.
 ============================================================

@@ -59,7 +59,12 @@ const sampleResult = {
 
   element_roles: "Sn: 기본 기지, Bi: 융점 저감",
 
-  dopant_rec: "Cu 0.5~1% 유지 권장"
+  dopant_rec: "Cu 0.5~1% 유지 권장",
+
+  // Process slides/charts are emitted only for an explicitly allowed contract.
+  prediction_contract: {
+    process_recommendation: { allowed: true }
+  }
 
 };
 
@@ -175,4 +180,3 @@ describe("professionalReportSlides", () => {
   });
 
 });
-

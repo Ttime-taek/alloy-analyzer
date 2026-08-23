@@ -4348,15 +4348,33 @@ function standardSourceLine(ref) {
   return `${label}${note}${url ? ` URL:${url}` : ""}`;
 }
 
-function strengthSourceLine(ref) {
+function isLegacyInternalStrengthReference(ref) {
+  const sourceKind = typeof ref?.source_kind === "string" ? ref.source_kind.trim().toLowerCase() : "";
+  const valueType = typeof ref?.value_type === "string" ? ref.value_type.trim().toLowerCase() : "";
+  const source = typeof ref?.source === "string" ? ref.source.replace(/\s+/g, "").toLowerCase() : "";
+  return (
+    sourceKind === "legacy_internal_db_mean" ||
+    valueType === "legacy_internal_db_mean" ||
+    source.includes("내부실측db평균") ||
+    source.includes("레거시내부db평균")
+  );
+}
+
+export function strengthSourceLine(ref) {
   const parts = [];
+  const isLegacyInternal = isLegacyInternalStrengthReference(ref);
   if (ref?.alloy) parts.push(String(ref.alloy));
   if (ref?.tensile_mpa != null) parts.push(`UTS≈${ref.tensile_mpa} MPa`);
-  if (ref?.source) parts.push(String(ref.source));
-  if (ref?.citation) parts.push(String(ref.citation));
-  const url = safeHttpUrl(ref?.url);
+  if (ref?.shear_mpa != null) parts.push(`전단≈${ref.shear_mpa} MPa`);
+  if (isLegacyInternal) parts.push("레거시 내부 DB 평균");
+  else if (ref?.source) parts.push(String(ref.source));
+  if (!isLegacyInternal && ref?.citation) parts.push(String(ref.citation));
+  const sourceLinkUnavailable = isLegacyInternal || ref?.source_link_status === "unavailable";
+  const url = sourceLinkUnavailable ? null : safeHttpUrl(ref?.url);
+  const doi = !sourceLinkUnavailable && typeof ref?.doi === "string" ? ref.doi.trim() : "";
   if (url) parts.push(`URL:${url}`);
-  else if (ref?.doi) parts.push(`DOI:${ref.doi}`);
+  else if (doi) parts.push(`DOI:${doi}`);
+  else parts.push("원출처 링크 미확인 · 시험조건 미확인 · 참고 전용");
   return parts.join(" — ");
 }
 
@@ -4400,7 +4418,7 @@ export function SourceReferences({ result, showAiCitations = true, showIntro = t
       {strengthRefs.length > 0 ? (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 6 }}>
-            기계적 물성 문헌 참고
+            기계적 물성 출처·참고값
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, listStyleType: "disc" }}>
             {strengthRefs.map((ref, index) => (
@@ -4549,86 +4567,103 @@ const SUMMARY_VARIANT_HINT = {
   solidus: "응고가 시작되는 쪽 온도(추정)",
   liquidus: "완전 액상(추정)",
   peak: "DSC/DTA 등 주요 열역학 신호(추정)",
-  wetting:
-    "젖음 측정 DB에서 IDW 보간한 Fmax(mN)·T₀(s). 상단에서 예측 온도(자동 또는 250–290℃) 선택 후 분석",
-  tensileDb: "물성 DB 유사 합금 IDW 인장(MPa). BD 근접(≤3)이면 MODEL과 블렌드, 멀면 MODEL 대신 IDW·문헌만 표시"
+  tensileDb: "물성 DB 유사 합금 IDW 인장(MPa). DB 근접(≤3)이면 MODEL과 블렌드, 멀면 MODEL 대신 IDW·문헌만 표시"
 };
+
+export const OVERALL_CONFIDENCE_SCOPE_LABEL = "조성·융점/젖음 근거 신뢰도";
 
 /** 하단 폰트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
 const SUMMARY_COMPACT_VALUE_VARIANTS = new Set(["wetting", "tensileDb"]);
 
-function SummaryWettingTensileFootnotes() {
+function SummaryWettingTensileFootnotes({ result }) {
   return (
     <div className="summary-wetting-tensile-footnotes">
       <p>
         <span className="summary-footnote-label--wetting">젖음 Fmax</span>
         {" — "}
-        {SUMMARY_VARIANT_HINT.wetting}
+        {wettingSourceDescription(result)}
       </p>
       <p>
-        <span className="summary-footnote-label--tensile">물성 DB 인장</span>
+        <span className="summary-footnote-label--tensile">인장 최종값</span>
         {" — "}
-        {SUMMARY_VARIANT_HINT.tensileDb}
+        {tensileProvenanceWarning(result) || SUMMARY_VARIANT_HINT.tensileDb}
       </p>
     </div>
   );
 }
 
 function formatWettingFmaxPrimary(props) {
-  const f = Number(props?.wetting_fmax_pred_mn);
-  const t0 = Number(props?.wetting_t0_pred_s);
-  const tc = Number(props?.wetting_temp_c);
-  if (!Number.isFinite(f)) return "—";
+  const f = optionalFiniteNumber(props?.wetting_fmax_pred_mn);
+  const t0 = optionalFiniteNumber(props?.wetting_t0_pred_s);
+  const tc = optionalFiniteNumber(props?.wetting_temp_c);
+  if (f == null) return "N/A";
   let s = `${f.toFixed(2)} mN`;
-  if (Number.isFinite(t0)) s += `\nT₀ ${t0.toFixed(2)} s`;
-  if (Number.isFinite(tc)) s += ` @ ${tc.toFixed(0)}℃`;
+  if (t0 != null) s += `\nT₀ ${t0.toFixed(2)} s`;
+  if (tc != null) s += ` @ ${tc.toFixed(0)}℃`;
   return s;
 }
 
 function formatTensileDbMpa(props) {
-  if (props?.tensile_strength_db_mpa == null) return "—";
-  const v = Number(props?.tensile_strength_db_mpa);
-  return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : "—";
+  const v = optionalFiniteNumber(props?.tensile_strength_db_mpa);
+  // 단일 요약 KPI는 기존 UI 계약인 em dash를 유지한다.
+  // 비교 표·막대·보고서의 누락 물성은 별도로 N/A를 표시한다.
+  return v == null ? "—" : `${v.toFixed(1)} MPa`;
 }
 
 export function formatTensilePrimary(props) {
-  if (props?.tensile_strength == null) return formatTensileDbMpa(props);
-  const v = Number(props?.tensile_strength);
-  return Number.isFinite(v) ? `${v.toFixed(1)} MPa` : formatTensileDbMpa(props);
+  const v = optionalFiniteNumber(props?.tensile_strength);
+  return v == null ? formatTensileDbMpa(props) : `${v.toFixed(1)} MPa`;
 }
 
 function formatDensityPrimary(props) {
-  const v = Number(props?.density);
-  return Number.isFinite(v) ? `${v.toFixed(2)} g/cm³` : "N/A";
+  const v = optionalFiniteNumber(props?.density);
+  return v == null ? "N/A" : `${v.toFixed(2)} g/cm³`;
 }
 
-export function tensileSummaryLabel(props) {
+function formatOptionalValue(value, digits = 1, unit = "") {
+  const number = optionalFiniteNumber(value);
+  return number == null ? "N/A" : `${number.toFixed(digits)}${unit}`;
+}
+
+function formatOptionalDifference(left, right, digits = 2, unit = "") {
+  const leftNumber = optionalFiniteNumber(left);
+  const rightNumber = optionalFiniteNumber(right);
+  return leftNumber == null || rightNumber == null
+    ? "N/A"
+    : `${(leftNumber - rightNumber).toFixed(digits)}${unit}`;
+}
+
+export function tensileSummaryLabel(props, result = null) {
   const basis = props?.tensile_strength_basis;
-  if (basis === "db_priority") return "인장 (DB우선)";
-  if (basis === "db_idw") return "인장 (BD유사 IDW)";
-  if (basis === "lit_ref") return "인장 (문헌 참고)";
-  if (basis === "lit_blend") return "인장 (문헌 보정)";
-  if (basis === "db_blend") return "인장 (BD 블렌드)";
-  return "물성 DB 인장";
+  let label = "물성 DB 인장";
+  if (basis === "db_priority") label = "인장 (DB우선)";
+  else if (basis === "db_idw") label = "인장 (DB유사 IDW)";
+  else if (basis === "lit_ref") label = "인장 (문헌 참고)";
+  else if (basis === "lit_blend") label = "인장 (문헌 보정)";
+  else if (basis === "db_blend") label = "인장 (DB 블렌드)";
+  else if (basis === "model_prediction") label = "인장 (조성 모델 예측)";
+  const provenanceResult = result && typeof result === "object" ? result : { props };
+  const verified = mechanicalMetadataDescriptor(provenanceResult, "tensile_strength")?.verified === true;
+  return verified ? label : `${label} · 참고 전용`;
 }
 
 export function tensileCompareLabel(a, b) {
   const bases = [a?.props?.tensile_strength_basis, b?.props?.tensile_strength_basis].filter(Boolean);
   if (new Set(bases).size > 1) return "인장 (최종값)";
   if (bases.includes("db_priority")) return "인장 (DB우선)";
-  if (bases.includes("db_idw")) return "인장 (BD유사)";
+  if (bases.includes("db_idw")) return "인장 (DB유사)";
   if (bases.includes("lit_ref")) return "인장 (문헌)";
   if (bases.includes("lit_blend")) return "인장 (문헌보정)";
-  if (bases.includes("db_blend")) return "인장 (BD 블렌드)";
+  if (bases.includes("db_blend")) return "인장 (DB 블렌드)";
+  if (bases.includes("model_prediction")) return "인장 (조성 모델 예측)";
   return "인장강도";
 }
 
 export function compareTensileMetric(a, b) {
   const value = (side) => {
-    const finalValue = Number(side?.props?.tensile_strength);
-    if (Number.isFinite(finalValue)) return finalValue;
-    const dbValue = Number(side?.props?.tensile_strength_db_mpa);
-    return Number.isFinite(dbValue) ? dbValue : null;
+    const finalValue = optionalFiniteNumber(side?.props?.tensile_strength);
+    if (finalValue != null) return finalValue;
+    return optionalFiniteNumber(side?.props?.tensile_strength_db_mpa);
   };
   return {
     label: tensileCompareLabel(a, b),
@@ -4637,12 +4672,25 @@ export function compareTensileMetric(a, b) {
   };
 }
 
+export function tensileComparisonAllowed(a, b) {
+  const contractAllows = (result) => {
+    const contract = result?.prediction_contract;
+    if (contract == null) return true;
+    return contract?.properties?.tensile_strength_mpa?.comparison_allowed === true;
+  };
+  return Boolean(
+    mechanicalComparisonAllowed(a, b, "tensile_strength") &&
+    contractAllows(a) &&
+    contractAllows(b)
+  );
+}
+
 function showCompareDbTensileRow(a, b) {
   const hideA = ["db_priority", "db_idw"].includes(a?.props?.tensile_strength_basis);
   const hideB = ["db_priority", "db_idw"].includes(b?.props?.tensile_strength_basis);
   if (hideA && hideB) return false;
-  const hasA = !hideA && Number.isFinite(Number(a?.props?.tensile_strength_db_mpa));
-  const hasB = !hideB && Number.isFinite(Number(b?.props?.tensile_strength_db_mpa));
+  const hasA = !hideA && optionalFiniteNumber(a?.props?.tensile_strength_db_mpa) != null;
+  const hasB = !hideB && optionalFiniteNumber(b?.props?.tensile_strength_db_mpa) != null;
   return hasA || hasB;
 }
 
@@ -4801,10 +4849,14 @@ function SummaryCard({ label, value, variant }) {
   );
 }
 
-function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC, onLoadGrid, loadPending, loadError }) {
+function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, basis, targetC, onLoadGrid, loadPending, loadError }) {
   const list = Array.isArray(rows) ? rows : [];
+  const proxyTempNumber = optionalFiniteNumber(proxyTemp);
+  const targetNumber = optionalFiniteNumber(targetC);
+  const liquidusNumber = optionalFiniteNumber(liquidus);
   const hi =
-    Number.isFinite(Number(proxyTemp)) && list.some((r) => Number(r.temp_c) === Number(proxyTemp));
+    proxyTempNumber != null &&
+    list.some((r) => optionalFiniteNumber(r?.temp_c) === proxyTempNumber);
   if (list.length === 0) {
     const hint =
       source === "Heuristic"
@@ -4869,20 +4921,20 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
             color: "var(--text-primary)"
           }}
         >
-          젖음 예측 (IDW)
-        {Number.isFinite(Number(proxyTemp)) ? (
-          <span style={{ fontWeight: 500, color: "#94a3b8", marginLeft: 8 }}>
-            {basis === "compare_shared"
-              ? `대표 행: 비교 공통 ${Number(proxyTemp).toFixed(0)}℃`
-              : basis === "user" && Number.isFinite(Number(targetC))
-                ? `대표 행: 선택 ${Number(targetC).toFixed(0)}℃ · ${Number(proxyTemp).toFixed(0)}℃`
-                : basis === "auto_liq_plus_30" &&
-                    Number.isFinite(Number(liquidus)) &&
-                    Number.isFinite(Number(targetC))
-                  ? `대표 행: 액상선 ${Number(liquidus).toFixed(1)}℃ +30°(목표≈${Number(targetC).toFixed(1)}℃) · ${Number(proxyTemp).toFixed(0)}℃`
-                  : `대표 행: ${Number(proxyTemp).toFixed(0)}℃`}
-          </span>
-        ) : null}
+          젖음 {sourceKind === "measured_db" ? "측정 DB" : sourceKind === "idw_prediction" ? "IDW 예측" : "근거 미확인"}
+          {proxyTempNumber != null ? (
+            <span style={{ fontWeight: 500, color: "#94a3b8", marginLeft: 8 }}>
+              {basis === "compare_shared"
+                ? `대표 행: 비교 공통 ${proxyTempNumber.toFixed(0)}℃`
+                : basis === "user" && targetNumber != null
+                  ? `대표 행: 선택 ${targetNumber.toFixed(0)}℃ · ${proxyTempNumber.toFixed(0)}℃`
+                  : basis === "auto_liq_plus_30" &&
+                      liquidusNumber != null &&
+                      targetNumber != null
+                    ? `대표 행: 액상선 ${liquidusNumber.toFixed(1)}℃ +30°(목표≈${targetNumber.toFixed(1)}℃) · ${proxyTempNumber.toFixed(0)}℃`
+                    : `대표 행: ${proxyTempNumber.toFixed(0)}℃`}
+            </span>
+          ) : null}
         </div>
         {typeof onLoadGrid === "function" ? (
           <TactileButton
@@ -4920,8 +4972,10 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
           </thead>
           <tbody>
             {list.map((r) => {
-              const rowHi =
-                hi && Number(r.temp_c) === Number(proxyTemp);
+              const rowTemp = optionalFiniteNumber(r?.temp_c);
+              const rowFmax = optionalFiniteNumber(r?.fmax_mn);
+              const rowT0 = optionalFiniteNumber(r?.t0_s);
+              const rowHi = hi && rowTemp === proxyTempNumber;
               const cell = {
                 ...ruleTd,
                 ...(rowHi
@@ -4930,13 +4984,9 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
               };
               return (
                 <tr key={r.temp_c}>
-                  <td style={cell}>{Number(r.temp_c).toFixed(0)}</td>
-                  <td style={cell}>
-                    {Number.isFinite(Number(r.fmax_mn)) ? Number(r.fmax_mn).toFixed(2) : "—"}
-                  </td>
-                  <td style={cell}>
-                    {Number.isFinite(Number(r.t0_s)) ? Number(r.t0_s).toFixed(2) : "—"}
-                  </td>
+                  <td style={cell}>{rowTemp == null ? "N/A" : rowTemp.toFixed(0)}</td>
+                  <td style={cell}>{rowFmax == null ? "N/A" : rowFmax.toFixed(2)}</td>
+                  <td style={cell}>{rowT0 == null ? "N/A" : rowT0.toFixed(2)}</td>
                 </tr>
               );
             })}
@@ -4947,7 +4997,11 @@ function WettingByTempTable({ rows, proxyTemp, source, liquidus, basis, targetC,
         <p style={{ fontSize: 12, color: "#f97316", margin: "8px 0 0 0" }}>{loadError}</p>
       ) : null}
       <p style={{ fontSize: 11, color: "#64748b", margin: "8px 0 0 0", lineHeight: 1.45 }}>
-        높은 Fmax·낮은 T₀가 일반적으로 유리합니다. 상단 카드는 선택한 예측 온도(측정 DB 250–290℃에 맞춘 값)에서의 대표값입니다.
+        높은 Fmax·낮은 T₀가 일반적으로 유리합니다. {sourceKind === "measured_db"
+          ? "표와 상단 카드는 등록 조성·온도와 일치한 측정값입니다."
+          : sourceKind === "idw_prediction"
+            ? "표와 상단 카드는 측정 DB를 조성·온도로 IDW 보간한 예측값입니다."
+            : "표시된 원출처와 검증 상태를 먼저 확인하세요."}
       </p>
     </div>
   );
@@ -5041,36 +5095,34 @@ function ResultSummaryBlock({
           alignItems: "stretch"
         }}
       >
-        <SummaryCard label="고상선" value={`${result.solidus.toFixed(1)} ℃`} variant="solidus" />
-        <SummaryCard label="액상선" value={`${result.liquidus.toFixed(1)} ℃`} variant="liquidus" />
-        <SummaryCard label="피크" value={`${result.peak.toFixed(1)} ℃`} variant="peak" />
+        <SummaryCard label="고상선" value={formatOptionalValue(result.solidus, 1, " ℃")} variant="solidus" />
+        <SummaryCard label="액상선" value={formatOptionalValue(result.liquidus, 1, " ℃")} variant="liquidus" />
+        <SummaryCard label="피크" value={formatOptionalValue(result.peak, 1, " ℃")} variant="peak" />
         {showDbMeta ? (
           <>
-            <SummaryCard label="DB 신뢰도" value={`${result.confidence.toFixed(1)} %`} variant="dbConfidence" />
+            <SummaryCard label="DB 신뢰도" value={formatOptionalValue(result.confidence, 1, " %")} variant="dbConfidence" />
             <SummaryCard
-              label="종합 신뢰도"
-              value={`${result.confidence_overall.toFixed(1)} %`}
+              label={OVERALL_CONFIDENCE_SCOPE_LABEL}
+              value={formatOptionalValue(result.confidence_overall, 1, " %")}
               variant="overallConfidence"
             />
             <SummaryCard label="최적 일치" value={result.best_name || "N/A"} variant="bestMatch" />
           </>
         ) : null}
         <SummaryCard
-          label="젖음 Fmax (IDW·측정 DB)"
+          label={`젖음 Fmax (${wettingSourceLabel(result)})`}
           value={formatWettingFmaxPrimary(result.props)}
           variant="wetting"
         />
-        {(result.props?.tensile_strength != null &&
-          Number.isFinite(Number(result.props.tensile_strength))) ||
-        (result.props?.tensile_strength_db_mpa != null &&
-          Number.isFinite(Number(result.props.tensile_strength_db_mpa))) ? (
+        {optionalFiniteNumber(result.props?.tensile_strength) != null ||
+        optionalFiniteNumber(result.props?.tensile_strength_db_mpa) != null ? (
           <SummaryCard
-            label={tensileSummaryLabel(result.props)}
+            label={tensileSummaryLabel(result.props, result)}
             value={formatTensilePrimary(result.props)}
             variant="tensileDb"
           />
         ) : null}
-        {Number.isFinite(Number(result.props?.density)) ? (
+        {optionalFiniteNumber(result.props?.density) != null ? (
           <SummaryCard
             label="비중"
             value={formatDensityPrimary(result.props)}
@@ -5078,10 +5130,10 @@ function ResultSummaryBlock({
           />
         ) : null}
       </div>
-      <SummaryWettingTensileFootnotes />
+      <SummaryWettingTensileFootnotes result={result} />
       {result.alloy_inference &&
-      result.alloy_inference.solidus != null &&
-      result.alloy_inference.liquidus != null ? (
+      optionalFiniteNumber(result.alloy_inference.solidus) != null &&
+      optionalFiniteNumber(result.alloy_inference.liquidus) != null ? (
         <div
           role="region"
           aria-label="데이터 추론 융점 및 리플로우 가이드"
@@ -5101,21 +5153,21 @@ function ResultSummaryBlock({
             보조 모델 교차확인 (공정 권장값에는 사용하지 않음)
           </div>
           <div style={{ marginBottom: 6 }}>
-            추정 고상선 {Number(result.alloy_inference.solidus).toFixed(1)} ℃ · 액상선{" "}
-            {Number(result.alloy_inference.liquidus).toFixed(1)} ℃
+            추정 고상선 {formatOptionalValue(result.alloy_inference.solidus, 1, " ℃")} · 액상선{" "}
+            {formatOptionalValue(result.alloy_inference.liquidus, 1, " ℃")}
           </div>
           {Array.isArray(result.alloy_inference.neighbors) && result.alloy_inference.neighbors.length ? (
             <div style={{ marginBottom: 8, color: "#94a3b8", fontSize: 11 }}>
               이웃:{" "}
               {result.alloy_inference.neighbors
-                .map((n) => `${n.name || "?"}(w=${Number(n.weight).toFixed(3)})`)
+                .map((n) => `${n.name || "?"}(w=${formatOptionalValue(n.weight, 3)})`)
                 .join(" · ")}
             </div>
           ) : null}
           <div style={{ marginBottom: 8, color: "#94a3b8", fontSize: 11, lineHeight: 1.45 }}>
             하이브리드 엔진 대비 Δ(추론 − 하이브리드): 고상{" "}
-            {(Number(result.alloy_inference.solidus) - Number(result.solidus)).toFixed(2)} ℃ · 액상{" "}
-            {(Number(result.alloy_inference.liquidus) - Number(result.liquidus)).toFixed(2)} ℃
+            {formatOptionalDifference(result.alloy_inference.solidus, result.solidus, 2, " ℃")} · 액상{" "}
+            {formatOptionalDifference(result.alloy_inference.liquidus, result.liquidus, 2, " ℃")}
           </div>
           <div style={{ color: "#64748b", fontSize: 11 }}>
             표시값과 차이가 크면 실제 DSC 측정을 우선하세요. 리플로우 차트는 위 검증 판정의 핵심 엔진 값만 사용합니다.
@@ -5131,6 +5183,7 @@ function ResultSummaryBlock({
           rows={wettingGridRows ?? result.props?.wetting_by_temp}
           proxyTemp={result.props?.wetting_temp_c}
           source={result.evidence?.wetting?.source}
+          sourceKind={wettingSourceKind(result)}
           liquidus={result.liquidus}
           basis={result.props?.wetting_temp_basis}
           targetC={result.props?.wetting_temp_target_c}
@@ -5166,6 +5219,293 @@ function formatCompareCompositionLabel(comp) {
     parts.push(`${k} ${t}%`);
   }
   return parts.length ? parts.join(" · ") : "—";
+}
+
+export function optionalFiniteNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function provenanceObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function opaqueProvenanceField(metadata, names) {
+  const values = names
+    .filter((name) => Object.prototype.hasOwnProperty.call(metadata || {}, name))
+    .map((name) => (typeof metadata[name] === "string" ? metadata[name].trim() : ""));
+  if (!values.length || values.some((value) => !value)) return "";
+  return new Set(values).size === 1 ? values[0] : "";
+}
+
+function mechanicalMetadataDescriptor(result, key) {
+  const propsContainer = result?.props?.mechanical_property_metadata;
+  const evidenceContainer = result?.evidence?.mechanical_properties;
+  if (
+    (propsContainer != null && !provenanceObject(propsContainer)) ||
+    (evidenceContainer != null && !provenanceObject(evidenceContainer))
+  ) {
+    return null;
+  }
+  const propsRaw = propsContainer?.[key];
+  const evidenceRaw = evidenceContainer?.[key];
+  const shearRaw = key === "shear_strength" ? result?.props?.shear_metadata : null;
+  if (
+    (propsRaw != null && !provenanceObject(propsRaw)) ||
+    (evidenceRaw != null && !provenanceObject(evidenceRaw)) ||
+    (shearRaw != null && !provenanceObject(shearRaw))
+  ) {
+    return null;
+  }
+  const propsMetadata = provenanceObject(propsRaw);
+  const evidenceMetadata = provenanceObject(evidenceRaw);
+  const shearMetadata = key === "shear_strength"
+    ? provenanceObject(shearRaw)
+    : null;
+  const selected = propsMetadata || evidenceMetadata || shearMetadata;
+  if (!selected) return null;
+  const signature = (metadata) => ({
+    sourceType: opaqueProvenanceField(metadata, ["source_type"]),
+    valueType: opaqueProvenanceField(metadata, ["value_type"]),
+    status: opaqueProvenanceField(metadata, ["verification_status"]),
+    allowed: metadata.comparison_allowed === true,
+    sourceId: opaqueProvenanceField(metadata, ["source_identifier", "source_id", "test_series_id"]),
+    basis: opaqueProvenanceField(metadata, ["comparison_basis", "test_standard", "test_method"])
+  });
+  const descriptor = signature(selected);
+  const signatures = [propsMetadata, evidenceMetadata, shearMetadata]
+    .filter(Boolean)
+    .map(signature);
+  if (signatures.some((item) => JSON.stringify(item) !== JSON.stringify(descriptor))) {
+    return null;
+  }
+  const allowedPairs = new Set([
+    "measured_db:measured",
+    "verified_property_db:verified_measured_mean",
+    "literature:literature_reference"
+  ]);
+  return {
+    ...descriptor,
+    verified:
+      descriptor.allowed &&
+      descriptor.status === "verified" &&
+      allowedPairs.has(`${descriptor.sourceType}:${descriptor.valueType}`) &&
+      Boolean(descriptor.sourceId && descriptor.basis)
+  };
+}
+
+function wettingMetadataDescriptor(result) {
+  const propsRaw = result?.props?.wetting_metadata;
+  const evidenceRaw = result?.evidence?.wetting;
+  if (
+    (propsRaw != null && !provenanceObject(propsRaw)) ||
+    (evidenceRaw != null && !provenanceObject(evidenceRaw))
+  ) {
+    return null;
+  }
+  const propsMetadata = provenanceObject(propsRaw);
+  const evidenceMetadata = provenanceObject(evidenceRaw);
+  const selected = propsMetadata || evidenceMetadata;
+  if (!selected) return null;
+  const signature = (metadata) => ({
+    kind: opaqueProvenanceField(metadata, ["source_kind"]),
+    valueType: opaqueProvenanceField(metadata, ["value_type"]),
+    status: opaqueProvenanceField(metadata, ["verification_status"]),
+    allowed: metadata.comparison_allowed === true,
+    sourceId: opaqueProvenanceField(metadata, ["source_identifier", "source_id", "dataset_id"]),
+    basis: opaqueProvenanceField(metadata, ["comparison_basis", "basis"])
+  });
+  const descriptor = signature(selected);
+  if (propsMetadata && evidenceMetadata) {
+    if (JSON.stringify(descriptor) !== JSON.stringify(signature(evidenceMetadata))) return null;
+  }
+  const validPair =
+    (descriptor.kind === "measured_db" && ["measured", "direct_db_record"].includes(descriptor.valueType)) ||
+    (descriptor.kind === "idw_prediction" && descriptor.valueType === "idw_prediction");
+  const allowedBases = new Set(["auto_liq_plus_30", "compare_shared", "user"]);
+  const parentBasis = typeof result?.props?.wetting_temp_basis === "string"
+    ? result.props.wetting_temp_basis.trim()
+    : "";
+  const temperature = optionalFiniteNumber(result?.props?.wetting_temp_c);
+  const evidenceTemperature = optionalFiniteNumber(result?.evidence?.wetting?.temperature_c);
+  const metadataTemperatures = [propsMetadata, evidenceMetadata]
+    .filter(Boolean)
+    .map((metadata) => optionalFiniteNumber(metadata.temperature_c));
+  const temperatureCopiesAgree =
+    temperature != null &&
+    evidenceMetadata != null &&
+    evidenceTemperature != null &&
+    Math.abs(evidenceTemperature - temperature) < 1e-6 &&
+    metadataTemperatures.every(
+      (metadataTemperature) =>
+        metadataTemperature != null && Math.abs(metadataTemperature - temperature) < 1e-6
+    );
+  return {
+    ...descriptor,
+    temperature,
+    verified:
+      descriptor.allowed &&
+      descriptor.status === "verified" &&
+      validPair &&
+      Boolean(descriptor.sourceId) &&
+      allowedBases.has(descriptor.basis) &&
+      parentBasis === descriptor.basis &&
+      temperatureCopiesAgree
+  };
+}
+
+function wettingSourceDescriptor(result) {
+  const propsRaw = result?.props?.wetting_metadata;
+  const evidenceRaw = result?.evidence?.wetting;
+  if (
+    (propsRaw != null && !provenanceObject(propsRaw)) ||
+    (evidenceRaw != null && !provenanceObject(evidenceRaw))
+  ) return null;
+  const copies = [provenanceObject(propsRaw), provenanceObject(evidenceRaw)].filter(Boolean);
+  if (!copies.length) return null;
+  const sourceSignature = (metadata) => ({
+    kind: opaqueProvenanceField(metadata, ["source_kind"]),
+    valueType: opaqueProvenanceField(metadata, ["value_type"])
+  });
+  const first = sourceSignature(copies[0]);
+  if (copies.some((metadata) => JSON.stringify(sourceSignature(metadata)) !== JSON.stringify(first))) {
+    return null;
+  }
+  const validPair =
+    (first.kind === "measured_db" && ["measured", "direct_db_record"].includes(first.valueType)) ||
+    (first.kind === "idw_prediction" && first.valueType === "idw_prediction");
+  return validPair ? first : null;
+}
+
+export function wettingSourceKind(result) {
+  return wettingSourceDescriptor(result)?.kind || "legacy_unverified";
+}
+
+export function wettingSourceLabel(result) {
+  const kind = wettingSourceKind(result);
+  if (kind === "measured_db") {
+    return wettingIsVerified(result) ? "측정 DB" : "측정 DB(시험조건 미확인)";
+  }
+  if (kind === "idw_prediction") return "IDW 예측(검증 보류)";
+  if (kind === "heuristic") return "휴리스틱 추정";
+  return "근거 미확인";
+}
+
+export function wettingSourceDescription(result) {
+  const kind = wettingSourceKind(result);
+  if (kind === "measured_db") {
+    if (wettingIsVerified(result)) {
+      return "등록 조성·온도와 일치한 측정값(Fmax·T₀)입니다.";
+    }
+    return "등록 조성·온도의 직접 DB 기록입니다. 원출처·시험조건 확인 전까지 참고 전용입니다.";
+  }
+  if (kind === "idw_prediction") {
+    return "인접한 젖음 측정 DB를 조성·온도로 IDW 보간한 예측값(Fmax·T₀)입니다.";
+  }
+  if (kind === "heuristic") {
+    return "젖음 측정 DB 보간 없이 휴리스틱으로 추정한 값입니다.";
+  }
+  return "젖음 값의 원출처와 검증 상태를 확인해야 합니다.";
+}
+
+function wettingIsVerified(result) {
+  return wettingMetadataDescriptor(result)?.verified === true;
+}
+
+function mechanicalPropertyMetadata(result, key) {
+  const metadata =
+    result?.props?.mechanical_property_metadata?.[key] ??
+    result?.evidence?.mechanical_properties?.[key] ??
+    (key === "shear_strength" ? result?.props?.shear_metadata : null);
+  return provenanceObject(metadata);
+}
+
+export function mechanicalComparisonAllowed(a, b, key) {
+  const metadataA = mechanicalMetadataDescriptor(a, key);
+  const metadataB = mechanicalMetadataDescriptor(b, key);
+  if (
+    !metadataA ||
+    !metadataB ||
+    optionalFiniteNumber(a?.props?.[key]) == null ||
+    optionalFiniteNumber(b?.props?.[key]) == null
+  ) return false;
+  return Boolean(
+    metadataA.verified &&
+    metadataB.verified &&
+    metadataA.sourceType === metadataB.sourceType &&
+    metadataA.valueType === metadataB.valueType &&
+    metadataA.sourceId === metadataB.sourceId &&
+    metadataA.basis === metadataB.basis
+  );
+}
+
+function normalizedMetadataToken(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+export function mechanicalPropertySourceLabel(result, key) {
+  const metadata = mechanicalPropertyMetadata(result, key) || {};
+  const valueType = normalizedMetadataToken(metadata.value_type);
+  const sourceType = normalizedMetadataToken(metadata.source_type);
+  const sourceLabel = String(metadata.source_label || "").trim();
+  const basis = normalizedMetadataToken(
+    metadata.basis ?? result?.props?.[`${key}_basis`]
+  );
+  const combined = `${valueType} ${sourceType} ${sourceLabel.toLowerCase()} ${basis}`;
+
+  if (valueType === "legacy_measured_mean") return "DB 평균(시험조건 미확인)";
+  if (combined.includes("idw")) return "DB IDW 예측";
+  if (valueType === "legacy_db_estimate" || sourceType === "legacy_property_db") {
+    return "DB 추정(시험조건 미확인)";
+  }
+  if (valueType === "measured" || valueType === "measured_db") return "DB 측정값";
+  if (combined.includes("lit") || sourceType === "literature") return "문헌 참고";
+  if (combined.includes("model") || sourceType === "model") return "모델 예측";
+  if (combined.includes("db")) return "DB 값(시험조건 미확인)";
+  return "근거 미확인";
+}
+
+function mechanicalComparisonLabel(base, a, b, key) {
+  const labelA = mechanicalPropertySourceLabel(a, key);
+  const labelB = mechanicalPropertySourceLabel(b, key);
+  const source = labelA === labelB ? labelA : `A ${labelA} / B ${labelB}`;
+  return `${base} · ${source}`;
+}
+
+export function tensileProvenanceWarning(result) {
+  const metadata = mechanicalPropertyMetadata(result, "tensile_strength");
+  if (!metadata) {
+    return "근거 미확인 · 시험조건·원출처 미확인/검증 미완료로 참고 전용입니다.";
+  }
+  const verified = mechanicalMetadataDescriptor(result, "tensile_strength")?.verified === true;
+  if (verified) return `${mechanicalPropertySourceLabel(result, "tensile_strength")} 근거입니다.`;
+  return `${mechanicalPropertySourceLabel(result, "tensile_strength")} 근거입니다. 시험조건·원출처 미확인/검증 미완료로 참고 전용입니다.`;
+}
+
+export function wettingComparisonAllowed(a, b) {
+  const metadataA = wettingMetadataDescriptor(a);
+  const metadataB = wettingMetadataDescriptor(b);
+  if (!metadataA || !metadataB) return false;
+  return Boolean(
+    metadataA.verified &&
+    metadataB.verified &&
+    metadataA.kind === metadataB.kind &&
+    metadataA.valueType === metadataB.valueType &&
+    metadataA.sourceId === metadataB.sourceId &&
+    metadataA.basis === metadataB.basis &&
+    Math.abs(metadataA.temperature - metadataB.temperature) < 1e-6
+  );
+}
+
+function wettingComparisonLabel(base, a, b) {
+  const labelA = wettingSourceLabel(a);
+  const labelB = wettingSourceLabel(b);
+  const source = labelA === labelB ? labelA : `A ${labelA} / B ${labelB}`;
+  return `${base} · ${source}`;
 }
 
 export function roundedDisplayDelta(na, nb, digits = 2) {
@@ -5263,13 +5603,55 @@ function CompareSummaryPair({ title, textA, textB, isLast, compact = false }) {
   );
 }
 
-function buildCompareHints(a, b) {
+function contractPropertyComparable(result, contractKey, resultKey) {
+  const property = result?.prediction_contract?.properties?.[contractKey];
+  const point = optionalFiniteNumber(property?.point);
+  const raw = optionalFiniteNumber(result?.[resultKey]);
+  return Boolean(
+    property &&
+    ["exact_match", "in_domain"].includes(property.state) &&
+    ["reference", "review"].includes(property.usage) &&
+    point != null &&
+    raw != null &&
+    Math.abs(point - raw) < 1e-6
+  );
+}
+
+function processPeakComparable(result) {
+  const process = result?.prediction_contract?.process_recommendation;
+  const recommended = optionalFiniteNumber(process?.recommended_peak_c);
+  const raw = optionalFiniteNumber(result?.peak);
+  return Boolean(
+    process?.allowed === true &&
+    recommended != null &&
+    raw != null &&
+    Math.abs(recommended - raw) < 1e-6
+  );
+}
+
+export function meltingComparisonPermissions(a, b) {
+  const solidus = contractPropertyComparable(a, "solidus_c", "solidus") &&
+    contractPropertyComparable(b, "solidus_c", "solidus");
+  const liquidus = contractPropertyComparable(a, "liquidus_c", "liquidus") &&
+    contractPropertyComparable(b, "liquidus_c", "liquidus");
+  const peak = processPeakComparable(a) && processPeakComparable(b);
+  return {
+    solidus,
+    liquidus,
+    meltRange: solidus && liquidus,
+    peak,
+    chart: solidus && liquidus && peak
+  };
+}
+
+export function buildCompareHints(a, b) {
   const hints = [];
-  const lsA = Number(a?.liquidus);
-  const lsB = Number(b?.liquidus);
-  const solA = Number(a?.solidus);
-  const solB = Number(b?.solidus);
-  if (Number.isFinite(lsA) && Number.isFinite(lsB) && Math.abs(lsA - lsB) > 0.5) {
+  const meltingAllowed = meltingComparisonPermissions(a, b);
+  const lsA = optionalFiniteNumber(a?.liquidus);
+  const lsB = optionalFiniteNumber(b?.liquidus);
+  const solA = optionalFiniteNumber(a?.solidus);
+  const solB = optionalFiniteNumber(b?.solidus);
+  if (meltingAllowed.liquidus && lsA != null && lsB != null && Math.abs(lsA - lsB) > 0.5) {
     if (lsB > lsA) {
       hints.push(
         `액상선이 B가 ${(lsB - lsA).toFixed(1)}℃ 더 높습니다. B는 리플로우 피크·상한이 상대적으로 높아질 수 있습니다.`
@@ -5281,12 +5663,13 @@ function buildCompareHints(a, b) {
     }
   }
   const rangeA =
-    Number.isFinite(lsA) && Number.isFinite(solA) ? lsA - solA : NaN;
+    lsA != null && solA != null ? lsA - solA : null;
   const rangeB =
-    Number.isFinite(lsB) && Number.isFinite(solB) ? lsB - solB : NaN;
+    lsB != null && solB != null ? lsB - solB : null;
   if (
-    Number.isFinite(rangeA) &&
-    Number.isFinite(rangeB) &&
+    meltingAllowed.meltRange &&
+    rangeA != null &&
+    rangeB != null &&
     Math.abs(rangeA - rangeB) > 3
   ) {
     hints.push(
@@ -5295,29 +5678,21 @@ function buildCompareHints(a, b) {
         : `용융 구간은 A(${rangeA.toFixed(1)}℃)가 B(${rangeB.toFixed(1)}℃)보다 넓습니다.`
     );
   }
-  const shA = Number(a?.props?.shear_strength);
-  const shB = Number(b?.props?.shear_strength);
-  if (Number.isFinite(shA) && Number.isFinite(shB) && Math.abs(shA - shB) > 3) {
-    hints.push(
-      shA > shB
-        ? `물성 DB 유사 합금 기준 전단강도는 A가 약 ${(shA - shB).toFixed(1)} MPa 더 높게 나왔습니다.`
-        : `물성 DB 유사 합금 기준 전단강도는 B가 약 ${(shB - shA).toFixed(1)} MPa 더 높게 나왔습니다.`
-    );
-  }
-  const fmaxA = Number(a?.props?.wetting_fmax_pred_mn);
-  const fmaxB = Number(b?.props?.wetting_fmax_pred_mn);
-  const wetT = Number(a?.props?.wetting_temp_c);
-  const wetTempNote = Number.isFinite(wetT) ? `${wetT.toFixed(0)}℃ 공통 온도에서 ` : "";
-  if (Number.isFinite(fmaxA) && Number.isFinite(fmaxB) && Math.abs(fmaxB - fmaxA) > 0.05) {
+  const allowWettingComparison = wettingComparisonAllowed(a, b);
+  const fmaxA = optionalFiniteNumber(a?.props?.wetting_fmax_pred_mn);
+  const fmaxB = optionalFiniteNumber(b?.props?.wetting_fmax_pred_mn);
+  const wetT = optionalFiniteNumber(a?.props?.wetting_temp_c);
+  const wetTempNote = wetT != null ? `${wetT.toFixed(0)}℃ 공통 온도에서 ` : "";
+  if (allowWettingComparison && fmaxA != null && fmaxB != null && Math.abs(fmaxB - fmaxA) > 0.05) {
     hints.push(
       fmaxB > fmaxA
         ? `${wetTempNote}예측 Fmax는 B가 약 ${(fmaxB - fmaxA).toFixed(2)} mN 더 큽니다.`
         : `${wetTempNote}예측 Fmax는 A가 약 ${(fmaxA - fmaxB).toFixed(2)} mN 더 큽니다.`
     );
   }
-  const t0A = Number(a?.props?.wetting_t0_pred_s);
-  const t0B = Number(b?.props?.wetting_t0_pred_s);
-  if (Number.isFinite(t0A) && Number.isFinite(t0B) && Math.abs(t0B - t0A) > 0.03) {
+  const t0A = optionalFiniteNumber(a?.props?.wetting_t0_pred_s);
+  const t0B = optionalFiniteNumber(b?.props?.wetting_t0_pred_s);
+  if (allowWettingComparison && t0A != null && t0B != null && Math.abs(t0B - t0A) > 0.03) {
     hints.push(
       t0B < t0A
         ? `${wetTempNote}예측 T₀는 B가 약 ${(t0A - t0B).toFixed(2)} s 더 짧습니다(젖음 속도 유리).`
@@ -5329,8 +5704,8 @@ function buildCompareHints(a, b) {
 
 function compareTempScale(a, b) {
   const vals = [a?.solidus, a?.liquidus, a?.peak, b?.solidus, b?.liquidus, b?.peak]
-    .map((v) => Number(v))
-    .filter(Number.isFinite);
+    .map(optionalFiniteNumber)
+    .filter((value) => value != null);
   if (!vals.length) return { min: 200, max: 260 };
   const rawMin = Math.min(...vals);
   const rawMax = Math.max(...vals);
@@ -5360,8 +5735,8 @@ function CompareTempBarChart({ a, b }) {
   const baseY = padT + plotH;
 
   const mapY = (temp) => {
-    const n = Number(temp);
-    if (!Number.isFinite(n)) return null;
+    const n = optionalFiniteNumber(temp);
+    if (n == null) return null;
     const span = max - min;
     if (span <= 0) return padT;
     return padT + plotH - ((n - min) / span) * plotH;
@@ -5383,7 +5758,8 @@ function CompareTempBarChart({ a, b }) {
     if (yTop == null) return null;
     const h = Math.max(2, baseY - yTop);
     const fill = tone === "a" ? "url(#compareBarGradA)" : "url(#compareBarGradB)";
-    const n = Number(val);
+    const n = optionalFiniteNumber(val);
+    if (n == null) return null;
     return (
       <g key={`${tone}-${x}`}>
         <rect
@@ -5519,19 +5895,18 @@ function CompareTempBarChart({ a, b }) {
 }
 
 function CompareHeroPanel({ a, b, compA, compB }) {
-  const meltA =
-    Number.isFinite(Number(a?.liquidus)) && Number.isFinite(Number(a?.solidus))
-      ? Number(a.liquidus) - Number(a.solidus)
-      : null;
-  const meltB =
-    Number.isFinite(Number(b?.liquidus)) && Number.isFinite(Number(b?.solidus))
-      ? Number(b.liquidus) - Number(b.solidus)
-      : null;
+  const liquidusA = optionalFiniteNumber(a?.liquidus);
+  const solidusA = optionalFiniteNumber(a?.solidus);
+  const liquidusB = optionalFiniteNumber(b?.liquidus);
+  const solidusB = optionalFiniteNumber(b?.solidus);
+  const meltA = liquidusA != null && solidusA != null ? liquidusA - solidusA : null;
+  const meltB = liquidusB != null && solidusB != null ? liquidusB - solidusB : null;
+  const meltingAllowed = meltingComparisonPermissions(a, b);
 
   const deltaSpecs = [
-    { label: "액상선", va: a?.liquidus, vb: b?.liquidus, unit: "℃" },
-    { label: "피크", va: a?.peak, vb: b?.peak, unit: "℃" },
-    { label: "용융 구간", va: meltA, vb: meltB, unit: "℃" }
+    { label: "액상선", va: a?.liquidus, vb: b?.liquidus, unit: "℃", allowed: meltingAllowed.liquidus },
+    { label: "피크", va: a?.peak, vb: b?.peak, unit: "℃", allowed: meltingAllowed.peak },
+    { label: "용융 구간", va: meltA, vb: meltB, unit: "℃", allowed: meltingAllowed.meltRange }
   ];
 
   return (
@@ -5563,14 +5938,20 @@ function CompareHeroPanel({ a, b, compA, compB }) {
         <span className="compare-hero-legend__item compare-hero-legend__item--b">B</span>
       </div>
       <div className="compare-hero-chart-wrap">
-        <CompareTempBarChart a={a} b={b} />
+        {meltingAllowed.chart ? (
+          <CompareTempBarChart a={a} b={b} />
+        ) : (
+          <div className="compare-provenance-hold">
+            융점·피크 검증 범위 또는 공정 승인 조건이 충족되지 않아 상대 온도 차트를 생략합니다.
+          </div>
+        )}
       </div>
 
       <div className="compare-hero-deltas">
-        {deltaSpecs.map(({ label, va, vb, unit }) => {
-          const na = Number(va);
-          const nb = Number(vb);
-          const delta = Number.isFinite(na) && Number.isFinite(nb)
+        {deltaSpecs.map(({ label, va, vb, unit, allowed }) => {
+          const na = optionalFiniteNumber(va);
+          const nb = optionalFiniteNumber(vb);
+          const delta = allowed && na != null && nb != null
             ? roundedDisplayDelta(na, nb)
             : null;
           const tone = compareDeltaTone(delta);
@@ -5599,11 +5980,15 @@ function CompareView({ data, compA, compB }) {
   const warnA = sumA > 0 && (sumA < 99 || sumA > 101);
   const warnB = sumB > 0 && (sumB < 99 || sumB > 101);
   const hints = buildCompareHints(a, b);
+  const meltingAllowed = meltingComparisonPermissions(a, b);
 
   const compareLabelTd = {
     padding: "8px 10px 8px 0",
     borderBottom: "1px solid var(--bg-table-head)",
-    whiteSpace: "nowrap",
+    whiteSpace: "normal",
+    wordBreak: "keep-all",
+    overflowWrap: "anywhere",
+    lineHeight: 1.35,
     verticalAlign: "middle",
     color: "#e2e8f0",
     fontWeight: 500,
@@ -5613,6 +5998,7 @@ function CompareView({ data, compA, compB }) {
     padding: "8px 10px",
     borderBottom: "1px solid var(--bg-table-head)",
     fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
     verticalAlign: "middle",
     fontSize: 13
   };
@@ -5621,11 +6007,13 @@ function CompareView({ data, compA, compB }) {
     textAlign: "right"
   };
 
-  const rowD = (label, va, vb, unit = "") => {
-    const na = Number(va);
-    const nb = Number(vb);
-    const dText = fmtDelta(na, nb, unit);
-    const dNum = Number.isFinite(na) && Number.isFinite(nb)
+  const rowD = (label, va, vb, unit = "", options = {}) => {
+    const na = optionalFiniteNumber(va);
+    const nb = optionalFiniteNumber(vb);
+    const valuesPresent = na != null && nb != null;
+    const allowDelta = valuesPresent && options.allowDelta !== false;
+    const dText = allowDelta ? fmtDelta(na, nb, unit) : valuesPresent ? options.holdText || "—" : "—";
+    const dNum = allowDelta
       ? roundedDisplayDelta(na, nb)
       : null;
     const toneClass =
@@ -5648,7 +6036,7 @@ function CompareView({ data, compA, compB }) {
                     ? "#38bdf8"
                     : "#94a3b8"
           }}
-          title="B − A (기준: 조성 A)"
+          title={allowDelta ? "B − A (기준: 조성 A)" : undefined}
         >
           {dText}
         </td>
@@ -5656,24 +6044,34 @@ function CompareView({ data, compA, compB }) {
     );
   };
 
-  const meltA =
-    Number.isFinite(Number(a?.liquidus)) && Number.isFinite(Number(a?.solidus))
-      ? Number(a.liquidus) - Number(a.solidus)
-      : NaN;
-  const meltB =
-    Number.isFinite(Number(b?.liquidus)) && Number.isFinite(Number(b?.solidus))
-      ? Number(b.liquidus) - Number(b.solidus)
-      : NaN;
-  const compareWetT = Number(a?.props?.wetting_temp_c);
-  const wetAtLabel = Number.isFinite(compareWetT) ? `(@${compareWetT.toFixed(0)}℃)` : "";
-  const wetFmaxLabel = wetAtLabel ? `젖음Fmax ${wetAtLabel}` : "젖음Fmax";
-  const shearLabel =
-    a?.props?.shear_strength_basis === "db_idw" || b?.props?.shear_strength_basis === "db_idw"
-      ? "전단 (BD유사)"
-      : "전단";
+  const liquidusA = optionalFiniteNumber(a?.liquidus);
+  const solidusA = optionalFiniteNumber(a?.solidus);
+  const liquidusB = optionalFiniteNumber(b?.liquidus);
+  const solidusB = optionalFiniteNumber(b?.solidus);
+  const meltA = liquidusA != null && solidusA != null ? liquidusA - solidusA : null;
+  const meltB = liquidusB != null && solidusB != null ? liquidusB - solidusB : null;
+  const compareWetT = optionalFiniteNumber(a?.props?.wetting_temp_c);
+  const wetAtLabel = compareWetT != null ? `(@${compareWetT.toFixed(0)}℃)` : "";
+  const wetFmaxLabel = wettingComparisonLabel(
+    wetAtLabel ? `젖음Fmax ${wetAtLabel}` : "젖음Fmax",
+    a,
+    b
+  );
+  const shearComparison = mechanicalComparisonAllowed(a, b, "shear_strength");
+  const shearLabel = `${mechanicalComparisonLabel("전단", a, b, "shear_strength")}${
+    shearComparison ? "" : " · 검증 미완료"
+  }`;
   const tensileMetric = compareTensileMetric(a, b);
+  const finalTensileComparison = tensileComparisonAllowed(a, b);
+  // This auxiliary IDW/DB field has no independent provenance contract yet.
+  const rawTensileComparison = false;
   const showDbTensile = showCompareDbTensileRow(a, b);
-  const wetT0Label = wetAtLabel ? `젖음T₀ ${wetAtLabel}` : "젖음T₀";
+  const wetT0Label = wettingComparisonLabel(
+    wetAtLabel ? `젖음T₀ ${wetAtLabel}` : "젖음T₀",
+    a,
+    b
+  );
+  const allowWettingComparison = wettingComparisonAllowed(a, b);
 
   return (
     <div className="compare-view">
@@ -5696,7 +6094,9 @@ function CompareView({ data, compA, compB }) {
           <div className="compare-metrics-block">
             <div className="compare-metrics-block__head">
               <div className="compare-metrics-block__title">주요 수치 비교</div>
-              <div className="compare-metrics-block__note">차이값은 B−A 기준입니다.</div>
+              <div className="compare-metrics-block__note">
+                차이값은 B−A 기준이며, 검증 보류·근거 불일치 항목은 비교하지 않습니다.
+              </div>
             </div>
           <table className="compare-metrics-table">
             <colgroup>
@@ -5716,31 +6116,65 @@ function CompareView({ data, compA, compB }) {
               </tr>
             </thead>
             <tbody>
-              {rowD("고상선", a?.solidus, b?.solidus, "℃")}
-              {rowD("액상선", a?.liquidus, b?.liquidus, "℃")}
+              {rowD("고상선", a?.solidus, b?.solidus, "℃", {
+                allowDelta: meltingAllowed.solidus,
+                holdText: "비교 보류"
+              })}
+              {rowD("액상선", a?.liquidus, b?.liquidus, "℃", {
+                allowDelta: meltingAllowed.liquidus,
+                holdText: "비교 보류"
+              })}
               {rowD(
                 "용융구간",
-                Number.isFinite(meltA) ? meltA : null,
-                Number.isFinite(meltB) ? meltB : null,
-                "℃"
+                meltA,
+                meltB,
+                "℃",
+                { allowDelta: meltingAllowed.meltRange, holdText: "비교 보류" }
               )}
-              {rowD("피크", a?.peak, b?.peak, "℃")}
+              {rowD("피크", a?.peak, b?.peak, "℃", {
+                allowDelta: meltingAllowed.peak,
+                holdText: "비교 보류"
+              })}
               {rowD("DB 근접 신뢰도", a?.confidence, b?.confidence, "%")}
-              {rowD(tensileMetric.label, tensileMetric.valueA, tensileMetric.valueB, " MPa")}
-              {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa")}
-              {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN")}
-              {rowD(wetT0Label, a?.props?.wetting_t0_pred_s, b?.props?.wetting_t0_pred_s, " s")}
+              {rowD(
+                `${tensileMetric.label}${finalTensileComparison ? "" : " · 검증 미완료"}`,
+                tensileMetric.valueA,
+                tensileMetric.valueB,
+                " MPa",
+                {
+                  allowDelta: finalTensileComparison,
+                  holdText: "검증 미완료"
+                }
+              )}
+              {rowD(shearLabel, a?.props?.shear_strength, b?.props?.shear_strength, " MPa", {
+                allowDelta: shearComparison,
+                holdText: "검증 미완료"
+              })}
+              {rowD(wetFmaxLabel, a?.props?.wetting_fmax_pred_mn, b?.props?.wetting_fmax_pred_mn, " mN", {
+                allowDelta: allowWettingComparison,
+                holdText: "비교 보류"
+              })}
+              {rowD(wetT0Label, a?.props?.wetting_t0_pred_s, b?.props?.wetting_t0_pred_s, " s", {
+                allowDelta: allowWettingComparison,
+                holdText: "비교 보류"
+              })}
               {rowD("비중", a?.props?.density, b?.props?.density, " g/cm³")}
               {showDbTensile
                 ? rowD(
-                    "DB인장",
+                    rawTensileComparison
+                      ? "물성 DB 인장"
+                      : "물성 DB 인장 · 검증 미완료/조건 미확인",
                     ["db_priority", "db_idw"].includes(a?.props?.tensile_strength_basis)
                       ? null
                       : a?.props?.tensile_strength_db_mpa,
                     ["db_priority", "db_idw"].includes(b?.props?.tensile_strength_basis)
                       ? null
                       : b?.props?.tensile_strength_db_mpa,
-                    " MPa"
+                    " MPa",
+                    {
+                      allowDelta: rawTensileComparison,
+                      holdText: "검증 미완료"
+                    }
                   )
                 : null}
             </tbody>
@@ -5773,21 +6207,63 @@ function CompareView({ data, compA, compB }) {
 }
 
 function fmt(v, unit = "") {
-  if (v === null || v === undefined) return "N/A";
-  const n = Number(v);
-  if (Number.isNaN(n)) return String(v);
+  const n = optionalFiniteNumber(v);
+  if (n == null) return "N/A";
   return `${n.toFixed(2)}${unit}`;
 }
 
-function PropertyBars({ a, b }) {
+export function PropertyBars({ a, b }) {
+  const allowWettingComparison = wettingComparisonAllowed(a, b);
+  // This auxiliary IDW/DB field has no independent provenance contract yet.
+  const rawTensileComparison = false;
+  const yieldComparison = mechanicalComparisonAllowed(a, b, "yield_strength");
+  const elongationComparison = mechanicalComparisonAllowed(a, b, "elongation");
+  const shearComparison = mechanicalComparisonAllowed(a, b, "shear_strength");
   const metrics = [
-    { key: "shear_strength", label: "전단강도 (MPa)" },
-    { key: "yield_strength", label: "항복강도 (MPa)" },
-    { key: "elongation", label: "연신율 (%)" },
-    { key: "wetting_fmax_pred_mn", label: "Fmax (mN)" },
-    { key: "wetting_t0_pred_s", label: "T₀ (s)" },
-    { key: "tensile_strength_db_mpa", label: "물성 DB 인장 (MPa)" },
-    { key: "tensile_strength_lit_mpa", label: "문헌 참고 인장 (MPa)" }
+    {
+      key: "shear_strength",
+      label: `${mechanicalComparisonLabel("전단", a, b, "shear_strength")}${
+        shearComparison ? "" : " · 검증 미완료"
+      } (MPa)`,
+      allowCompare: shearComparison,
+      holdText: "상대 막대·우열 비교 제외"
+    },
+    {
+      key: "yield_strength",
+      label: yieldComparison ? "항복강도 (MPa)" : "항복강도 · 검증 미완료/조건 미확인 (MPa)",
+      allowCompare: yieldComparison,
+      holdText: "상대 막대·우열 비교 제외"
+    },
+    {
+      key: "elongation",
+      label: elongationComparison ? "연신율 (%)" : "연신율 · 검증 미완료/조건 미확인 (%)",
+      allowCompare: elongationComparison,
+      holdText: "상대 막대·우열 비교 제외"
+    },
+    {
+      key: "wetting_fmax_pred_mn",
+      label: wettingComparisonLabel("Fmax (mN)", a, b),
+      allowCompare: allowWettingComparison,
+      holdText: "근거·검증 상태가 달라 상대 막대 생략"
+    },
+    {
+      key: "wetting_t0_pred_s",
+      label: wettingComparisonLabel("T₀ (s)", a, b),
+      allowCompare: allowWettingComparison,
+      holdText: "근거·검증 상태가 달라 상대 막대 생략"
+    },
+    {
+      key: "tensile_strength_db_mpa",
+      label: rawTensileComparison ? "물성 DB 인장 (MPa)" : "물성 DB 인장 · 검증 미완료/조건 미확인 (MPa)",
+      allowCompare: rawTensileComparison,
+      holdText: "상대 막대·우열 비교 제외"
+    },
+    {
+      key: "tensile_strength_lit_mpa",
+      label: "문헌 참고 인장 · 시험조건 미정규화/검증 미완료 (MPa)",
+      allowCompare: false,
+      holdText: "동일 시험법·조건 확인 전까지 상대 막대·우열 비교 제외"
+    }
   ];
 
   const trackStyle = {
@@ -5822,15 +6298,16 @@ function PropertyBars({ a, b }) {
       {metrics.map((mtr) => {
         const rawA = a?.props?.[mtr.key];
         const rawB = b?.props?.[mtr.key];
-        const hasA = rawA !== null && rawA !== undefined && rawA !== "";
-        const hasB = rawB !== null && rawB !== undefined && rawB !== "";
+        const av = optionalFiniteNumber(rawA);
+        const bv = optionalFiniteNumber(rawB);
+        const hasA = av != null;
+        const hasB = bv != null;
         if (!hasA && !hasB) return null;
-        const av = hasA ? Number(rawA) : 0;
-        const bv = hasB ? Number(rawB) : 0;
+        const allowVisualCompare = mtr.allowCompare !== false && hasA && hasB;
         /* 항목마다 스케일 분리: MPa·%·지수를 한 max로 나누면 왜곡됨 */
-        const denom = Math.max(av, bv, 1e-9);
-        const awPct = av > 0 ? (av / denom) * 100 : 0;
-        const bwPct = bv > 0 ? (bv / denom) * 100 : 0;
+        const denom = Math.max(...[av, bv].filter((value) => value != null), 1e-9);
+        const awPct = allowVisualCompare && av > 0 ? (av / denom) * 100 : 0;
+        const bwPct = allowVisualCompare && bv > 0 ? (bv / denom) * 100 : 0;
         /* 0이 아닌 값은 최소 몇 px 보이게 (너무 얇아지는 것 방지) */
         const barW = (pct) =>
           pct <= 0 ? "0%" : `${Math.max(pct, 3)}%`;
@@ -5839,6 +6316,11 @@ function PropertyBars({ a, b }) {
           <div key={mtr.key} className="property-bars__row" style={{ marginBottom: 10 }}>
             <div className="property-bars__label" style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>
               {mtr.label}
+              {!allowVisualCompare ? (
+                <span style={{ marginLeft: 8, color: "#64748b", fontSize: 10 }}>
+                  {mtr.holdText || "값 누락으로 상대 막대 생략"}
+                </span>
+              ) : null}
             </div>
             <div style={{ ...rowStyle, marginBottom: 4 }}>
               <span
@@ -5853,14 +6335,16 @@ function PropertyBars({ a, b }) {
                 A
               </span>
               <div style={trackStyle}>
-                <div
-                  style={{
-                    height: "100%",
-                    width: barW(awPct),
-                    background:
-                      "linear-gradient(90deg, rgba(59,130,246,0.95), rgba(59,130,246,0.35))"
-                  }}
-                />
+                {allowVisualCompare && hasA ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      width: barW(awPct),
+                      background:
+                        "linear-gradient(90deg, rgba(59,130,246,0.95), rgba(59,130,246,0.35))"
+                    }}
+                  />
+                ) : null}
               </div>
               <span
                 style={{
@@ -5871,7 +6355,7 @@ function PropertyBars({ a, b }) {
                   fontVariantNumeric: "tabular-nums"
                 }}
               >
-                {av.toFixed(1)}
+                {hasA ? av.toFixed(1) : "N/A"}
               </span>
             </div>
             <div style={rowStyle}>
@@ -5887,14 +6371,16 @@ function PropertyBars({ a, b }) {
                 B
               </span>
               <div style={trackStyle}>
-                <div
-                  style={{
-                    height: "100%",
-                    width: barW(bwPct),
-                    background:
-                      "linear-gradient(90deg, rgba(234,88,12,0.95), rgba(234,88,12,0.35))"
-                  }}
-                />
+                {allowVisualCompare && hasB ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      width: barW(bwPct),
+                      background:
+                        "linear-gradient(90deg, rgba(234,88,12,0.95), rgba(234,88,12,0.35))"
+                    }}
+                  />
+                ) : null}
               </div>
               <span
                 style={{
@@ -5905,7 +6391,7 @@ function PropertyBars({ a, b }) {
                   fontVariantNumeric: "tabular-nums"
                 }}
               >
-                {bv.toFixed(1)}
+                {hasB ? bv.toFixed(1) : "N/A"}
               </span>
             </div>
           </div>
@@ -6042,7 +6528,7 @@ function getAlloyInferenceMelt(result) {
 
 /** 리플로우 차트/튜너에 쓸 고상·액상·기준 피크 */
 export function shouldShowReflowProcessDetails(reflowMeltDisplay) {
-  return reflowMeltDisplay?.processAllowed !== false;
+  return reflowMeltDisplay?.processAllowed === true;
 }
 
 function getReflowMeltDisplay(result, meltBasis) {
@@ -6054,12 +6540,12 @@ function getReflowMeltDisplay(result, meltBasis) {
       modelPeak: Number(result?.peak || 0),
       basis: "validated_core",
       label: "검증 판정 핵심 엔진",
-      processAllowed: Boolean(contract?.process_recommendation?.allowed)
+      processAllowed: contract?.process_recommendation?.allowed === true
     };
   }
   const inf = getAlloyInferenceMelt(result);
   if (meltBasis === "inference" && inf) {
-    return { ...inf, basis: "inference", label: "데이터 추론(3-NN)" };
+    return { ...inf, basis: "inference", label: "데이터 추론(3-NN)", processAllowed: false };
   }
   const r = result || {};
   return {
@@ -6067,7 +6553,8 @@ function getReflowMeltDisplay(result, meltBasis) {
     liquidus: Number(r.liquidus || 0),
     modelPeak: Number(r.peak || 0),
     basis: "hybrid",
-    label: "하이브리드 엔진"
+    label: "하이브리드 엔진",
+    processAllowed: false
   };
 }
 

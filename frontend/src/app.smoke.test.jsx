@@ -24,7 +24,7 @@ describe("App module", () => {
     };
 
     expect(formatTensilePrimary(props)).toBe("48.5 MPa");
-    expect(tensileSummaryLabel(props)).toBe("인장 (DB우선)");
+    expect(tensileSummaryLabel(props)).toBe("인장 (DB우선) · 참고 전용");
     expect(formatTensilePrimary({})).toBe("—");
   });
 
@@ -59,6 +59,6 @@ describe("App module", () => {
       { props: { tensile_strength: 42, tensile_strength_basis: "db_idw" } }
     );
 
-    expect(metric).toEqual({ label: "인장 (BD유사)", valueA: 44, valueB: 42 });
+    expect(metric).toEqual({ label: "인장 (DB유사)", valueA: 44, valueB: 42 });
   });
 });

@@ -9,17 +9,43 @@ from .utils import log_exception
 from .wetting_db import WETTING_DB, WETTING_TEMPS_C
 from .interp_pchip import interp_pchip_1d
 
+_WETTING_EXACT_EPS = 1e-4
+_WETTING_LEGACY_MISSING_CONDITIONS = (
+    "source_identifier",
+    "test_standard",
+    "substrate_and_finish",
+    "test_atmosphere",
+    "flux_amount",
+    "replicate_count",
+)
+
+
+def _optional_finite_float(value):
+    if type(value) is bool or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
 
 def snap_wetting_temp_to_bd_grid(target_c: float) -> float:
     """250–290℃ 범위로 클램프한 뒤, 측정 DB와 동일한 입력 온도 목록에 가장 가깝게 스냅."""
+    target = _optional_finite_float(target_c)
+    if target is None:
+        raise ValueError("wetting temperature must be finite")
     lo, hi = min(WETTING_TEMPS_C), max(WETTING_TEMPS_C)
-    t = max(min(float(target_c), hi), lo)
+    t = max(min(target, hi), lo)
     return float(min(WETTING_TEMPS_C, key=lambda x: (abs(x - t), -x)))
 
 
 def default_wetting_temp_c(liquidus: float) -> float:
     """기본: 액상선+30℃를 측정 DB 온도 축(250–290℃)에 맞춤."""
-    return snap_wetting_temp_to_bd_grid(float(liquidus or 0.0) + 30.0)
+    liquidus_value = _optional_finite_float(liquidus)
+    if liquidus_value is None:
+        raise ValueError("liquidus is required for automatic wetting temperature")
+    return snap_wetting_temp_to_bd_grid(liquidus_value + 30.0)
 
 
 def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> float:
@@ -87,8 +113,9 @@ class PropertyModels:
             comp_factor += self._sat(comp.get("Zn", 0),  A=10, tau=5)
 
             return base + temp_factor + comp_factor
-        except:
-            return 0.0
+        except Exception as exc:
+            log_exception("predict tensile unavailable", exc)
+            return None
 
     # -----------------------------------------------------
     # 항복강도(MPa)
@@ -100,8 +127,9 @@ class PropertyModels:
             # Bi 고함량: 항복/인장 비율 상승 (취성 거동)
             ratio = 0.75 + self._sat(bi, A=0.15, tau=20)
             return tensile * ratio
-        except:
-            return 0.0
+        except Exception as exc:
+            log_exception("predict yield unavailable", exc)
+            return None
 
     # -----------------------------------------------------
     # 연신율(%)
@@ -118,8 +146,9 @@ class PropertyModels:
             cu_penalty = self._sat(comp.get("Cu", 0), A=8,  tau=2)
 
             return max(3.0, base - bi_penalty - sb_penalty - cu_penalty)
-        except:
-            return 0.0
+        except Exception as exc:
+            log_exception("predict elongation unavailable", exc)
+            return None
 
     # -----------------------------------------------------
     # 전단강도(MPa)
@@ -139,8 +168,9 @@ class PropertyModels:
             factor_lo = 0.34 + 0.06 * self._smoothstep01(bi / 30.0)
             factor = factor_hi * (1.0 - w) + factor_lo * w
             return tensile * factor
-        except:
-            return 0.0
+        except Exception as exc:
+            log_exception("predict shear unavailable", exc)
+            return None
 
     # -----------------------------------------------------
     # 젖음성 지수
@@ -256,6 +286,74 @@ class PropertyModels:
         f_min, f_max = min(f_vals), max(f_vals)
         t_min, t_max = min(t_vals), max(t_vals)
 
+        # An exact composition is a measured DB row, not an interpolation.
+        # Return that row directly so the value and its evidence cannot be
+        # contaminated by even a numerically tiny contribution from neighbors.
+        for rec in WETTING_DB:
+            exact_dist = float(composition_distance(comp, rec["comp"]))
+            if exact_dist > _WETTING_EXACT_EPS:
+                continue
+            f_exact, t_exact = self._rec_fmax_t0_at_temp(rec, t_test)
+            if f_exact is None or t_exact is None:
+                continue
+            if abs(f_max - f_min) < 1e-9:
+                f_score = 70.0
+            else:
+                f_score = 10.0 + 90.0 * (f_exact - f_min) / (f_max - f_min)
+            if abs(t_max - t_min) < 1e-9:
+                t_score = 70.0
+            else:
+                t_score = 10.0 + 90.0 * (t_max - t_exact) / (t_max - t_min)
+            score = max(10.0, min(100.0, float(0.55 * f_score + 0.45 * t_score)))
+            confidence_neighbors = []
+            for neighbor_rec in WETTING_DB:
+                neighbor_dist = float(composition_distance(comp, neighbor_rec["comp"]))
+                f_neighbor, t_neighbor = self._rec_fmax_t0_at_temp(
+                    neighbor_rec, t_test
+                )
+                if f_neighbor is None or t_neighbor is None:
+                    continue
+                confidence_neighbors.append(
+                    {
+                        "name": neighbor_rec.get("name", "N/A"),
+                        "dist": neighbor_dist,
+                        "weight": float(
+                            PropertyModels._idw_comp_weight(neighbor_dist, comp)
+                        ),
+                    }
+                )
+            confidence_neighbors.sort(key=lambda x: x.get("dist", 9999.0))
+            return {
+                "wetting_temp_c": float(t_test),
+                "fmax_pred_mn": float(f_exact),
+                "t0_pred_s": float(t_exact),
+                "wetting_score": score,
+                "neighbors": [
+                    {
+                        "name": rec.get("name", "N/A"),
+                        "dist": exact_dist,
+                        "weight": 1.0,
+                        "weight_share": 1.0,
+                    }
+                ],
+                # Confidence remains calibrated against the same three-distance
+                # support profile used before the exact-value short-circuit.
+                "confidence_neighbors": confidence_neighbors[:3],
+                "wetting_metadata": {
+                    "source_kind": "measured_db",
+                    "value_type": "direct_db_record",
+                    "exact_match": True,
+                    "nearest_distance": exact_dist,
+                    "provenance_status": "unconfirmed",
+                    "verification_status": "unverified",
+                    "comparison_allowed": False,
+                    "reason_code": "WETTING_PROVENANCE_UNCONFIRMED",
+                    "missing_conditions": list(_WETTING_LEGACY_MISSING_CONDITIONS),
+                    "neighbor_semantics": "value_contributors_v2",
+                    "confidence_neighbor_semantics": "distance_support_v1",
+                },
+            }
+
         for rec in WETTING_DB:
             d = composition_distance(comp, rec["comp"])
             w = PropertyModels._idw_comp_weight(d, comp)
@@ -291,12 +389,34 @@ class PropertyModels:
         score = max(10.0, min(100.0, float(score)))
 
         neighbors.sort(key=lambda x: x.get("dist", 9999.0))
+        nearest_distance = (
+            float(neighbors[0]["dist"])
+            if neighbors and neighbors[0].get("dist") is not None
+            else None
+        )
+        exact_match = (
+            nearest_distance is not None
+            and nearest_distance <= _WETTING_EXACT_EPS
+        )
         return {
             "wetting_temp_c": float(t_test),
             "fmax_pred_mn": float(f_pred),
             "t0_pred_s": float(t_pred),
             "wetting_score": float(score),
             "neighbors": neighbors[:3],
+            "wetting_metadata": {
+                "source_kind": "measured_db" if exact_match else "idw_prediction",
+                "value_type": "direct_db_record" if exact_match else "idw_prediction",
+                "exact_match": bool(exact_match),
+                "nearest_distance": nearest_distance,
+                "provenance_status": "unconfirmed",
+                "verification_status": "unverified",
+                "comparison_allowed": False,
+                "reason_code": "WETTING_PROVENANCE_UNCONFIRMED",
+                "missing_conditions": list(_WETTING_LEGACY_MISSING_CONDITIONS),
+                "neighbor_semantics": "value_contributors_v2",
+                "confidence_neighbor_semantics": "distance_support_v1",
+            },
         }
 
     def _predict_wetting_by_temperature(self, comp):
@@ -324,12 +444,14 @@ class PropertyModels:
         peak 는 하위 호환용으로만 남김(젖음 온도 선택에는 사용하지 않음).
         """
         comp = self._ensure_sn(comp)
-        liq = float(liquidus or 0.0)
         if wetting_temp_c is not None:
             t_test = snap_wetting_temp_to_bd_grid(float(wetting_temp_c))
             basis = wetting_temp_basis or "user"
             target_for_ui = float(wetting_temp_c)
         else:
+            liq = _optional_finite_float(liquidus)
+            if liq is None:
+                raise ValueError("liquidus is required for automatic wetting prediction")
             t_test = default_wetting_temp_c(liq)
             basis = "auto_liq_plus_30"
             target_for_ui = liq + 30.0
@@ -367,50 +489,79 @@ class PropertyModels:
         wetting_temp_basis=None,
         include_wetting_grid=False,
     ):
-        s = solidus  if solidus  is not None else 0
-        l = liquidus if liquidus is not None else 0
+        s = solidus
+        l = liquidus
 
-        try: tensile = self.predict_tensile_strength(comp, s, l)
-        except: tensile = 0.0
+        # A failed property model means "unavailable", not a physically measured
+        # zero.  Downstream DB/literature layers may still fill these values.
+        try:
+            tensile = self.predict_tensile_strength(comp, s, l)
+        except Exception as exc:
+            log_exception("predict tensile unavailable", exc)
+            tensile = None
 
-        try: yield_s = self.predict_yield_strength(comp, s, l)
-        except: yield_s = 0.0
+        try:
+            yield_s = self.predict_yield_strength(comp, s, l)
+        except Exception as exc:
+            log_exception("predict yield unavailable", exc)
+            yield_s = None
 
-        try: elong = self.predict_elongation(comp, s, l)
-        except: elong = 0.0
+        try:
+            elong = self.predict_elongation(comp, s, l)
+        except Exception as exc:
+            log_exception("predict elongation unavailable", exc)
+            elong = None
 
-        try: shear = self.predict_shear_strength(comp, s, l)
-        except: shear = 0.0
+        try:
+            shear = self.predict_shear_strength(comp, s, l)
+        except Exception as exc:
+            log_exception("predict shear unavailable", exc)
+            shear = None
 
         wet_details = None
+        wet = None
         wetting_by_temp = []
-        try:
-            wet_details = self._predict_wetting_details(
-                comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c, wetting_temp_basis=wetting_temp_basis
-            )
-            wet = float(wet_details.get("wetting_score", 0.0) or 0.0)
-            if include_wetting_grid:
-                try:
-                    wetting_by_temp = self._predict_wetting_by_temperature(comp)
-                except Exception:
-                    wetting_by_temp = []
-        except Exception:
-            # IDW 실패 시 predict_wetting()이 동일 조성에 대해 휴리스틱 젖음 지수를 돌려줌 (0 고정 방지)
-            wet = float(self.predict_wetting(comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c) or 0.0)
+        # Automatic wetting temperature depends on a real liquidus.  If melting
+        # failed, keep wetting unavailable instead of snapping a fake 30℃ target
+        # to the 250℃ DB row.  A user-supplied test temperature remains usable.
+        if wetting_temp_c is not None or liquidus is not None:
+            try:
+                wet_details = self._predict_wetting_details(
+                    comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c, wetting_temp_basis=wetting_temp_basis
+                )
+                wet_value = wet_details.get("wetting_score")
+                wet = float(wet_value) if wet_value is not None else None
+                if include_wetting_grid:
+                    try:
+                        wetting_by_temp = self._predict_wetting_by_temperature(comp)
+                    except Exception:
+                        wetting_by_temp = []
+            except Exception:
+                # IDW 실패 시 명시 온도 또는 유효 액상선에 대해서만 휴리스틱을 사용한다.
+                wet_fallback = self.predict_wetting(
+                    comp, s, l, peak=peak, wetting_temp_c=wetting_temp_c
+                )
+                wet = float(wet_fallback) if wet_fallback is not None else None
 
         out = {
-            "tensile_strength": float(tensile),
-            "yield_strength":   float(yield_s),
-            "elongation":       float(elong),
-            "shear_strength":   float(shear),
-            "wetting_score":    float(wet),
+            "tensile_strength": float(tensile) if tensile is not None else None,
+            "yield_strength":   float(yield_s) if yield_s is not None else None,
+            "elongation":       float(elong) if elong is not None else None,
+            "shear_strength":   float(shear) if shear is not None else None,
+            "wetting_score":    float(wet) if wet is not None else None,
         }
         if isinstance(wet_details, dict):
-            out["wetting_temp_c"] = float(wet_details.get("wetting_temp_c", 0.0) or 0.0)
-            out["wetting_fmax_pred_mn"] = float(wet_details.get("fmax_pred_mn", 0.0) or 0.0)
-            out["wetting_t0_pred_s"] = float(wet_details.get("t0_pred_s", 0.0) or 0.0)
+            out["wetting_temp_c"] = _optional_finite_float(wet_details.get("wetting_temp_c"))
+            out["wetting_fmax_pred_mn"] = _optional_finite_float(wet_details.get("fmax_pred_mn"))
+            out["wetting_t0_pred_s"] = _optional_finite_float(wet_details.get("t0_pred_s"))
             out["wetting_neighbors"] = wet_details.get("neighbors", [])
+            confidence_neighbors = wet_details.get("confidence_neighbors")
+            if isinstance(confidence_neighbors, list):
+                out["wetting_confidence_neighbors"] = confidence_neighbors
             out["wetting_by_temp"] = wetting_by_temp
+            wetting_metadata = wet_details.get("wetting_metadata")
+            if isinstance(wetting_metadata, dict):
+                out["wetting_metadata"] = dict(wetting_metadata)
             wb = wet_details.get("wetting_temp_basis")
             if wb:
                 out["wetting_temp_basis"] = str(wb)

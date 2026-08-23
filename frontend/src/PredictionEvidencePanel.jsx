@@ -15,17 +15,34 @@ const PROPERTY_LABEL = {
   tensile_strength_mpa: "인장강도"
 };
 
+function optionalFiniteNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
 function formatNumber(value, digits = 1) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(digits) : "N/A";
+  const number = optionalFiniteNumber(value);
+  return number == null ? "N/A" : number.toFixed(digits);
+}
+
+function hasFiniteNumber(value) {
+  return optionalFiniteNumber(value) != null;
 }
 
 function PropertyEvidence({ name, value }) {
   if (!value) return null;
   const interval = value.interval;
   const color = STATE_COLOR[value.state] || "#94a3b8";
+  const hasInterval =
+    hasFiniteNumber(interval?.lower) &&
+    hasFiniteNumber(interval?.upper) &&
+    optionalFiniteNumber(interval.lower) !== optionalFiniteNumber(interval.upper);
   const range =
-    interval && Number(interval.lower) !== Number(interval.upper)
+    hasInterval
       ? `${formatNumber(interval.lower)}–${formatNumber(interval.upper)} ${value.unit}`
       : value.state === "exact_match"
         ? "등록 DB 값"
@@ -46,12 +63,17 @@ function PropertyEvidence({ name, value }) {
         <span style={{ fontSize: 11, color, fontWeight: 700 }}>{value.state_label_ko}</span>
       </div>
       <div style={{ marginTop: 3, fontSize: 18, color: "#f8fafc", fontWeight: 800 }}>
-        {formatNumber(value.point)} {value.unit}
+        {formatNumber(value.point)}{hasFiniteNumber(value.point) && value.unit ? ` ${value.unit}` : ""}
       </div>
       <div style={{ marginTop: 3, fontSize: 11, color: "#cbd5e1" }}>경험적 90% 범위: {range}</div>
       <div style={{ marginTop: 3, fontSize: 10, color: "#64748b" }}>
         최근접 거리 {formatNumber(value.evidence?.nearest_distance, 3)} · {value.usage_label_ko}
       </div>
+      {value.comparison_allowed !== true ? (
+        <div style={{ marginTop: 4, fontSize: 10, color: "#f59e0b", lineHeight: 1.4 }}>
+          {value.comparison_label_ko || value.reason_labels_ko?.[0] || "원출처·시험조건 확인 전까지 정량 비교 금지"}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -60,6 +82,7 @@ export default function PredictionEvidencePanel({ contract }) {
   if (!contract || typeof contract !== "object") return null;
   const properties = contract.properties || {};
   const process = contract.process_recommendation || {};
+  const processAllowed = process.allowed === true;
   const stateColor = STATE_COLOR[contract.overall_state] || "#94a3b8";
   return (
     <section
@@ -75,7 +98,7 @@ export default function PredictionEvidencePanel({ contract }) {
     >
       <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>전체 물성 예측 판정</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>융점·인장 예측 판정</div>
           <div style={{ marginTop: 2, color: "#f8fafc", fontSize: 16, fontWeight: 800 }}>
             {contract.family} · {contract.overall_state_label_ko}
           </div>
@@ -114,15 +137,15 @@ export default function PredictionEvidencePanel({ contract }) {
           marginTop: 10,
           padding: "9px 10px",
           borderRadius: 8,
-          background: process.allowed ? "rgba(14,116,144,0.16)" : "rgba(127,29,29,0.2)",
-          border: process.allowed ? "1px solid #0e7490" : "1px solid #991b1b",
+          background: processAllowed ? "rgba(14,116,144,0.16)" : "rgba(127,29,29,0.2)",
+          border: processAllowed ? "1px solid #0e7490" : "1px solid #991b1b",
           color: "#e2e8f0",
           fontSize: 11,
           lineHeight: 1.5
         }}
       >
         <strong>리플로우 사용 판정: {process.usage_label_ko || "확인 필요"}</strong>
-        {process.recommended_peak_c != null ? (
+        {optionalFiniteNumber(process.recommended_peak_c) != null ? (
           <span> · 기준 피크 {formatNumber(process.recommended_peak_c)} ℃</span>
         ) : null}
         {Array.isArray(process.reason_labels_ko) && process.reason_labels_ko.length ? (
@@ -131,6 +154,9 @@ export default function PredictionEvidencePanel({ contract }) {
       </div>
       <div style={{ marginTop: 7, fontSize: 10, color: "#64748b", lineHeight: 1.45 }}>
         {contract.disclaimer_ko}
+      </div>
+      <div style={{ marginTop: 5, fontSize: 10, color: "#f59e0b", lineHeight: 1.45 }}>
+        전단·젖음 값은 이 판정 범위에 포함되지 않습니다. 전단은 시험조건 확인 전 검증 보류입니다.
       </div>
     </section>
   );

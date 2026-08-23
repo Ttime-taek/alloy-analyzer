@@ -263,12 +263,12 @@ def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, 
     if not by_name:
         return {"value": None, "best_dist": None, "top": []}
 
-    best_dist = min(v["dist"] for v in by_name.values())
-    contributors = []
+    # ``best_dist`` must describe the nearest row that can actually contribute
+    # a shear value.  An exact alloy row with ``shear=None`` is not shear
+    # evidence and must not make a remote IDW estimate look exact.
+    valid_contributors = []
     for name, item in sorted(by_name.items(), key=lambda x: x[1]["dist"]):
         dist = float(item["dist"])
-        if dist > float(max_dist):
-            continue
         stats = get_statistics(name)
         if not stats or not stats.get("shear"):
             continue
@@ -277,7 +277,7 @@ def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, 
         w = _shear_family_weight(input_comp, item["comp"], dist) * n
         if w <= 0.0:
             continue
-        contributors.append(
+        valid_contributors.append(
             {
                 "alloy": name,
                 "dist": dist,
@@ -286,6 +286,32 @@ def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, 
             }
         )
 
+    if not valid_contributors:
+        return {"value": None, "best_dist": None, "top": []}
+
+    best_dist = min(c["dist"] for c in valid_contributors)
+
+    # Exact measured shear is authoritative.  Mixing remote rows here made the
+    # detailed/evidence value disagree with the main exact-match DB mean.
+    exact = [c for c in valid_contributors if c["dist"] <= 1e-4]
+    if exact:
+        measured = exact[0]
+        return {
+            "value": float(measured["shear_mpa"]),
+            "best_dist": float(measured["dist"]),
+            "top": [
+                {
+                    "alloy": measured["alloy"],
+                    "dist": float(measured["dist"]),
+                    "shear_mpa": float(measured["shear_mpa"]),
+                    "weight_share": 1.0,
+                }
+            ],
+        }
+
+    contributors = [
+        c for c in valid_contributors if c["dist"] <= float(max_dist)
+    ]
     if not contributors:
         return {"value": None, "best_dist": float(best_dist), "top": []}
 
