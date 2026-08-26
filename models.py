@@ -49,9 +49,11 @@ def default_wetting_temp_c(liquidus: float) -> float:
 
 
 def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> float:
-    """비교 모드 자동: 더 높은 액상선+30℃ 목표를 BD 격자(250–290℃)에 한 번 스냅해 A·B 공통 온도로 사용."""
-    ta = default_wetting_temp_c(float(liquidus_a or 0.0))
-    tb = default_wetting_temp_c(float(liquidus_b or 0.0))
+    """비교 모드 자동: 더 높은 액상선+30℃ 목표를 DB 격자에 한 번 스냅해 공통 온도로 사용."""
+    # A missing liquidus is an unavailable prediction, not 0 °C.  Do not let
+    # the DB-grid clamp turn that sentinel into a plausible 250 °C test point.
+    ta = default_wetting_temp_c(liquidus_a)
+    tb = default_wetting_temp_c(liquidus_b)
     return float(max(ta, tb))
 
 class PropertyModels:
@@ -92,10 +94,14 @@ class PropertyModels:
             comp_factor = 0.0
             comp_factor += self._sat(ag, A=15, tau=3.5)
             comp_factor += self._sat(comp.get("Cu", 0), A=10, tau=2)
-            # SAC+Bi 저함량: Bi 1–3%에서 UTS 급상승 (실측·MDPI metals-12-01245)
+            # SAC+Bi: the low-Bi strengthening curve and the Sn-rich high-Bi
+            # curve describe different regimes.  Blend them over 12–18 wt%
+            # Bi so an input rounding at 12.00% cannot create a 30 MPa step.
             if sn >= 50.0 and bi >= 12.0:
-                # Sn-rich SAC+Bi(12–35%): Sn57Bi 저Sn 곡선(A=80)과 분리 — Sn1Ag25Bi0.7Cu 등
-                comp_factor += self._sat(max(0.0, bi - 8.0), A=36, tau=11)
+                low_bi = self._sat(bi, A=42, tau=2.5)
+                high_bi = self._sat(max(0.0, bi - 8.0), A=36, tau=11)
+                transition = self._smoothstep01((bi - 12.0) / 6.0)
+                comp_factor += low_bi * (1.0 - transition) + high_bi * transition
             elif bi >= 20.0:
                 # Ag가 거의 없는 순수 Sn-Bi는 내부 DB 평균이 더 낮아
                 # 고Bi(Ag-rich)와 같은 강한 A=80 곡선을 쓰면 과대가 된다.

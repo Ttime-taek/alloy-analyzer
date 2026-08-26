@@ -1071,7 +1071,26 @@ class AlloyAnalyzer:
             shear_idw = None
             if isinstance(shear_idw_detail, dict):
                 shear_idw = shear_idw_detail.get("value")
-            if shear_idw is not None and db_w > 0.0:
+            shear_db_dist = None
+            if isinstance(shear_idw_detail, dict):
+                try:
+                    shear_db_dist = float(shear_idw_detail.get("best_dist"))
+                except (TypeError, ValueError):
+                    shear_db_dist = None
+            # A composition that exactly matches a property-DB row with no
+            # shear observation must not inherit a different alloy's IDW
+            # value.  Use IDW only when the nearest *valid shear* evidence is
+            # itself within the property blend radius.
+            exact_shear_missing = bool(
+                db_exact_hit and (db_pred.get("shear") is None)
+            )
+            allow_shear_idw = bool(
+                shear_idw is not None
+                and shear_db_dist is not None
+                and shear_db_dist <= 3.0
+                and not exact_shear_missing
+            )
+            if allow_shear_idw:
                 try:
                     props["shear_strength"] = float(shear_idw)
                     d_s = shear_idw_detail.get("best_dist")

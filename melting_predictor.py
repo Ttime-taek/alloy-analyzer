@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "10"
+MELTING_ENGINE_VERSION = "11"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -272,9 +272,32 @@ def _classify(norm):
     # (In 동반 고-Bi(예 Bi10 In6, Bi14 In11)는 Sn-In 반응이 지배 → 기존대로 SnBi.)
     sac_matrix_lowin = (sn >= 78 and ag > 0 and cu > 0 and inp <= 2.0 and zn <= 1.0)
 
-    # Pb 1% 이상은 SnPb 경로(저-Pb Sn97.8Pb2.2 등 상용 커버리지). 1% 미만은 불순물 취급.
-    if pb >= 1:
+    # Binary trace systems need a stable route at the threshold.  Treat a
+    # composition containing only Sn+that element as the corresponding binary
+    # even below the historical commercial cut-off; otherwise a 0.01 wt%
+    # change can jump through the generic CALPHAD branch.
+    pure_sn_pb = (
+        pb > 0 and ag == 0 and cu == 0 and bi == 0 and inp == 0 and zn == 0 and sb == 0
+    )
+    pure_sn_zn = (
+        zn > 0 and ag == 0 and cu == 0 and bi == 0 and inp == 0 and pb == 0 and sb == 0
+    )
+    pure_sn_sb = (
+        sb > 0 and ag == 0 and cu == 0 and bi == 0 and inp == 0 and pb == 0 and zn == 0
+    )
+
+    # Define this before the broad Bi classifier so the transition cannot be
+    # swallowed by the SnBi return path once Sn falls below the SAC cutoff.
+    sac_bi_transition = (
+        sn >= 76.0 and ag > 0 and cu > 0 and inp <= 2.0 and zn <= 1.0
+        and 16.0 <= bi <= 20.0
+    )
+
+    # Pb 1% 이상은 SnPb 경로(저-Pb Sn97.8Pb2.2 등 상용 커버리지).
+    if pb >= 1 or pure_sn_pb:
         return "SnPb"
+    if sac_bi_transition:
+        return "SAC_BI_TRANSITION"
     # Bi > 5%: Sn-Bi 계열. (Bi ≤ 5%인 SAC+Bi/In 첨가는 SAC 경로.)
     # 과거 inp==0 일 때만 SnBi로 두면 Bi≥In 인 고Bi+In(예: Bi10 In6 …)이 neither SAC nor SnBi 가 되어
     # other+L4로 고상·액상이 과대(≈250℃+) 평가된다.
@@ -291,7 +314,7 @@ def _classify(norm):
         return "SnIn"
     # Sn-Zn-Bi 3원계 (Bi ≤ 5%): Sn8Zn3Bi 등 상용 조성 — Bi 없음을 요구하던 기존 조건이
     # 54°C 규모 오차 발생시켜 완화.
-    if zn > 3 and bi <= 5:
+    if (zn > 3 and bi <= 5) or pure_sn_zn:
         return "SnZn"
     # SAC 4원계 커버리지:
     # - 이전(bi < 3)은 boundary에서 Bi=3.0%를 "other"로 떨궈 L2(상태도)를 죽이고
@@ -314,7 +337,7 @@ def _classify(norm):
         return "SnAg"
     if sn > 80 and cu > 0 and ag == 0:
         return "SnCu"
-    if sb > 3:
+    if sb > 3 or pure_sn_sb:
         return "SnSb"
     return "other"
 
@@ -388,6 +411,21 @@ def _phase_diagram_predict(norm, family):
     cu  = norm.get("Cu", 0)
     sb  = norm.get("Sb", 0)
     zn  = norm.get("Zn", 0)
+
+    # High-Bi SAC additions cross from an Ag-Cu-Sn matrix to the Sn-Bi
+    # eutectic.  Keep the two physically meaningful curves but blend them over
+    # a finite composition corridor instead of selecting one with a hard
+    # classifier threshold.
+    if family == "SAC_BI_TRANSITION":
+        sac = _phase_diagram_predict(norm, "SAC")
+        snbi = _phase_diagram_predict(norm, "SnBi")
+        if sac is None or snbi is None:
+            return None
+        w = _smoothstep01((float(bi) - 16.0) / 4.0)
+        sol = float(sac[0]) * (1.0 - w) + float(snbi[0]) * w
+        liq = float(sac[1]) * (1.0 - w) + float(snbi[1]) * w
+        confidence = float(sac[2]) * (1.0 - w) + float(snbi[2]) * w
+        return sol, liq, confidence
 
     # ── Sn-Bi 계 ─────────────────────────────────────────────────────────────
     if family == "SnBi":
@@ -954,8 +992,12 @@ def _external_calphad_http(norm):
             return None
         sol = float(j["solidus"])
         liq = float(j["liquidus"])
+        if not (math.isfinite(sol) and math.isfinite(liq)):
+            return None
         raw_c = j.get("confidence", j.get("conf", 0.85))
         conf = float(raw_c) if raw_c is not None else 0.85
+        if not math.isfinite(conf):
+            return None
         conf = max(0.05, min(1.0, conf))
         return sol, liq, conf
     except Exception:
@@ -1047,7 +1089,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         l2_sol, l2_liq, l2_conf = (phase_result if phase_result
                                     else (None, None, 0.0))
 
-        is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SnAg",
+        is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SAC_BI_TRANSITION", "SnAg",
                                 "SnCu", "SnSb", "SnZn")
         if l2_sol is not None:
             l2_w = l2_conf * (
@@ -1177,6 +1219,18 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
 
         # ─── Physics-informed: Sn–Bi 고상선 절벽/과대상승 완화 ───
         final_sol = _physics_sn_bi_rich_solidus(norm, family, final_sol)
+        if family == "SAC_BI_TRANSITION":
+            # The SnBi low-Cu plateau engages at 20 wt% Bi.  Match that
+            # endpoint continuously so the final 20.00→20.01% step does not
+            # reintroduce a classifier-layer jump after the phase blend.
+            try:
+                bi_value = float(norm.get("Bi") or 0.0)
+                cu_value = float(norm.get("Cu") or 0.0)
+            except (TypeError, ValueError):
+                bi_value, cu_value = 0.0, 999.0
+            if 19.0 <= bi_value <= 20.0 and cu_value <= 0.8:
+                endpoint_weight = _smoothstep01(bi_value - 19.0)
+                final_sol = final_sol * (1.0 - endpoint_weight) + 138.3 * endpoint_weight
         final_sol, snbi_plateau_detail = _snbi_highbi_lowcu_plateau(norm, family, final_sol)
 
     # db_exact_match 이면 위 블록에서 이미 최종값 확정 (물리/ plateau 미적용)
