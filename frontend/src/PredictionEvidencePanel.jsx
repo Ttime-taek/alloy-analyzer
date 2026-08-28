@@ -66,7 +66,7 @@ function PropertyEvidence({ name, value }) {
         {formatNumber(value.point)}{hasFiniteNumber(value.point) && value.unit ? ` ${value.unit}` : ""}
       </div>
       <div style={{ marginTop: 3, fontSize: 11, color: "#cbd5e1" }}>경험적 90% 범위: {range}</div>
-      <div style={{ marginTop: 3, fontSize: 10, color: "#64748b" }}>
+      <div style={{ marginTop: 3, fontSize: 10, color: "#7b8794" }}>
         최근접 거리 {formatNumber(value.evidence?.nearest_distance, 3)} · {value.usage_label_ko}
       </div>
       {value.comparison_allowed !== true ? (
@@ -152,7 +152,7 @@ export default function PredictionEvidencePanel({ contract }) {
           <div style={{ marginTop: 3, color: "#cbd5e1" }}>{process.reason_labels_ko.join(" ")}</div>
         ) : null}
       </div>
-      <div style={{ marginTop: 7, fontSize: 10, color: "#64748b", lineHeight: 1.45 }}>
+      <div style={{ marginTop: 7, fontSize: 10, color: "#7b8794", lineHeight: 1.45 }}>
         {contract.disclaimer_ko}
       </div>
       <div style={{ marginTop: 5, fontSize: 10, color: "#f59e0b", lineHeight: 1.45 }}>

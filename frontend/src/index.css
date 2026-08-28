@@ -26,7 +26,7 @@ html {
   --border-accent: #334155;
   --text-primary: #e5e7eb;
   --text-secondary: #9ca3af;
-  --text-muted: #64748b;
+  --text-muted: #7b8794;
   --text-dim: #94a3b8;
   /* 표 헤더·보조 라벨 등 (기존 인라인 #cbd5e1과 동일) */
   --text-soft: #cbd5e1;
@@ -1277,7 +1277,7 @@ summary:focus-visible,
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #7b8794;
 }
 
 .rs-chrome__title {
@@ -1355,7 +1355,7 @@ summary:focus-visible,
   width: 44px;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: #7b8794;
   font-size: 28px;
   line-height: 1;
   cursor: pointer;
@@ -1411,7 +1411,7 @@ summary:focus-visible,
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #7b8794;
 }
 
 .rs-cover-title {
@@ -1434,7 +1434,7 @@ summary:focus-visible,
 .rs-cover-date {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: #7b8794;
 }
 
 .rs-closing-title {
@@ -1593,7 +1593,7 @@ summary:focus-visible,
   display: block;
   margin-top: 4px;
   font-size: 10px;
-  color: #64748b;
+  color: #7b8794;
   overflow-wrap: anywhere;
 }
 
@@ -1638,11 +1638,11 @@ summary:focus-visible,
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #7b8794;
 }
 
 .rs-muted {
-  color: #64748b;
+  color: #7b8794;
   font-size: 14px;
   margin: auto;
   text-align: center;
@@ -1695,7 +1695,7 @@ summary:focus-visible,
   margin: 8px 0 0;
   text-align: center;
   font-size: 11px;
-  color: #64748b;
+  color: #7b8794;
 }
 
 /* HTML 저장용 오프라인 슬라이드 (pro-*) — flex 목록 금지 */
@@ -2269,7 +2269,7 @@ summary:focus-visible,
   display: block;
   margin-top: 2px;
   font-size: 10px;
-  color: #64748b;
+  color: #7b8794;
 }
 
 .compare-hero-legend {
@@ -2352,7 +2352,7 @@ summary:focus-visible,
 }
 
 .compare-hero-delta__label {
-  color: #64748b;
+  color: #7b8794;
   font-weight: 500;
 }
 
@@ -2373,7 +2373,7 @@ summary:focus-visible,
 .compare-hero-footnote {
   margin: 10px 0 0;
   font-size: 11px;
-  color: #64748b;
+  color: #7b8794;
   line-height: 1.4;
 }
 
@@ -2549,7 +2549,7 @@ summary:focus-visible,
 
 .compare-metrics-block__note {
   font-size: 11px;
-  color: #64748b;
+  color: #7b8794;
   line-height: 1.4;
 }
 

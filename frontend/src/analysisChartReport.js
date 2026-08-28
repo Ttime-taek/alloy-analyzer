@@ -179,7 +179,7 @@ export const REPORT_SLIDE_CSS = `
 .pro-kpi__hint {
   font-size: 11px;
   line-height: 1.35;
-  color: #64748b;
+  color: #7b8794;
   overflow-wrap: anywhere;
 }
 .pro-metrics-layout {
@@ -251,7 +251,7 @@ export const REPORT_SLIDE_CSS = `
   color: #94a3b8;
 }
 .pro-wetting-table td { color: #e2e8f0; }
-.pro-muted { color: #64748b; font-size: 14px; }
+.pro-muted { color: #7b8794; font-size: 14px; }
 .slide-body--executive {
   display: flex;
   flex-direction: column;
@@ -343,15 +343,15 @@ body { margin: 0; font-family: "Pretendard", system-ui, sans-serif; background: 
   row-gap: 4px;
   align-items: baseline;
 }
-.slide-head__index { grid-row: 1 / -1; align-self: center; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: #64748b; }
+.slide-head__index { grid-row: 1 / -1; align-self: center; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: #7b8794; }
 .slide-head__title { margin: 0; font-size: var(--slide-title); font-weight: 800; line-height: 1.2; letter-spacing: -0.02em; grid-column: 2; }
 .slide-head__subtitle { margin: 0; grid-column: 2; font-size: 13px; color: #94a3b8; line-height: 1.45; overflow-wrap: anywhere; }
 .slide-body { flex: 1; min-height: 0; padding: var(--slide-pad-y) var(--slide-pad-x); display: flex; flex-direction: column; overflow: hidden; }
 .slide-cover, .slide-closing { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 16px; padding: 24px; }
-.slide-cover__doctype { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #64748b; margin: 0; }
+.slide-cover__doctype { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #7b8794; margin: 0; }
 .slide-cover__title { font-size: clamp(28px, 4vw, 40px); font-weight: 800; margin: 0; line-height: 1.15; max-width: 18ch; }
 .slide-cover__sub { font-size: 15px; color: #94a3b8; margin: 0; max-width: 42em; line-height: 1.5; overflow-wrap: anywhere; }
-.slide-cover__date, .slide-closing__date { font-size: 13px; color: #64748b; margin: 8px 0 0; }
+.slide-cover__date, .slide-closing__date { font-size: 13px; color: #7b8794; margin: 8px 0 0; }
 .slide-cover .pro-kpi-grid { width: 100%; max-width: 720px; margin-top: 8px; }
 .slide-charts-grid { flex: 1; display: grid; grid-template-columns: 0.95fr 1.45fr; gap: 20px; min-height: 280px; }
 .slide-chart-panel { min-height: 0; padding: 12px; border-radius: 10px; background: rgba(15,23,42,0.5); border: 1px solid #334155; position: relative; }

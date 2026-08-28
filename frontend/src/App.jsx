@@ -1696,7 +1696,7 @@ export default function App() {
   };
 
   const totalColor = (t, hasInput) => {
-    if (!hasInput && Number(t) < 0.01) return "#64748b";
+    if (!hasInput && Number(t) < 0.01) return "#7b8794";
     if (compositionTotalIsComplete(t)) return "#22c55e";
     if (t >= 95 && t <= 105) return "#fbbf24";
     return "#f97316";
@@ -1873,7 +1873,7 @@ export default function App() {
           >
             {aboutInfo ? `v${aboutInfo.version}` : "웹 UI"}
           </span>
-          <span style={{ fontSize: 13, color: "#64748b" }}>
+          <span style={{ fontSize: 13, color: "#7b8794" }}>
             FastAPI + React · 데스크톱 GUI와 동일 엔진
           </span>
         </div>
@@ -1992,7 +1992,7 @@ export default function App() {
                   {aboutInfo.composition_input.wt_percent_sum_guidance}
                 </p>
                 {aboutInfo.composition_input.strict_mode_env ? (
-                  <p style={{ margin: "0 0 14px 0", color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>
+                  <p style={{ margin: "0 0 14px 0", color: "#7b8794", fontSize: 12, lineHeight: 1.5 }}>
                     {aboutInfo.composition_input.strict_mode_env}
                   </p>
                 ) : null}
@@ -2100,7 +2100,7 @@ export default function App() {
               onToggle={() => setMeltSearchOpen((v) => !v)}
               rightHint={meltSearchRightHint(meltSearchOpen, meltRecLiquidus, meltRecResult)}
             >
-            <p className="app-helper-copy" style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            <p className="app-helper-copy" style={{ margin: "0 0 10px", fontSize: 12, color: "#7b8794", lineHeight: 1.45 }}>
               기본은 <strong style={{ color: "#94a3b8" }}>목표 액상</strong> 한 가지만 넣습니다.{" "}
               <strong style={{ color: "#94a3b8" }}>Ag·Cu·In·Bi</strong> 격자를 스윕하고 나머지는{" "}
               <strong style={{ color: "#94a3b8" }}>Sn</strong>으로 맞춥니다. 표에는 후보와{" "}
@@ -2111,7 +2111,7 @@ export default function App() {
                 API 확인 중…
               </p>
             ) : null}
-            <p className="app-helper-copy app-helper-copy--compact" style={{ margin: "0 0 10px", fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
+            <p className="app-helper-copy app-helper-copy--compact" style={{ margin: "0 0 10px", fontSize: 11, color: "#7b8794", lineHeight: 1.45 }}>
               실행은 보통 <strong style={{ color: "#94a3b8" }}>10초~1분</strong> 걸릴 수 있습니다. 서버가 처음 시작하는
               경우는 더 느릴 수 있으니 끝날 때까지 이 페이지를 유지하세요.
             </p>
@@ -2229,7 +2229,7 @@ export default function App() {
                       }}
                     />
                   </label>
-                  <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.45, maxWidth: 320 }}>
+                  <span style={{ fontSize: 11, color: "#7b8794", lineHeight: 1.45, maxWidth: 320 }}>
                     고상·액상 중 하나만 넣어도 됩니다. 둘 다 넣으면 두 축 밴드에 맞춥니다.
                   </span>
                 </div>
@@ -2296,7 +2296,7 @@ export default function App() {
                   onClick={() => setLiteratureMode("deep")}
                   label="정밀"
                 />
-                <span className="app-inline-note" style={{ fontSize: 13, color: "#64748b" }}>
+                <span className="app-inline-note" style={{ fontSize: 13, color: "#7b8794" }}>
                   {literatureMode === "deep" ? "출처를 더 깊게 검색합니다." : "속도 우선"}
                 </span>
               </div>
@@ -2338,7 +2338,7 @@ export default function App() {
                   <option value="280">280 ℃</option>
                   <option value="290">290 ℃</option>
                 </select>
-                <span className="app-helper-copy app-helper-copy--compact" style={{ fontSize: 12, color: "#64748b", maxWidth: 420, lineHeight: 1.45 }}>
+                <span className="app-helper-copy app-helper-copy--compact" style={{ fontSize: 12, color: "#7b8794", maxWidth: 420, lineHeight: 1.45 }}>
                   {mode === "compare"
                     ? "비교 시 A·B 모두 같은 온도에서 젖음을 봅니다. 자동이면 더 높은 기준 온도를 씁니다."
                     : "기본은 액상선보다 약 +30℃를 목표로 하고, DB 기준과 가장 가까운 250–290℃ 값으로 맞춥니다."}
@@ -2627,7 +2627,7 @@ export default function App() {
 
             <div className={mode === "compare" ? "compare-compose-add-block" : undefined}>
               {mode !== "compare" && <div style={{ fontWeight: 600, marginBottom: 4 }}>조성 A</div>}
-              <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+              <p style={{ fontSize: 13, color: "#7b8794", margin: "0 0 8px 0" }}>
                 {mode === "compare"
                   ? "주기율표·원소 추가로 입력란을 만듭니다."
                   : "위 주기율표에서 원소를 클릭하거나, 아래에서 원소를 추가하면 입력란이 나타납니다."}
@@ -2666,7 +2666,7 @@ export default function App() {
             {mode === "compare" ? (
               <div className="compare-compose-inputs">
                 {compareVisibleElemsA.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
+                  <p style={{ fontSize: 13, color: "#7b8794", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
                 ) : (
                   compareVisibleElemsA.map((el) => renderCompareComposeInputRow(el, "A"))
                 )}
@@ -2674,7 +2674,7 @@ export default function App() {
             ) : (
             <div>
               {activeElemsA.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
+                <p style={{ fontSize: 13, color: "#7b8794", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
               ) : (
                 activeElemsA.map((el) => (
                   <div
@@ -2866,7 +2866,7 @@ export default function App() {
                   </TactileButton>
                 </div>
                 <div className="compare-compose-add-block">
-                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+                  <p style={{ fontSize: 13, color: "#7b8794", margin: "0 0 8px 0" }}>
                     주기율표·원소 추가로 입력란을 만듭니다.
                   </p>
                   <select
@@ -2902,7 +2902,7 @@ export default function App() {
                 </div>
                 <div className="compare-compose-inputs">
                   {compareVisibleElemsB.length === 0 ? (
-                    <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
+                    <p style={{ fontSize: 13, color: "#7b8794", margin: 0 }}>아직 선택된 원소가 없습니다.</p>
                   ) : (
                     compareVisibleElemsB.map((el) => renderCompareComposeInputRow(el, "B"))
                   )}
@@ -2976,7 +2976,7 @@ export default function App() {
                 style={{
                   margin: "10px 0 0",
                   fontSize: 12,
-                  color: "#64748b",
+                  color: "#7b8794",
                   lineHeight: 1.45
                 }}
               >
@@ -3012,7 +3012,7 @@ export default function App() {
                   <span style={{ fontWeight: 600 }}>
                     {analysisStage || "분석 요청 처리 중..."}
                   </span>
-                  <span style={{ color: "#64748b", fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ color: "#7b8794", fontVariantNumeric: "tabular-nums" }}>
                     (경과 {analysisElapsedSec}s)
                   </span>
                 </div>
@@ -3175,7 +3175,7 @@ export default function App() {
                           textAlign: "left",
                           padding: "0 0 10px",
                           fontSize: 11,
-                          color: "#64748b",
+                          color: "#7b8794",
                           lineHeight: 1.45
                         }}
                       >
@@ -3367,12 +3367,12 @@ export default function App() {
               </p>
             )}
             {mode === "compare" && compareResult && !resultPanelOpen && (
-              <p style={{ color: "#64748b", marginTop: 6 }}>
+              <p style={{ color: "#7b8794", marginTop: 6 }}>
                 분석 결과가 접혀 있습니다. “분석 결과 펼치기”로 비교 표·IMC 요약을 확인하세요.
               </p>
             )}
             {mode === "single" && result && !resultPanelOpen && (
-              <p style={{ color: "#64748b", marginTop: 6 }}>
+              <p style={{ color: "#7b8794", marginTop: 6 }}>
                 상세 분석(탭·문헌·리플로우)이 접혀 있습니다. KPI는 아래에 표시됩니다. “분석 결과 펼치기”로 전체를
                 확인하세요.
               </p>
@@ -3460,7 +3460,7 @@ export default function App() {
                   </TactileButton>
                 </div>
                 {result.evidence?.wetting?.source === "Heuristic" && (
-                  <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px 0" }}>
+                  <p style={{ fontSize: 12, color: "#7b8794", margin: "0 0 12px 0" }}>
                     젖음: 측정 DB 보간 대신 조성·온도 휴리스틱 추정입니다. (융점 DB 최근접 거리는 요약·신뢰도 블록 참고)
                   </p>
                 )}
@@ -3758,7 +3758,7 @@ export default function App() {
                     open={sectionOpen.lab}
                     onToggle={() => toggleSection("lab")}
                   >
-                    <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+                    <p style={{ fontSize: 13, color: "#7b8794", margin: "0 0 8px 0" }}>
                       이 블록은 &quot;연구소 모드&quot;로 분석을 실행했을 때만 서버에서 생성됩니다. 토글만
                       바꾼 경우에는 다시 &quot;분석&quot;을 눌러 주세요.
                     </p>
@@ -4398,7 +4398,7 @@ export function SourceReferences({ result, showAiCitations = true, showIntro = t
   return (
     <>
       {showIntro ? (
-        <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px 0" }}>
+        <p style={{ fontSize: 13, color: "#7b8794", margin: "0 0 8px 0" }}>
           실제 인용 출처와 자동 검색 후보를 구분해 표시합니다. DOI/URL이 포함된 항목은
           링크로 열 수 있습니다.
         </p>
@@ -4439,7 +4439,7 @@ export function SourceReferences({ result, showAiCitations = true, showIntro = t
               ))}
             </ul>
           ) : (
-            <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+            <p style={{ color: "#7b8794", fontSize: 13, margin: 0 }}>
               {aiNotRequested
                 ? "AI 설명을 불러오면 실제 인용 출처가 여기에 표시됩니다."
                 : "이번 요청에서 AI가 직접 인용한 DOI/URL이 없습니다."}
@@ -4458,7 +4458,7 @@ export function SourceReferences({ result, showAiCitations = true, showIntro = t
             ))}
           </ul>
         ) : (
-          <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+          <p style={{ color: "#7b8794", fontSize: 13, margin: 0 }}>
             아직 표시할 자동 검색 후보가 없습니다. 네트워크 제한 시 비어 있을 수 있습니다.
           </p>
         )}
@@ -4996,7 +4996,7 @@ function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, bas
       {loadError ? (
         <p style={{ fontSize: 12, color: "#f97316", margin: "8px 0 0 0" }}>{loadError}</p>
       ) : null}
-      <p style={{ fontSize: 11, color: "#64748b", margin: "8px 0 0 0", lineHeight: 1.45 }}>
+      <p style={{ fontSize: 11, color: "#7b8794", margin: "8px 0 0 0", lineHeight: 1.45 }}>
         높은 Fmax·낮은 T₀가 일반적으로 유리합니다. {sourceKind === "measured_db"
           ? "표와 상단 카드는 등록 조성·온도와 일치한 측정값입니다."
           : sourceKind === "idw_prediction"
@@ -5169,7 +5169,7 @@ function ResultSummaryBlock({
             {formatOptionalDifference(result.alloy_inference.solidus, result.solidus, 2, " ℃")} · 액상{" "}
             {formatOptionalDifference(result.alloy_inference.liquidus, result.liquidus, 2, " ℃")}
           </div>
-          <div style={{ color: "#64748b", fontSize: 11 }}>
+          <div style={{ color: "#7b8794", fontSize: 11 }}>
             표시값과 차이가 크면 실제 DSC 측정을 우선하세요. 리플로우 차트는 위 검증 판정의 핵심 엔진 값만 사용합니다.
           </div>
         </div>
@@ -5835,7 +5835,7 @@ function CompareTempBarChart({ a, b }) {
               x={padL - 8}
               y={yy + 4}
               textAnchor="end"
-              fill="#64748b"
+              fill="#7b8794"
               fontSize={10}
               fontFamily="inherit"
             >
@@ -5850,10 +5850,10 @@ function CompareTempBarChart({ a, b }) {
         y1={baseY}
         x2={padL + plotW}
         y2={baseY}
-        stroke="#64748b"
+        stroke="#7b8794"
         strokeWidth={1.5}
       />
-      <line x1={padL} y1={padT} x2={padL} y2={baseY} stroke="#64748b" strokeWidth={1.5} />
+      <line x1={padL} y1={padT} x2={padL} y2={baseY} stroke="#7b8794" strokeWidth={1.5} />
 
       {categories.map((cat, i) => {
         const cx = padL + groupInset + groupW * i + groupW / 2;
@@ -5882,7 +5882,7 @@ function CompareTempBarChart({ a, b }) {
         x={16}
         y={padT + plotH / 2}
         textAnchor="middle"
-        fill="#64748b"
+        fill="#7b8794"
         fontSize={10}
         fontFamily="inherit"
         transform={`rotate(-90 16 ${padT + plotH / 2})`}
@@ -6029,7 +6029,7 @@ function CompareView({ data, compA, compB }) {
             ...compareNumTdRight,
             color:
               dNum == null
-                ? "#64748b"
+                ? "#7b8794"
                 : dNum > 0
                   ? "#fbbf24"
                   : dNum < 0
@@ -6317,7 +6317,7 @@ export function PropertyBars({ a, b }) {
             <div className="property-bars__label" style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>
               {mtr.label}
               {!allowVisualCompare ? (
-                <span style={{ marginLeft: 8, color: "#64748b", fontSize: 10 }}>
+                <span style={{ marginLeft: 8, color: "#7b8794", fontSize: 10 }}>
                   {mtr.holdText || "값 누락으로 상대 막대 생략"}
                 </span>
               ) : null}
@@ -7001,7 +7001,7 @@ function ImcInterfaceCard({
             {guardrailHeadline.tone === "ERR" ? "❌" : guardrailHeadline.tone === "WARN" ? "⚠" : "✓"}{" "}
             튜닝 가드레일: {guardrailHeadline.msg}
             {guardrailRes.errors.length + guardrailRes.warnings.length + guardrailRes.oks.length > 1 ? (
-              <span style={{ marginLeft: 6, color: "#64748b" }}>
+              <span style={{ marginLeft: 6, color: "#7b8794" }}>
                 (+{guardrailRes.errors.length + guardrailRes.warnings.length + guardrailRes.oks.length - 1})
               </span>
             ) : null}
@@ -7349,7 +7349,7 @@ function ReflowTuneBar({
         즉시 갱신됩니다. 조성에 맞춰 AUTO 프리셋이 선택되며, 1차 램프·프리히트(시간)·액상선 이상 유지·냉각·피크
         마진을 조절할 수 있습니다. TAL·S~L·Peak-5·IMC 블록에도 동일 프로파일이 반영됩니다.
       </p>
-      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "#7b8794", marginBottom: 10 }}>
         프리셋(AUTO): <strong style={{ color: "var(--text-soft)" }}>{presetName || "—"}</strong>
       </div>
 
@@ -7383,7 +7383,7 @@ function ReflowTuneBar({
         >
           권장값 적용
         </TactileButton>
-        <span style={{ fontSize: 11, color: "#64748b" }}>
+        <span style={{ fontSize: 11, color: "#7b8794" }}>
           (현재 합금 프리셋 + 목표 → 공급사 가이드 기반 권장값으로 한 번에 세팅)
         </span>
       </div>
@@ -7396,7 +7396,7 @@ function ReflowTuneBar({
             lineHeight: 1.45
           }}
         >
-          <span style={{ color: "#64748b", fontWeight: 600 }}>목표 대비 Δ(현재 − 권장)</span>: {vsRecommendedLine}
+          <span style={{ color: "#7b8794", fontWeight: 600 }}>목표 대비 Δ(현재 − 권장)</span>: {vsRecommendedLine}
         </div>
       ) : null}
       <div
@@ -7521,7 +7521,7 @@ function ReflowTuneBar({
                   <div key={d.key} style={{ fontSize: 12, color: "#e2e8f0" }}>
                     <span style={{ color: "#94a3b8" }}>{d.label}: </span>
                     <span>{fmt(d.before)}</span>
-                    <span style={{ color: "#64748b", margin: "0 4px" }}>→</span>
+                    <span style={{ color: "#7b8794", margin: "0 4px" }}>→</span>
                     <span style={{ fontWeight: 700 }}>{fmt(d.after)}</span>
                     {Number.isFinite(d.delta) ? (
                       <span style={{ marginLeft: 6, color: d.delta > 0 ? "#86efac" : "#fbbf24" }}>
@@ -7567,7 +7567,7 @@ function ReflowTuneBar({
           {validation.errors.length === 0 &&
           validation.warnings.length === 0 &&
           validation.oks.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#64748b" }}>
+            <div style={{ fontSize: 12, color: "#7b8794" }}>
               검증 결과 없음 — 분석 후 AUTO가 합금에 맞는 프리셋으로 확정되면 카테고리별 밴드가 채워집니다.
             </div>
           ) : null}
@@ -7603,7 +7603,7 @@ function ReflowTuneBar({
         >
           프리셋 기본값으로 구간 초기화
         </TactileButton>
-        <span style={{ fontSize: 12, color: "#64748b" }}>
+        <span style={{ fontSize: 12, color: "#7b8794" }}>
           적용 피크: <strong style={{ color: "#e2e8f0" }}>{reflowPeakEffective.toFixed(1)} ℃</strong>
           {Number.isFinite(mp) && Math.abs(reflowPeakEffective - mp) > 0.05 ? (
             <span style={{ marginLeft: 6 }}>(분석 {mp.toFixed(1)} ℃ 대비)</span>
@@ -7626,7 +7626,7 @@ function ReflowCard({ solidus, liquidus, peak, modelPeak, profileMeta }) {
         }}
       >
         <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>리플로우 프로파일</div>
-        <div style={{ fontSize: 13, color: "#64748b" }}>온도 정보가 부족합니다.</div>
+        <div style={{ fontSize: 13, color: "#7b8794" }}>온도 정보가 부족합니다.</div>
       </div>
     );
   }
@@ -7668,7 +7668,7 @@ function ReflowCard({ solidus, liquidus, peak, modelPeak, profileMeta }) {
       <div style={{ fontSize: 13, marginBottom: 2 }}>
         프리히트: {preheatLo.toFixed(1)}–{preheatHi.toFixed(1)} ℃ ({soakTime}s)
         {usePeakMeta ? (
-          <span style={{ color: "#64748b", fontSize: 12 }}> · 그래프 Peak-based 구간</span>
+          <span style={{ color: "#7b8794", fontSize: 12 }}> · 그래프 Peak-based 구간</span>
         ) : null}
       </div>
       <div style={{ fontSize: 13, marginBottom: 2 }}>
@@ -7683,7 +7683,7 @@ function ReflowCard({ solidus, liquidus, peak, modelPeak, profileMeta }) {
           <span style={{ color: "#94a3b8" }}> (분석 피크 {modelPeak.toFixed(1)} ℃)</span>
         ) : null}
       </div>
-      <div style={{ fontSize: 13, marginTop: 4, color: "#64748b" }}>
+      <div style={{ fontSize: 13, marginTop: 4, color: "#7b8794" }}>
         실제 프로파일 설계 시 부품/PCB 스펙과 함께 검토해야 합니다.
       </div>
     </div>
@@ -7757,7 +7757,7 @@ function RegulationCard({ norm }) {
           ))}
         </ul>
       )}
-      <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+      <div style={{ fontSize: 13, color: "#7b8794", marginTop: 4 }}>
         실제 인증 여부는 부품/제품 단위 시험·법규 검토가 필요합니다.
       </div>
     </div>
@@ -7966,10 +7966,10 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
           y1={height - padY}
           x2={padX + plotW}
           y2={height - padY}
-          stroke="#64748b"
+          stroke="#7b8794"
           strokeWidth={1.5}
         />
-        <line x1={padX} y1={padY} x2={padX} y2={height - padY} stroke="#64748b" strokeWidth={1.5} />
+        <line x1={padX} y1={padY} x2={padX} y2={height - padY} stroke="#7b8794" strokeWidth={1.5} />
 
         <text
           x={padX + plotW / 2}
@@ -8072,7 +8072,7 @@ function ReflowChart({ profile, solidus, liquidus, layoutScale = 1, expandable =
       <div
         style={{
           fontSize: Math.round(13 * Math.min(sc, 1.15)),
-          color: "#64748b",
+          color: "#7b8794",
           marginTop: 6,
           lineHeight: 1.45
         }}
@@ -8117,7 +8117,7 @@ function PopupReflowTuner({ result, initialTune, initialPeakUser, hostWindow, me
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "baseline" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>리플로우 프로파일 (확대)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>
+          <div style={{ fontSize: 12, color: "#7b8794" }}>
             새 창에서도 피크·튜닝을 바꾸면 곡선이 즉시 갱신됩니다.
           </div>
         </div>
