@@ -226,6 +226,30 @@ _HEESUNG_SUMMARY_20130628 = [
 ]
 
 
+# [2026-09-18 점검 패치] 저Ag SAC 액상선 219 °C 행 격리
+#   결과: SAC105(Sn-1.0Ag-0.5Cu) 액상선 예측 219.8 → 226.4 °C (제조사 자료 225–227 °C 범위),
+#         Sn-1.2Ag-0.5Cu 226.3 °C. SAC305(221)·SAC405(219.7) 등 다른 SAC 예측은 변화 없음.
+#   부수 효과: 서로를 완벽히 '맞히던' 근접 중복행이 빠져 홀드아웃 검증 통계가 현실화됨
+#         (SAC 액상선 표본 54→47, MAE 9.50→9.88 °C, 전체 액상선 p90 12.7→21.4 °C).
+#   검증: tests/test_audit_2026_09_18_regression.py::test_contradictory_low_ag_sac_rows_are_quarantined
+# 원본 요약표 값이 상태도·동일 DB 행과 모순되어 학습/정확일치에서 제외하는 행.
+# 원본 기록은 위 목록에 그대로 보존하고, 출처 재확인 후 여기서 빼면 다시 합류한다.
+# - Sn-(1.0~1.2)Ag-0.5Cu 계열 액상선 219 °C: 저Ag SAC 액상선은 통상 224~227 °C
+#   (같은 DB Sn1.0Ag0.7Cu = 224 °C, SAC105 제조사 자료 217–227 °C).
+#   미량 Ni/Ge/P 첨가로 액상선이 5~8 °C 내려가지 않으므로 전기 오류로 판단.
+QUARANTINED_SOURCE_ROWS = {
+    "Sn-1.0Ag-0.5Cu-0.015P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+    "Sn-1.0Ag-0.015P": "Sn-1Ag liquidus 219 °C contradicts binary Sn-Ag liquidus (~227 °C)",
+    "Sn-1.0Ag-0.5Cu-0.003Ni-0.0075Ge": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0035Ge-0.01P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge-0.0035P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+    "Sn-1.2Ag-0.5Cu-0.02Ni-0.0085Ge-0.0035P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
+}
+_known_source_names = {row["name"] for row in _HEESUNG_SUMMARY_20130628}
+assert set(QUARANTINED_SOURCE_ROWS) <= _known_source_names, "quarantine list references unknown rows"
+
+
 # ================================================================
 # 최종 DB 구성 (정규화 + 메타데이터 추가)
 # ================================================================
@@ -233,6 +257,8 @@ SOLDER_DB = []
 _seen_comp_signatures = set()
 
 for entry in [*_raw_db, *_HEESUNG_SUMMARY_20130628]:
+    if entry.get("source") == "Heesung summary 2013-06-28" and entry.get("name") in QUARANTINED_SOURCE_ROWS:
+        continue
     entry["comp"] = normalize_comp(entry["comp"])
     validate_alloy(entry)
     sig = comp_signature(entry["comp"])

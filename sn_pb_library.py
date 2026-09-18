@@ -29,8 +29,13 @@ SN_PB_PHASE: List[Tuple[float, float, float]] = [
     (80.0, 183.0, 275.0),
     (81.7, 183.0, 277.0),
     (85.0, 215.0, 290.0),
-    (90.0, 255.0, 301.0),
-    (95.0, 290.0, 312.0),
+    # [2026-09-18 점검 패치] Pb-rich 고상선 수정
+    #   변경: Sn10Pb90 255/301 → 268/302 °C, Sn5Pb95 290/312 → 301/314 °C
+    #   근거: Kester Alloy Temperature Chart(268–302, 301–314), AIM 자료(275–302, 308–312)
+    #   결과: 두 합금 모두 DB 정확일치로 268/302, 301/314 반환. 중간 조성 Sn7Pb93 예측 289.9/309.1 °C.
+    #   검증: tests/test_audit_2026_09_18_regression.py::test_high_lead_sn_pb_solidus_matches_datasheets
+    (90.0, 268.0, 302.0),  # Kester Alloy Temperature Chart: Sn10Pb90 268–302 °C
+    (95.0, 301.0, 314.0),  # Kester Alloy Temperature Chart: Sn5Pb95 301–314 °C
     (98.0, 312.0, 322.0),
     (100.0, 327.5, 327.5),
 ]
@@ -39,8 +44,9 @@ SN_PB_PHASE: List[Tuple[float, float, float]] = [
 SN_PB_SOLDER_ENTRIES: List[Dict[str, Any]] = [
     {"name": "Pb100", "comp": {"Pb": 100.0}, "solidus": 327.5, "liquidus": 327.5},
     {"name": "Sn2Pb98", "comp": {"Sn": 2.0, "Pb": 98.0}, "solidus": 312.0, "liquidus": 322.0},
-    {"name": "Sn5Pb95", "comp": {"Sn": 5.0, "Pb": 95.0}, "solidus": 290.0, "liquidus": 312.0},
-    {"name": "Sn10Pb90", "comp": {"Sn": 10.0, "Pb": 90.0}, "solidus": 255.0, "liquidus": 301.0},
+    # [2026-09-18 점검 패치] 아래 두 행 = 위 SN_PB_PHASE와 동일 출처(Kester)로 수정 (이전 290/312, 255/301)
+    {"name": "Sn5Pb95", "comp": {"Sn": 5.0, "Pb": 95.0}, "solidus": 301.0, "liquidus": 314.0},
+    {"name": "Sn10Pb90", "comp": {"Sn": 10.0, "Pb": 90.0}, "solidus": 268.0, "liquidus": 302.0},
     {"name": "Sn15Pb85", "comp": {"Sn": 15.0, "Pb": 85.0}, "solidus": 215.0, "liquidus": 290.0},
     {"name": "Sn18.3Pb81.7", "comp": {"Sn": 18.3, "Pb": 81.7}, "solidus": 183.0, "liquidus": 277.0},
     {"name": "Sn20Pb80", "comp": {"Sn": 20.0, "Pb": 80.0}, "solidus": 183.0, "liquidus": 275.0},

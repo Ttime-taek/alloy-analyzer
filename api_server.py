@@ -26,6 +26,7 @@ The core analysis logic is reused from the existing test7 package
 so that GUI와 서버가 항상 동일한 엔진을 사용합니다.
 """
 
+import logging
 import json
 import math
 import os
@@ -1148,6 +1149,15 @@ def _core_result_payload(
     }
 
 
+
+# [2026-09-18 점검 패치] 500 응답에서 예외 원문 노출 제거
+#   변경 전: detail=f"분석 실패: {e}" 처럼 내부 경로·예외 메시지가 클라이언트에 그대로 전달됨
+#   결과: 응답은 "…중 내부 오류가 발생했습니다." 고정 문구, 원문은 서버 로그(alloy.api)에만 기록
+#   검증: tests/test_audit_2026_09_18_regression.py::test_internal_errors_do_not_leak_exception_text
+def _log_internal_error(context: str, exc: BaseException) -> None:
+    """내부 예외 원문은 서버 로그에만 남기고 응답에는 노출하지 않는다."""
+    logging.getLogger("alloy.api").error("%s failed", context, exc_info=exc)
+
 def _v1_error(code: str, message: str, *, details: Any = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"code": code, "message": message}
     if details is not None:
@@ -1445,22 +1455,25 @@ async def put_favorites(
             try:
                 _write_web_favorites_file(items)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"즐겨찾기 저장 실패: {e}") from e
+                _log_internal_error("즐겨찾기 저장 실패", e)
+                raise HTTPException(status_code=500, detail="즐겨찾기 저장 중 내부 오류가 발생했습니다.") from e
             return WebFavoritesPayload(favorites=body.favorites, storage="local_fallback")
         return WebFavoritesPayload(favorites=body.favorites, storage="supabase")
 
     try:
         _write_web_favorites_file(items)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"즐겨찾기 저장 실패: {e}") from e
+        _log_internal_error("즐겨찾기 저장 실패", e)
+        raise HTTPException(status_code=500, detail="즐겨찾기 저장 중 내부 오류가 발생했습니다.") from e
     return WebFavoritesPayload(favorites=body.favorites, storage="local")
 
 
 @app.post("/api/analyze", response_model=AnalysisResponse)
-async def analyze(req: CompositionRequest) -> AnalysisResponse:
+async def analyze(req: CompositionRequest, request: Request) -> AnalysisResponse:
     """
     합금 조성(wt%)을 받아 analyzer.analyze_all 결과를 JSON으로 반환.
-    React 등 클라이언트에서는 이 엔드포인트만 호출하면 됩니다.
+    레거시 호환 경로. include_ai=True 요청은 v1 설명 API와 같은 속도·동시성 제한을 받고,
+    생성형 AI가 융점 수치를 보정하지 않는다(include_melting_ai=False).
     """
     _ai_engine, _analyzer = _get_engine_bundle()
     try:
@@ -1468,6 +1481,31 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     sum_in, comp_notes = _composition_notes_for_raw_comp(dict(req.comp))
+    # [2026-09-18 점검 패치] 레거시 AI 경로 보호
+    #   변경 전: include_ai=true 요청은 속도·동시성 제한 없이 Gemini/Cerebras 호출,
+    #            DB에서 먼 조성은 AI 델타(최대 ±4.2 °C)가 융점 수치에 가산됨
+    #   결과: v1 설명 API와 같은 IP별 쿼터(기본 6회/60초)·동시 1건 게이트 적용 → 초과 시 429,
+    #         include_melting_ai=False 로 AI가 수치를 바꾸지 않음(README 원칙과 일치)
+    #   검증: tests/test_audit_2026_09_18_regression.py::test_legacy_ai_is_rate_limited_and_never_adjusts_melting_numbers,
+    #         ::test_legacy_ai_respects_concurrency_gate
+    use_ai = bool(req.include_ai)
+    gate_acquired = False
+    if use_ai:
+        client_key = request.client.host if request.client is not None else "unknown"
+        quota_ok, retry_after = _consume_explanation_quota(client_key)
+        if not quota_ok:
+            raise HTTPException(
+                status_code=429,
+                detail="AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if not _explanation_gate.acquire(blocking=False):
+            raise HTTPException(
+                status_code=429,
+                detail="다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
+                headers={"Retry-After": "2"},
+            )
+        gate_acquired = True
     # Cerebras 폴백이 이번 요청에서 실제 응답을 만들었는지 카운터 델타로 판정
     _cb_before = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
     try:
@@ -1477,12 +1515,17 @@ async def analyze(req: CompositionRequest) -> AnalysisResponse:
             literature_mode=req.literature_mode or "fast",
             wetting_temp_c=req.wetting_temp_c,
             include_wetting_grid=bool(req.include_wetting_grid),
-            include_ai=bool(req.include_ai),
+            include_ai=use_ai,
+            include_melting_ai=False,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"분석 실패: {e}") from e
+        _log_internal_error("legacy analyze", e)
+        raise HTTPException(status_code=500, detail="분석 중 내부 오류가 발생했습니다.") from e
+    finally:
+        if gate_acquired:
+            _explanation_gate.release()
     _cb_after = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
     _cerebras_used_this_request = bool(_cb_after > _cb_before)
 
@@ -1582,7 +1625,8 @@ async def wetting_grid(req: WettingGridRequest) -> Dict[str, Any]:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"온도별 젖음 표 계산 실패: {e}") from e
+        _log_internal_error("온도별 젖음 표 계산 실패", e)
+        raise HTTPException(status_code=500, detail="온도별 젖음 표 계산 중 내부 오류가 발생했습니다.") from e
     return {"wetting_by_temp": rows}
 
 
@@ -1630,7 +1674,8 @@ async def recommend_melt(req: RecommendMeltRequest) -> RecommendMeltResponse:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"목표 융점 탐색 실패: {e}") from e
+        _log_internal_error("목표 융점 탐색 실패", e)
+        raise HTTPException(status_code=500, detail="목표 융점 탐색 중 내부 오류가 발생했습니다.") from e
 
     db_meta: Dict[str, Any] = {}
     db_raw: List[Dict[str, Any]] = []
@@ -1778,7 +1823,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"비교 분석 실패: {e}") from e
+        _log_internal_error("비교 분석 실패", e)
+        raise HTTPException(status_code=500, detail="비교 분석 중 내부 오류가 발생했습니다.") from e
 
     def _one(r: Dict[str, Any]) -> CompareOne:
         best = (r.get("best") or {}) if isinstance(r, dict) else {}
