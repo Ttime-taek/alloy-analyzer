@@ -98,7 +98,10 @@ export default function PredictionEvidencePanel({ contract }) {
     >
       <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>융점·인장 예측 판정</div>
+          {/* [2026-09-21 DB 우선 표시 패치] DB 등록 조성에서도 제목이 "예측 판정"이라 DB 값이 예측처럼 보였음 */}
+          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>
+            {contract.overall_state === "exact_match" ? "융점·인장 판정 (DB 등록값 우선)" : "융점·인장 예측 판정"}
+          </div>
           <div style={{ marginTop: 2, color: "#f8fafc", fontSize: 16, fontWeight: 800 }}>
             {contract.family} · {contract.overall_state_label_ko}
           </div>

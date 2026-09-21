@@ -130,7 +130,12 @@ function techSummaryLead(result, meta) {
   const l = optionalFiniteNumber(result?.liquidus);
   const p = optionalFiniteNumber(result?.peak);
   const range = s != null && l != null ? ` (Δ ${fmtNum(l - s, 1)} ℃)` : "";
-  return `조성 ${meta.composition} 기준 추정 융점: 고상선 ${fmtNum(s)} ℃, 액상선 ${fmtNum(l)} ℃${range}, 계산 피크(참고) ${fmtNum(p)} ℃.${best}${conf}`;
+  // [2026-09-21 DB 우선 표시 패치] DB 등록 조성이면 "추정 융점" 대신 "DB 등록 융점"으로 표기
+  const dbExact =
+    result?.prediction_contract?.properties?.liquidus_c?.state === "exact_match" ||
+    (!result?.prediction_contract && result?.melting_detail?.db_exact_match === true);
+  const basis = dbExact ? "DB 등록 융점" : "추정 융점";
+  return `조성 ${meta.composition} 기준 ${basis}: 고상선 ${fmtNum(s)} ℃, 액상선 ${fmtNum(l)} ℃${range}, 계산 피크(참고) ${fmtNum(p)} ℃.${best}${conf}`;
 }
 
 function fmtMaybe(v, digits = 1) {

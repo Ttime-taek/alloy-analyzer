@@ -5087,7 +5087,10 @@ class AlloyGUI:
             ax.set_xlim(-5, 380)
             ax.set_xlabel("시간 (초)", color="#9ca3af", fontsize=10, **kfp(10))
             ax.set_ylabel("온도 (\u2103)", color="#9ca3af", fontsize=10, **kfp(10))
-            ax.set_title(f"리플로우 프로파일 / 융점 예측  [{best_name}]",
+            # [2026-09-21 DB 우선 표시 패치] DB 등록 조성이면 제목을 "융점 예측" 대신 "융점 (DB 등록값)"으로
+            _md = r.get("melting_detail") if isinstance(r.get("melting_detail"), dict) else {}
+            _melt_title = "융점 (DB 등록값)" if _md.get("db_exact_match") else "융점 예측"
+            ax.set_title(f"리플로우 프로파일 / {_melt_title}  [{best_name}]",
                          color="#e5e7eb", fontsize=13, pad=12, **kfp(13, bold=True))
             ax.tick_params(colors="#9ca3af")
             for spine in ax.spines.values():
