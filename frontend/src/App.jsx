@@ -540,41 +540,56 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer = null;
     setMeltSupport("checking");
 
-    const check = async () => {
+    // [2026-09-21 웹 점검 패치] Render 무료 서버 콜드 스타트 대응
+    //   변경 전: 첫 접속 때 서버가 잠들어 있으면 한 번 실패로 곧바로 "no" 확정 →
+    //            일반 사용자에게 "8000 포트·api_server.py 재실행" 같은 개발자용 경고가 뜨고 새로고침 전까지 유지됨.
+    //   변경 후: 네트워크 오류·5xx면 최대 약 80초 동안 재시도("waking" 상태 안내), 최종 실패 시 사용자용 문구.
+    //   검증: src/api-cold-start.regression-1.test.js
+    const RETRY_DELAYS_MS = [3000, 5000, 8000, 12000, 20000, 30000];
+
+    const probe = async () => {
+      const [aboutRes, openApiRes] = await Promise.all([
+        fetch(apiUrl(`/api/about?_=${Date.now()}`)),
+        fetch(apiUrl(`/openapi.json?_=${Date.now()}`))
+      ]);
+      if (aboutRes.status >= 500 || openApiRes.status >= 500) {
+        throw new Error(`server not ready: ${aboutRes.status}/${openApiRes.status}`);
+      }
+      let aboutOk = false;
+      if (aboutRes.ok) {
+        const j = await aboutRes.json();
+        if (j && typeof j === "object" && j.product) {
+          if (!cancelled) setAboutInfo(j);
+          aboutOk = j.api_features?.recommend_melt === true;
+        }
+      }
+      if (aboutOk) return "yes";
+      if (!openApiRes.ok) return "no";
+      const spec = await openApiRes.json();
+      return spec?.paths?.["/api/recommend_melt"]?.post ? "yes" : "no";
+    };
+
+    const check = async (attempt) => {
       try {
-        const [aboutRes, openApiRes] = await Promise.all([
-          fetch(apiUrl(`/api/about?_=${Date.now()}`)),
-          fetch(apiUrl(`/openapi.json?_=${Date.now()}`))
-        ]);
-        if (cancelled) return;
-        let aboutOk = false;
-        if (aboutRes.ok) {
-          const j = await aboutRes.json();
-          if (j && typeof j === "object" && j.product) {
-            setAboutInfo(j);
-            aboutOk = j.api_features?.recommend_melt === true;
-          }
-        }
-        if (aboutOk) {
-          setMeltSupport("yes");
-          return;
-        }
-        if (!openApiRes.ok) {
-          setMeltSupport("no");
-          return;
-        }
-        const spec = await openApiRes.json();
-        const has = !!(spec?.paths?.["/api/recommend_melt"]?.post);
-        setMeltSupport(has ? "yes" : "no");
+        const result = await probe();
+        if (!cancelled) setMeltSupport(result);
       } catch {
-        if (!cancelled) setMeltSupport("no");
+        if (cancelled) return;
+        if (attempt < RETRY_DELAYS_MS.length) {
+          setMeltSupport("waking");
+          timer = setTimeout(() => check(attempt + 1), RETRY_DELAYS_MS[attempt]);
+        } else {
+          setMeltSupport("unreachable");
+        }
       }
     };
-    check();
+    check(0);
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
@@ -2111,6 +2126,16 @@ export default function App() {
                 API 확인 중…
               </p>
             ) : null}
+            {meltSupport === "waking" ? (
+              <p role="status" style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
+                분석 서버를 깨우는 중입니다… 첫 접속은 최대 1분 정도 걸릴 수 있습니다.
+              </p>
+            ) : null}
+            {meltSupport === "unreachable" ? (
+              <p role="alert" style={{ margin: "0 0 8px", color: "#fde68a", fontSize: 11 }}>
+                분석 서버에 연결하지 못했습니다. 잠시 후 페이지를 새로고침해 주세요.
+              </p>
+            ) : null}
             <p className="app-helper-copy app-helper-copy--compact" style={{ margin: "0 0 10px", fontSize: 11, color: "#7b8794", lineHeight: 1.45 }}>
               실행은 보통 <strong style={{ color: "#94a3b8" }}>10초~1분</strong> 걸릴 수 있습니다. 서버가 처음 시작하는
               경우는 더 느릴 수 있으니 끝날 때까지 이 페이지를 유지하세요.
@@ -2129,8 +2154,13 @@ export default function App() {
                   lineHeight: 1.45
                 }}
               >
-                <code style={{ color: "#e7e5e4" }}>/api/recommend_melt</code> 없음 — 8000 포트·최신{" "}
-                <code style={{ color: "#e7e5e4" }}>api_server.py</code> 재실행 확인
+                이 서버는 목표 융점 탐색 기능을 지원하지 않습니다.
+                {import.meta.env.DEV ? (
+                  <>
+                    {" "}(개발: <code style={{ color: "#e7e5e4" }}>/api/recommend_melt</code> 없음 — 8000 포트·최신{" "}
+                    <code style={{ color: "#e7e5e4" }}>api_server.py</code> 재실행 확인)
+                  </>
+                ) : null}
               </div>
             ) : null}
             <div
@@ -3154,8 +3184,9 @@ export default function App() {
                 {meltRecResult?.meta?.melting_engine_version ? (
                   <p style={{ margin: "0 0 8px", color: "#94a3b8", fontSize: 11 }}>
                     융점 엔진 v{meltRecResult.meta.melting_engine_version}. 입력은 기본 액상만이며, 고상 목표도
-                    지정을 켜면 두 축을 넣을 수 있고 DB는 두 축 모두 허용 밴드에 들어간 행만 합칩니다. 값이
-                    반영되지 않으면 API(8000)를 재시작했는지 확인하세요.
+                    지정을 켜면 두 축을 넣을 수 있고 DB는 두 축 모두 허용 밴드에 들어간 행만 합칩니다.
+                    {/* [2026-09-21 웹 점검 패치] 운영 화면에 개발용 "API(8000) 재시작" 안내가 보이던 문제 → 개발 빌드에서만 표시 */}
+                    {import.meta.env.DEV ? " 값이 반영되지 않으면 API(8000)를 재시작했는지 확인하세요." : null}
                   </p>
                 ) : null}
                 {Array.isArray(meltRecResult?.candidates) && meltRecResult.candidates.length ? (
