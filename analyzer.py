@@ -153,7 +153,9 @@ def _imc_line_to_plain_korean(s: str) -> str:
         return "오래 가열하면 두꺼워질 수 있는 구리·주석 반응층(약칭: Cu3Sn)"
     if "(ni,cu)6sn5" in low or "ni3sn4" in low:
         return "니켈·구리·주석이 함께 만든 단단한 층(일명 (Ni,Cu)6Sn5 등)"
-    if "bi 농화" in t or "bi-rich" in low:
+    # [2026-09-21 웹 점검 패치] "bi 농화" 를 원문 t(대문자 "Bi")에서 찾아 매칭되지 않던 버그 수정 → low 사용.
+    #   결과: Sn-58Bi 결과에서 같은 Bi 분산상이 쉬운 문장·원문으로 두 번 나오던 문제 해소.
+    if "bi 농화" in low or "bi-rich" in low or "비스무스가 많을" in t:
         return "비스무스가 많을 때 생길 수 있는 작은 알갱이 모양 층"
     if "in-rich" in low or "insn" in low:
         return "인듐이 많을 때 생길 수 있는 저융점 층"
@@ -1404,7 +1406,22 @@ class AlloyAnalyzer:
             merged_imc = ["규칙 기반으로는 지배적 IMC를 특정하기 어려움"]
 
         if mode_key == "eng":
-            merged_imc = [_imc_line_to_plain_korean(x) for x in merged_imc[:6]]
+            # [2026-09-21 웹 점검 패치] 쉬운 설명 변환 후 중복 제거
+            #   변경 전: 원문이 다른 두 줄(예: "Ag3Sn", "Ag3Sn IMC ...")이 같은 쉬운 문장으로 바뀌어
+            #            SAC105 결과에 Ag3Sn·Cu6Sn5가 두 번씩 표시됨.
+            #   결과: 변환 후 문장 기준으로 한 번만 표시.
+            #   검증: tests/test_web_audit_2026_09_21_regression.py
+            #   또한 "특정하기 어렵습니다" 문장은 다른 항목이 있으면 빼서 모순 표시를 막음
+            #   (예: Sn63Pb37·In52Sn48에서 '특정 어려움'과 실제 층이 함께 나오던 문제).
+            plain = []
+            for x in merged_imc[:6]:
+                line = _imc_line_to_plain_korean(x)
+                if line not in plain:
+                    plain.append(line)
+            unknown_line = _imc_line_to_plain_korean("규칙 기반으로는 지배적 IMC를 특정하기 어려움")
+            if len(plain) > 1:
+                plain = [x for x in plain if x != unknown_line]
+            merged_imc = plain
 
         ai_dopant_txt = str(full_ai.get("dopant", "") or "").strip() if isinstance(full_ai, dict) else ""
         rule_dopant_txt = ""
