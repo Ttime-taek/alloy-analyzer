@@ -249,6 +249,18 @@ QUARANTINED_SOURCE_ROWS = {
 _known_source_names = {row["name"] for row in _HEESUNG_SUMMARY_20130628}
 assert set(QUARANTINED_SOURCE_ROWS) <= _known_source_names, "quarantine list references unknown rows"
 
+# [2026-09-21 정확도 패치] 기본 DB(_raw_db) 중 액상선이 다른 행 값을 복사한 것으로 보이는 행 격리
+#   - Sn0.5Cu 액상선 312 °C = Sn3.0Cu 값과 동일. Sn-Cu 공정(0.7Cu, 227 °C) 근처 아공정이라 상태도상 ~229 °C.
+#   - Sn0.3Ag0.2Cu 액상선 270 °C = Sn0.3Ag2.0Cu 값과 동일. Sn 과잉 저합금이라 상태도상 ~229 °C.
+#   두 행이 학습에 남아 있으면 인접 조성(Sn-0.5Cu-Ni-P 등) 예측이 270 °C 근처로 끌려 올라감.
+#   결과: SAC 액상선 홀드아웃 MAE·p90 변화는 tests/test_accuracy_2026_09_21_regression.py 와 PR 설명 참고.
+#   실측값을 확보하면 여기서 빼고 _raw_db 값을 고쳐 다시 합류시킨다.
+QUARANTINED_RAW_ROWS = {
+    "Sn0.5Cu": "liquidus 312 °C duplicates Sn3.0Cu; hypoeutectic Sn-0.5Cu liquidus is ~229 °C",
+    "Sn0.3Ag0.2Cu": "liquidus 270 °C duplicates Sn0.3Ag2.0Cu; Sn-rich low-alloy liquidus is ~229 °C",
+}
+assert set(QUARANTINED_RAW_ROWS) <= {row["name"] for row in _raw_db}, "raw quarantine list references unknown rows"
+
 
 # ================================================================
 # 최종 DB 구성 (정규화 + 메타데이터 추가)
@@ -258,6 +270,8 @@ _seen_comp_signatures = set()
 
 for entry in [*_raw_db, *_HEESUNG_SUMMARY_20130628]:
     if entry.get("source") == "Heesung summary 2013-06-28" and entry.get("name") in QUARANTINED_SOURCE_ROWS:
+        continue
+    if entry.get("source") is None and entry.get("name") in QUARANTINED_RAW_ROWS:
         continue
     entry["comp"] = normalize_comp(entry["comp"])
     validate_alloy(entry)
