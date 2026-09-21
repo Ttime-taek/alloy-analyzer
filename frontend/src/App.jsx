@@ -4601,6 +4601,28 @@ const SUMMARY_VARIANT_HINT = {
   tensileDb: "물성 DB 유사 합금 IDW 인장(MPa). DB 근접(≤3)이면 MODEL과 블렌드, 멀면 MODEL 대신 IDW·문헌만 표시"
 };
 
+// [2026-09-21 DB 우선 표시 패치]
+//   변경 전: 고상선·액상선 카드가 DB 등록 조성(예: Sn-3Ag-0.5Cu, 221 ℃)이어도 항상 "(추정)"으로 표시되어
+//            DB 값이 예측처럼 보였음. 수치 자체는 DB 값(221 ℃)이었고 판정 패널은 "DB 등록값"이었음.
+//   변경 후: 계약(prediction_contract) 상태가 exact_match 이거나 melting_detail.db_exact_match 이면
+//            "DB 등록값"으로 표시. 피크는 DB 액상선에서 계산한 값이라 계속 "(추정)".
+//   검증: src/db-priority-label.regression-1.test.js
+export function isDbRegisteredMelt(result, key) {
+  const state = result?.prediction_contract?.properties?.[key]?.state;
+  if (state) return state === "exact_match";
+  return result?.melting_detail?.db_exact_match === true;
+}
+
+export function meltSummaryHint(result, variant) {
+  if (variant === "solidus" && isDbRegisteredMelt(result, "solidus_c")) {
+    return "DB 등록값 · 응고가 시작되는 쪽 온도";
+  }
+  if (variant === "liquidus" && isDbRegisteredMelt(result, "liquidus_c")) {
+    return "DB 등록값 · 완전 액상";
+  }
+  return SUMMARY_VARIANT_HINT[variant] || null;
+}
+
 export const OVERALL_CONFIDENCE_SCOPE_LABEL = "조성·융점/젖음 근거 신뢰도";
 
 /** 하단 폰트·숫자 비율 조정(젖음·인장 카드) — 설명 문구는 카드 밖 `SummaryWettingTensileFootnotes`로 표시 */
@@ -4725,7 +4747,7 @@ function showCompareDbTensileRow(a, b) {
   return hasA || hasB;
 }
 
-function SummaryCard({ label, value, variant }) {
+function SummaryCard({ label, value, variant, hint }) {
   const gradients = {
     solidus: {
       background:
@@ -4804,11 +4826,12 @@ function SummaryCard({ label, value, variant }) {
   const compactValue = variant && SUMMARY_COMPACT_VALUE_VARIANTS.has(variant);
   const primaryCard = variant === "solidus" || variant === "liquidus" || variant === "peak";
   const hintText =
-    variant &&
+    hint ||
+    (variant &&
     SUMMARY_VARIANT_HINT[variant] &&
     !SUMMARY_COMPACT_VALUE_VARIANTS.has(variant)
       ? SUMMARY_VARIANT_HINT[variant]
-      : null;
+      : null);
   return (
     <div
       className={`summary-card${variant ? ` summary-card--${variant}` : ""}${primaryCard ? " summary-card--primary" : ""}`}
@@ -5126,8 +5149,18 @@ function ResultSummaryBlock({
           alignItems: "stretch"
         }}
       >
-        <SummaryCard label="고상선" value={formatOptionalValue(result.solidus, 1, " ℃")} variant="solidus" />
-        <SummaryCard label="액상선" value={formatOptionalValue(result.liquidus, 1, " ℃")} variant="liquidus" />
+        <SummaryCard
+          label="고상선"
+          value={formatOptionalValue(result.solidus, 1, " ℃")}
+          variant="solidus"
+          hint={meltSummaryHint(result, "solidus")}
+        />
+        <SummaryCard
+          label="액상선"
+          value={formatOptionalValue(result.liquidus, 1, " ℃")}
+          variant="liquidus"
+          hint={meltSummaryHint(result, "liquidus")}
+        />
         <SummaryCard label="피크" value={formatOptionalValue(result.peak, 1, " ℃")} variant="peak" />
         {showDbMeta ? (
           <>
