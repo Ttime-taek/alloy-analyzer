@@ -1087,6 +1087,24 @@ def _consume_explanation_quota(client_key: str) -> tuple[bool, int]:
     return True, 0
 
 
+# [2026-09-22 gstack-plan-eng-review 패치] v1 설명 엔드포인트와 레거시 /api/analyze 가
+#   쿼터 체크 → 429, 동시성 게이트 획득 → 429 를 각각 따로 구현해 ~20줄이 두 번 복제되어
+#   있었다(DRY 위반). 공용 헬퍼로 추출 — 두 호출부는 에러 메시지 형식만 넘기고,
+#   게이트 해제(release)는 여전히 각자 try/finally 에서 한다(획득 성공 여부를 호출자가
+#   알아야 하므로 컨텍스트 매니저로 감추지 않는다).
+def _acquire_ai_explanation_gate(client_key: str, *, rate_detail: Any, busy_detail: Any) -> None:
+    """원격 설명 호출의 클라이언트+전역 쿼터와 동시성 게이트를 획득한다.
+
+    성공하면 조용히 반환한다(게이트를 쥔 채로) — 호출자는 반드시 finally 에서
+    `_explanation_gate.release()` 해야 한다. 실패하면 429 HTTPException 을 던진다.
+    """
+    quota_ok, retry_after = _consume_explanation_quota(client_key)
+    if not quota_ok:
+        raise HTTPException(status_code=429, detail=rate_detail, headers={"Retry-After": str(retry_after)})
+    if not _explanation_gate.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail=busy_detail, headers={"Retry-After": "2"})
+
+
 def _get_engine_bundle() -> tuple[Any, Any]:
     """무거운 AI/Gemini 초기화를 첫 요청까지 지연해 `/openapi.json` 등 가벼운 엔드포인트 응답을 빠르게 합니다."""
     global _ai_engine, _analyzer
@@ -1349,25 +1367,17 @@ def explain_v1(
                 ),
             )
         client_key = request.client.host if request.client is not None else "unknown"
-        quota_ok, retry_after = _consume_explanation_quota(client_key)
-        if not quota_ok:
-            raise HTTPException(
-                status_code=429,
-                detail=_v1_error(
-                    "EXPLANATION_RATE_LIMITED",
-                    "AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
-                ),
-                headers={"Retry-After": str(retry_after)},
-            )
-        if not _explanation_gate.acquire(blocking=False):
-            raise HTTPException(
-                status_code=429,
-                detail=_v1_error(
-                    "EXPLANATION_BUSY",
-                    "다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
-                ),
-                headers={"Retry-After": "2"},
-            )
+        _acquire_ai_explanation_gate(
+            client_key,
+            rate_detail=_v1_error(
+                "EXPLANATION_RATE_LIMITED",
+                "AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+            ),
+            busy_detail=_v1_error(
+                "EXPLANATION_BUSY",
+                "다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
+            ),
+        )
         try:
             result = analyzer.analyze_all(
                 req.comp,
@@ -1541,19 +1551,11 @@ async def analyze(req: CompositionRequest, request: Request) -> AnalysisResponse
     gate_acquired = False
     if use_ai:
         client_key = request.client.host if request.client is not None else "unknown"
-        quota_ok, retry_after = _consume_explanation_quota(client_key)
-        if not quota_ok:
-            raise HTTPException(
-                status_code=429,
-                detail="AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
-                headers={"Retry-After": str(retry_after)},
-            )
-        if not _explanation_gate.acquire(blocking=False):
-            raise HTTPException(
-                status_code=429,
-                detail="다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
-                headers={"Retry-After": "2"},
-            )
+        _acquire_ai_explanation_gate(
+            client_key,
+            rate_detail="AI 설명 요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+            busy_detail="다른 AI 설명을 생성 중입니다. 잠시 후 다시 시도하세요.",
+        )
         gate_acquired = True
     # Cerebras 폴백이 이번 요청에서 실제 응답을 만들었는지 카운터 델타로 판정
     _cb_before = int(((getattr(_ai_engine, "usage_stats", {}) or {}).get("ask_cerebras_success", 0)) or 0)
