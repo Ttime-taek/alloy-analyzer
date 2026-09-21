@@ -1022,19 +1022,38 @@ _explanation_gate = threading.BoundedSemaphore(_EXPLANATION_CONCURRENCY)
 _explanation_rate_lock = threading.Lock()
 _explanation_requests: Dict[str, deque[float]] = defaultdict(deque)
 
+# [2026-09-21 AI 비용 패치] 서버 전체(모든 클라이언트 합산) 상한
+#   배경: Render 프록시 뒤에서는 request.client.host 가 사용자 IP가 아니라서 IP별 제한이
+#         사용자를 구분하지 못한다. X-Forwarded-For 를 그대로 믿으면 IP 위조로 IP별 제한을 우회할 수 있어,
+#         IP 판별을 바꾸는 대신 누가 호출하든 넘을 수 없는 전역 상한을 추가했다.
+#   결과: 기본 30회/60초(ALLOY_EXPLANATION_GLOBAL_RATE_LIMIT, 1~1000)를 넘으면 429.
+#         IP별 제한(기본 6회/60초)은 그대로 유지되고, 전역 상한이 AI 요금의 최대치를 보장한다.
+#   검증: tests/test_accuracy_2026_09_21_regression.py::test_global_explanation_cap_applies_across_clients
+_EXPLANATION_GLOBAL_RATE_LIMIT = _bounded_env_int(
+    "ALLOY_EXPLANATION_GLOBAL_RATE_LIMIT",
+    30,
+    minimum=1,
+    maximum=1000,
+)
+_GLOBAL_EXPLANATION_KEY = "__global__"
+
 
 def _consume_explanation_quota(client_key: str) -> tuple[bool, int]:
-    """단일 인스턴스의 원격 설명 호출을 IP별 슬라이딩 윈도우로 제한한다."""
+    """원격 설명 호출을 클라이언트별 + 서버 전체 슬라이딩 윈도우로 제한한다."""
     now = time.monotonic()
     cutoff = now - float(_EXPLANATION_RATE_WINDOW_SEC)
     with _explanation_rate_lock:
         queue = _explanation_requests[client_key]
-        while queue and queue[0] <= cutoff:
-            queue.popleft()
-        if len(queue) >= _EXPLANATION_RATE_LIMIT:
-            retry_after = max(1, math.ceil(queue[0] + _EXPLANATION_RATE_WINDOW_SEC - now))
-            return False, retry_after
+        global_queue = _explanation_requests[_GLOBAL_EXPLANATION_KEY]
+        for q in (queue, global_queue):
+            while q and q[0] <= cutoff:
+                q.popleft()
+        for q, limit in ((queue, _EXPLANATION_RATE_LIMIT), (global_queue, _EXPLANATION_GLOBAL_RATE_LIMIT)):
+            if len(q) >= limit:
+                retry_after = max(1, math.ceil(q[0] + _EXPLANATION_RATE_WINDOW_SEC - now))
+                return False, retry_after
         queue.append(now)
+        global_queue.append(now)
     return True, 0
 
 
