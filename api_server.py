@@ -1037,9 +1037,21 @@ _EXPLANATION_GLOBAL_RATE_LIMIT = _bounded_env_int(
 )
 _GLOBAL_EXPLANATION_KEY = "__global__"
 
+# [2026-09-21 gstack-plan-eng-review 패치] 클라이언트별 쿼터 딕셔너리 정리
+#   변경 전: _explanation_requests 는 defaultdict(deque) 라 한 번이라도 요청을 보낸 IP 키가
+#            윈도우가 지나 큐가 비어도 딕셔너리에 영구히 남음 — 공개 웹앱이라 방문자 IP가
+#            다양할수록 프로세스 수명 동안 메모리가 계속 늘어남(느린 메모리 누수).
+#   변경 후: 쿼터 확인 512회마다 큐가 비어 있는 클라이언트 키(전역 키 제외)를 딕셔너리에서 제거.
+#   결과: 오래 켜진 서버에서도 _explanation_requests 크기가 "최근 윈도우 안에 실제로 요청한
+#         클라이언트 수" 근처로 수렴. 활성 클라이언트의 카운트/윈도우 동작은 그대로.
+#   검증: tests/test_eng_review_2026_09_21_regression.py::test_explanation_quota_prunes_stale_client_keys
+_EXPLANATION_PRUNE_INTERVAL = 512
+_explanation_calls_since_prune = 0
+
 
 def _consume_explanation_quota(client_key: str) -> tuple[bool, int]:
     """원격 설명 호출을 클라이언트별 + 서버 전체 슬라이딩 윈도우로 제한한다."""
+    global _explanation_calls_since_prune
     now = time.monotonic()
     cutoff = now - float(_EXPLANATION_RATE_WINDOW_SEC)
     with _explanation_rate_lock:
@@ -1054,6 +1066,24 @@ def _consume_explanation_quota(client_key: str) -> tuple[bool, int]:
                 return False, retry_after
         queue.append(now)
         global_queue.append(now)
+
+        _explanation_calls_since_prune += 1
+        if _explanation_calls_since_prune >= _EXPLANATION_PRUNE_INTERVAL:
+            _explanation_calls_since_prune = 0
+            # 스윕 대상은 이번 호출의 client_key/global_queue 가 아닌 "다른" 키들 —
+            # 그 두 개는 방금 위에서 이미 트림·append 했음. 다른 클라이언트 키는
+            # 자신이 다시 호출하기 전까지 트림될 기회가 없으므로(각 호출은 자신의
+            # 큐만 트림), 여기서 전체를 훑어 만료분을 지우고 빈 큐가 된 키를 제거한다.
+            stale_keys = []
+            for key, q in _explanation_requests.items():
+                if key == client_key or key == _GLOBAL_EXPLANATION_KEY:
+                    continue
+                while q and q[0] <= cutoff:
+                    q.popleft()
+                if not q:
+                    stale_keys.append(key)
+            for key in stale_keys:
+                del _explanation_requests[key]
     return True, 0
 
 
