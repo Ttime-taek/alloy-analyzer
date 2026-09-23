@@ -1441,24 +1441,6 @@ export default function App() {
 
   const reflowPeakEffective = Number(reflowProfile?.meta?.peak ?? result?.peak ?? 0);
 
-  const handleElemClick = (target, elem) => {
-    const cur = target === "A" ? comp[elem] ?? "" : compB[elem] ?? "";
-    const input = window.prompt(`${target} - ${elem} (%) 값 입력`, cur === "" ? "" : String(cur));
-    if (input === null) return;
-    const v = Number(input);
-    if (!Number.isFinite(v) || v < 0) {
-      setError("0 이상의 숫자를 입력하세요.");
-      return;
-    }
-    if (target === "A") {
-      setActiveElemsA((prev) => (prev.includes(elem) ? prev : [...prev, elem]));
-      setComp((prev) => ({ ...prev, [elem]: v }));
-    } else {
-      setActiveElemsB((prev) => (prev.includes(elem) ? prev : [...prev, elem]));
-      setCompB((prev) => ({ ...prev, [elem]: v }));
-    }
-  };
-
   const addElemRowA = (el) => {
     if (!el || activeElemsA.includes(el)) return;
     setActiveElemsA((prev) => [...prev, el]);
@@ -2610,7 +2592,7 @@ export default function App() {
                     key={el}
                     type="button"
                     className={`periodic-cell-btn${isActive ? " is-active" : ""}`}
-                    onClick={() => handleElemClick("A", el)}
+                    onClick={() => addElemRowA(el)}
                     style={{
                       minHeight: 44,
                       padding: "8px 0",
@@ -2851,7 +2833,7 @@ export default function App() {
                         key={`B-btn-${el}`}
                         type="button"
                         className={`periodic-cell-btn${isActive ? " is-active" : ""}`}
-                        onClick={() => handleElemClick("B", el)}
+                        onClick={() => addElemRowB(el)}
                         style={{
                           minHeight: 44,
                           padding: "8px 0",
