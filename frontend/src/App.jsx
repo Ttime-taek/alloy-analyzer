@@ -1707,6 +1707,27 @@ export default function App() {
           ? "#fb7185"
           : "#f59e0b";
 
+  // 즐겨찾기 이름 입력: 네이티브 window.prompt() 대신 인라인 입력(디자인 리뷰 FINDING-DR-002 계열).
+  const [favNamePrompt, setFavNamePrompt] = useState(null); // { target: "A" | "B", draft, clean } | null
+  const favNameInputRef = useRef(null);
+  useEffect(() => {
+    if (favNamePrompt) favNameInputRef.current?.focus();
+  }, [favNamePrompt]);
+
+  const commitFavorite = (target, rawName, clean) => {
+    const name = (rawName || "").trim();
+    if (!name) return;
+    const fav = { name, comp: clean };
+    const next = [fav, ...favorites.filter((f) => f.name !== fav.name)].slice(
+      0,
+      20
+    );
+    setFavorites(next);
+    if (target === "A") setSelectedFavoriteName(fav.name);
+    else setSelectedFavoriteNameB(fav.name);
+    persistFavoritesLocal(next);
+  };
+
   const saveFavoriteA = () => {
     const clean = Object.fromEntries(
       Object.entries(comp)
@@ -1717,16 +1738,7 @@ export default function App() {
       setError("저장할 조성이 없습니다.");
       return;
     }
-    const name = window.prompt("즐겨찾기 이름을 입력하세요.", "조성 A");
-    if (!name || !name.trim()) return;
-    const fav = { name: name.trim(), comp: clean };
-    const next = [fav, ...favorites.filter((f) => f.name !== fav.name)].slice(
-      0,
-      20
-    );
-    setFavorites(next);
-    setSelectedFavoriteName(fav.name);
-    persistFavoritesLocal(next);
+    setFavNamePrompt({ target: "A", draft: "조성 A", clean });
   };
 
   const loadFavoriteToA = (name) => {
@@ -1763,16 +1775,73 @@ export default function App() {
       setError("저장할 조성 B가 없습니다.");
       return;
     }
-    const name = window.prompt("즐겨찾기 이름을 입력하세요.", "조성 B");
-    if (!name || !name.trim()) return;
-    const fav = { name: name.trim(), comp: clean };
-    const next = [fav, ...favorites.filter((f) => f.name !== fav.name)].slice(
-      0,
-      20
+    setFavNamePrompt({ target: "B", draft: "조성 B", clean });
+  };
+
+  const renderFavNamePrompt = (target) => {
+    if (!favNamePrompt || favNamePrompt.target !== target) return null;
+    const confirm = () => {
+      commitFavorite(favNamePrompt.target, favNamePrompt.draft, favNamePrompt.clean);
+      setFavNamePrompt(null);
+    };
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <input
+          type="text"
+          ref={favNameInputRef}
+          value={favNamePrompt.draft}
+          onChange={(e) =>
+            setFavNamePrompt((prev) => (prev ? { ...prev, draft: e.target.value } : prev))
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirm();
+            else if (e.key === "Escape") setFavNamePrompt(null);
+          }}
+          aria-label="즐겨찾기 이름"
+          placeholder="즐겨찾기 이름을 입력하세요."
+          style={{
+            flex: 1,
+            background: "var(--bg-page)",
+            borderRadius: 6,
+            border: "1px solid var(--border-muted)",
+            padding: "6px 8px",
+            color: "#e5e7eb"
+          }}
+        />
+        <TactileButton
+          onClick={confirm}
+          style={{
+            flexShrink: 0,
+            minHeight: 44,
+            padding: "10px 12px",
+            borderRadius: 6,
+            border: "1px solid var(--accent)",
+            background: "rgba(37, 99, 235, 0.35)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            cursor: "pointer"
+          }}
+        >
+          저장
+        </TactileButton>
+        <TactileButton
+          onClick={() => setFavNamePrompt(null)}
+          style={{
+            flexShrink: 0,
+            minHeight: 44,
+            padding: "10px 12px",
+            borderRadius: 6,
+            border: "1px solid #475569",
+            background: "var(--border-default)",
+            color: "#e5e7eb",
+            fontSize: 13,
+            cursor: "pointer"
+          }}
+        >
+          취소
+        </TactileButton>
+      </div>
     );
-    setFavorites(next);
-    setSelectedFavoriteNameB(fav.name);
-    persistFavoritesLocal(next);
   };
 
   const loadFavoriteToB = (name) => {
@@ -2412,6 +2481,7 @@ export default function App() {
                   >
                     조성 A 즐겨찾기 저장
                   </TactileButton>
+                  {renderFavNamePrompt("A")}
                   {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>합금 불러오기</span>
@@ -2522,6 +2592,7 @@ export default function App() {
                   >
                     A 즐겨찾기
                   </TactileButton>
+                  {renderFavNamePrompt("A")}
                   {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
@@ -2770,6 +2841,7 @@ export default function App() {
                   >
                     B 즐겨찾기
                   </TactileButton>
+                  {renderFavNamePrompt("B")}
                   {(
                     <>
                       <span style={{ fontSize: 13, color: "#9ca3af" }}>불러오기</span>
