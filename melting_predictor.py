@@ -651,14 +651,25 @@ def _phase_diagram_predict(norm, family):
         liq = liq_ag
         if cu > 0.7:
             liq += (cu - 0.7) * 9.0
+        # [2026-09-25 계산 로직 점검 P3] 과공정 Ag(Ag3Sn 초정)에서는 Cu가 액상면을 3원 공정 골짜기
+        # (Sn-3.7Ag-0.9Cu, 217 ℃) 쪽으로 낮춘다. 이원 Sn-Ag 과공정 액상선을 그대로 쓰면
+        # 3원 공정 조성 Sn-3.7Ag-0.9Cu가 217/223.5 ℃로 나오고, 홀드아웃 Sn3.9Ag0.6Cu +5.3,
+        # Sn-4.0Ag-0.5Cu +5.1 ℃였다. Ag 3.5→3.9 %(과공정)에서 켜서 SAC305·Ag 3.5 % 실측 앵커
+        # (Sn89.2Ag3.5Cu0.8Bi0.5In6 DSC 202/206 ℃ — SAC+In 계수의 기준)는 그대로 둔다.
+        hyper_ag = _smoothstep01((float(ag) - 3.5) / 0.4)
+        liq -= 10.0 * min(float(cu), 0.9) * hyper_ag
+        liq = max(liq, SAC_TERNARY_EUTECTIC["solidus"])
         # [2026-09-25 계산 로직 점검 P2] 액상선은 초정상 액상면 중 가장 높은 것이다.
         # 위 식(Sn-Ag 액상선 + Cu 9 ℃/%)은 β-Sn/Ag3Sn 초정 영역용이라, Cu가 많아 Cu6Sn5가 초정인
         # 저Ag·고Cu 조성에서는 Sn-Cu 액상선(약 33 ℃/%)을 크게 밑돌았다. Sn-0.3Ag-xCu에서
         # Cu 2.0 → 270(DB) 다음 Cu 2.5 → 248 ℃로 오히려 떨어지고, Sn0.3Ag2.0Cu 홀드아웃 −25 ℃.
         # Cu6Sn5 액상면 = Sn-Cu 이원 액상선 − Ag 강하(3원 공정 217 ℃ ≈ 이원 227 ℃ − 10 ℃ @ Ag 3.5 %).
         # 일반 SAC(Cu ≤ 약 0.9 %)에서는 이 면이 더 낮아 기존 값 그대로다.
-        _, liq_cu6sn5 = _interp(cu, SN_CU_PHASE)
-        liq_cu6sn5 -= (227.0 - SAC_TERNARY_EUTECTIC["solidus"]) * min(float(ag), 3.5) / 3.5
+        # [P3 보정] Ag가 늘면 공정 Cu 조성도 0.7 → 0.9 %(Sn-3.7Ag-0.9Cu)로 이동하므로 Cu 축을 그만큼
+        # 당겨서 읽는다. 이동을 빼면 3원 공정 조성에서 이 면이 223.5 ℃로 잘못 올라온다.
+        ag_frac = min(float(ag), 3.5) / 3.5
+        _, liq_cu6sn5 = _interp(max(0.0, float(cu) - 0.2 * ag_frac), SN_CU_PHASE)
+        liq_cu6sn5 -= (227.0 - SAC_TERNARY_EUTECTIC["solidus"]) * ag_frac
         liq = max(liq, liq_cu6sn5)
 
         # Bi 소량 첨가 효과 (SAC 4원계: Bi ≤ 5%)
