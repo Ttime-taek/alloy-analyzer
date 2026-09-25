@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "11"
+MELTING_ENGINE_VERSION = "12"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -164,6 +164,108 @@ def _smoothstep01(t):
     return t * t * (3.0 - 2.0 * t)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sn-Pb-Bi 3원계 [2026-09-25 계산 로직 점검]
+#   이전: Pb≥1%면 Sn-Pb 이원 표만 쓰고 Bi를 무시, Pb가 조금이라도 있으면 Sn-Bi 경로에서 제외.
+#         Sn43Pb43Bi14(실측 144/163) → 183/212, Sn42Bi58+Pb1 → 182/222(실제는 Pb 오염 시 오히려 하강).
+#   변경: Sn-Bi 이원·Sn-Pb 이원을 Pb:Bi 비율로 섞은 뒤, 3원 공정(Bi52 Pb32 Sn16, 96℃)에
+#         가까울수록 96℃ 쪽으로 당긴다. Pb 또는 Bi가 0이면 기존 이원계 값과 정확히 같다.
+#   기준점(Wikipedia "Solder alloys" 표): Sn43Pb43Bi14 144/163, Bi52Pb32Sn16 96,
+#         Bi46Sn34Pb20 100/105, Sn62Pb36Ag2 179 → 모두 ±8℃ 이내. 정밀값은 실제 CALPHAD 도입 시 교체.
+# ─────────────────────────────────────────────────────────────────────────────
+SN_PB_BI_TERNARY_EUTECTIC = {"Sn": 16.0, "Pb": 32.0, "Bi": 52.0, "T": 96.0}
+SN_PB_BI_TERNARY_SIGMA = 55.0     # 3원 공정 조성으로부터의 거리(wt%) 스케일
+SN_PB_BI_MINOR_SCALE = 5.0        # Pb·Bi 중 적은 쪽이 이 정도(wt%)는 돼야 3원 효과가 본격화
+
+
+def _sn_pb_bi_pull(sn, pb, bi):
+    """3원 공정(96℃) 쪽으로 당기는 가중 0~1. Pb 또는 Bi가 0이면 0."""
+    sn, pb, bi = max(0.0, float(sn)), max(0.0, float(pb)), max(0.0, float(bi))
+    minor = min(pb, bi)
+    tot = sn + pb + bi
+    if minor <= 0.0 or tot <= 0.0:
+        return 0.0
+    e = SN_PB_BI_TERNARY_EUTECTIC
+    d2 = (
+        (sn / tot * 100.0 - e["Sn"]) ** 2
+        + (pb / tot * 100.0 - e["Pb"]) ** 2
+        + (bi / tot * 100.0 - e["Bi"]) ** 2
+    )
+    near = math.exp(-d2 / (SN_PB_BI_TERNARY_SIGMA ** 2))
+    return near * _smoothstep01(minor / SN_PB_BI_MINOR_SCALE)
+
+
+def _sn_pb_bi_base(sn, pb, bi):
+    """
+    Sn-Pb-Bi 기준 고상·액상 (다른 원소 보정 전).
+    반환: (solidus, liquidus, pull) — pull은 3원 공정 쪽 가중(하류 Sn-Bi 고정 보정 완화용).
+    """
+    sn, pb, bi = max(0.0, float(sn)), max(0.0, float(pb)), max(0.0, float(bi))
+    eff_bi = (bi / (sn + bi) * 100.0) if (sn + bi) > 0 else 100.0
+    eff_pb = (pb / (sn + pb) * 100.0) if (sn + pb) > 0 else 100.0
+    x = pb / (pb + bi) if (pb + bi) > 0 else 0.0
+    if x <= 0.0:
+        s, l = _interp(eff_bi, SN_BI_PHASE)
+        return float(s), float(l), 0.0
+    if x >= 1.0:
+        s, l = _interp(eff_pb, SN_PB_PHASE)
+        return float(s), float(l), 0.0
+    s_bi, l_bi = _interp(eff_bi, SN_BI_PHASE)
+    s_pb, l_pb = _interp(eff_pb, SN_PB_PHASE)
+    s = (1.0 - x) * s_bi + x * s_pb
+    l = (1.0 - x) * l_bi + x * l_pb
+    g = _sn_pb_bi_pull(sn, pb, bi)
+    t_e = SN_PB_BI_TERNARY_EUTECTIC["T"]
+    s = s - (s - t_e) * g
+    l = l - (l - t_e) * g
+    return float(s), float(max(l, s)), float(g)
+
+
+SN_IN_ZN_TERNARY_EUTECTIC_C = 108.0   # In-Sn-Zn 3원 공정(~108℃)
+
+
+def _combine_sn_in_zn(s_in, l_in, s_zn, l_zn):
+    """
+    Sn-In 이원값과 Sn-Zn 이원값을 결합(순수 Sn 231℃ → 3원 공정 108℃ 사이 '남은 여유'의 곱).
+    대칭식이라 SnIn·SnZn 어느 경로로 계산해도 같다. 한쪽 용질이 0이면 다른 쪽 이원값 그대로.
+    공정 근처(예: Sn56In42Zn1, 실측 117℃)에서 가산식처럼 과도하게 내려가지 않는다.
+    """
+    t0 = SN_IN_PHASE[0][1]            # 231.0 (두 표 공통 순수 Sn 값)
+    te = SN_IN_ZN_TERNARY_EUTECTIC_C
+    span = t0 - te
+
+    def _mix(a, b):
+        a = max(float(a), te)
+        b = max(float(b), te)
+        return te + (a - te) * (b - te) / span
+
+    s = _mix(s_in, s_zn)
+    l = _mix(l_in, l_zn)
+    return s, max(l, s)
+
+
+def _in_floor_relaxed_by_bi(floor_c, bi):
+    """SAC/SnAg In 블록의 고상 바닥: Bi 2→8%에서 Sn-Bi 공정(139℃) 쪽으로 연속 완화."""
+    return float(floor_c) - (float(floor_c) - 139.0) * _smoothstep01((float(bi or 0.0) - 2.0) / 6.0)
+
+
+def _norm_pb_bi_pull(norm):
+    try:
+        return _sn_pb_bi_pull(norm.get("Sn", 0) or 0, norm.get("Pb", 0) or 0, norm.get("Bi", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _snbi_eutectic_pin_release(norm):
+    """
+    Sn-Bi 139℃ 고정 보정(plateau·physics)을 Pb 동반 시 풀어 주는 정도(0=그대로, 1=완전 해제).
+    3원 공정 가중 g가 0.5 이상이면 완전 해제 — 이 보정은 L2와 최종 단계에서 두 번 적용되므로
+    부분 해제로 두면 누적되어 3원 공정 근처(Bi46Sn34Pb20)를 +14℃ 끌어올렸다.
+    Pb 미량 오염(Sn42Bi58+Pb1, g≈0.06)에서는 거의 그대로 유지된다.
+    """
+    return _smoothstep01(_norm_pb_bi_pull(norm) / 0.5)
+
+
 def _db_neighbor_gate(dist, lo=0.10, hi=0.52):
     """
     가장 가까운 DB 행에 대한 신뢰 가중 (0~1).
@@ -189,6 +291,9 @@ def _physics_sn_bi_rich_solidus(norm, family, solidus):
         return solidus
     lo, hi, mu = 134.0, 144.0, 139.0
     w = min(0.55, (bi - 18.0) / 18.0)  # Bi=23→0.28, Bi=25→0.39
+    # [2026-09-25] Bi=23에서 가중이 0.28로 바로 켜지던 계단 제거(23→24.5에서 서서히),
+    # Pb 동반 시 3원 공정(96℃) 쪽으로 내려가야 하므로 139 복도로 끌어올리지 않음.
+    w *= _smoothstep01((bi - 23.0) / 1.5) * (1.0 - _snbi_eutectic_pin_release(norm))
     s = float(solidus)
     if s < lo:
         return s + (lo - s) * (0.35 * w)
@@ -217,37 +322,37 @@ def _snbi_highbi_lowcu_plateau(norm, family, solidus):
     except (TypeError, ValueError):
         return float(solidus), None
 
-    # Bi>=20% 구간에서 Cu/Ag 미세 변화로 solidus가 튀는 것을 억제
-    if bi < 20.0 or cu > 0.8:
+    # [2026-09-25 계산 로직 점검] 이전에는 Bi=20.00%·Cu=0.80%에서 켜고 끄는 하드 경계라
+    # Sn80.01Bi19.99(159.4℃) → Sn80Bi20(139.0℃)처럼 0.01%에 20℃가 튀었다.
+    # Bi 17→20%, Cu 0.8→1.0%에서 고정 강도를 서서히 바꾸고, Bi≥20·Cu≤0.8 안쪽은 기존과 동일.
+    if bi < 17.0 or cu >= 1.0:
         return float(solidus), None
 
     s0 = float(solidus)
     # 실측 기반 앵커(대표 케이스: Sn-1Ag-25Bi-0.7Cu solidus ≈ 137.81℃)
     target = 137.8
 
+    # Pb 동반 시 3원 공정(96℃) 쪽으로 내려가야 하므로 139 부근 고정을 그만큼 약화
+    pb_release = 1.0 - _snbi_eutectic_pin_release(norm)
+    cu_fade = 1.0 - _smoothstep01((cu - 0.80) / 0.20)       # 0.80→1.00 에서 해제
+
     # Bi가 높을수록(20→30) 앵커를 강하게
     bi_gate = _smoothstep01((bi - 20.0) / 10.0)
     # Cu 0.50~0.80 구간에서 plateau를 강하게 (경계에서 hard step 금지)
     cu_gate_lo = _smoothstep01((cu - 0.48) / 0.08)          # 0.48→0.56
     cu_gate_hi = 1.0 - _smoothstep01((cu - 0.80) / 0.04)    # 0.80→0.84 에서 약화
-    w = 0.96 * bi_gate * cu_gate_lo * cu_gate_hi
+    w = 0.96 * bi_gate * cu_gate_lo * cu_gate_hi * pb_release
 
     s1 = s0 * (1.0 - w) + target * w
 
-    clamped = False
-    # Hard constraint: Bi>=20%에서는 Sn-Bi 공정 반응 pinning이 우선.
-    # 요청 범위(0.5~0.8)에서는 137.3~138.3℃로 더 강하게 고정 (±0.5℃ 요구 충족).
-    if 0.5 <= cu <= 0.8 and bi >= 20.0:
-        lo, hi = 137.3, 138.3
-        s1c = min(max(s1, lo), hi)
-        clamped = abs(s1c - s1) > 1e-9
-        s1 = s1c
-    elif bi >= 20.0 and cu <= 1.0:
-        # 그 외 근접 구간도 공정대(137~139) 밖으로 나가지 않게 제한
-        lo, hi = 137.0, 139.0
-        s1c = min(max(s1, lo), hi)
-        clamped = clamped or (abs(s1c - s1) > 1e-9)
-        s1 = s1c
+    # 공정 반응 pinning 복도: Cu 0.5~0.8 → 137.3~138.3, 그 밖 → 137~139 (Cu에 대해 연속 보간)
+    tight = _smoothstep01((cu - 0.40) / 0.10) * (1.0 - _smoothstep01((cu - 0.80) / 0.10))
+    lo = 137.0 + 0.3 * tight
+    hi = 139.0 - 0.7 * tight
+    s1c = min(max(s1, lo), hi)
+    strength = _smoothstep01((bi - 17.0) / 3.0) * cu_fade * pb_release
+    clamped = strength > 0.0 and abs(s1c - s1) > 1e-9
+    s1 = s1 + (s1c - s1) * strength
 
     return float(s1), {
         "applied": True,
@@ -301,7 +406,9 @@ def _classify(norm):
     )
 
     # Pb 1% 이상은 SnPb 경로(저-Pb Sn97.8Pb2.2 등 상용 커버리지).
-    if pb >= 1 or pure_sn_pb:
+    # [2026-09-25] 단, Bi가 Pb보다 많고 5% 초과면 Sn-Bi 경로(3원 보정 포함)로 보낸다.
+    # 이전에는 Sn42Bi58에 Pb 1%만 섞여도 Sn-Pb 표로 가서 고상 139→182℃로 튀었다.
+    if pure_sn_pb or (pb >= 1 and (pb >= bi or bi <= 5)):
         return "SnPb"
     if sac_bi_transition:
         return "SAC_BI_TRANSITION"
@@ -310,14 +417,18 @@ def _classify(norm):
     # other+L4로 고상·액상이 과대(≈250℃+) 평가된다.
     # In 상한(과거 8%)는 Ag–Cu 저함량·고Bi–In(예 In 11, Bi 14)이 SAC·SnBi 모두 아니게
     # other→L4 단독 ~250℃ 과대평가되던 구간. SnBi L2+In 보정이 커버하므로 14%까지 완화.
-    if bi > 5 and pb == 0 and not sac_matrix_lowin:
+    # [2026-09-25] `pb == 0` 조건 제거: Pb 0.05% 불순물로 Sn80Bi20이 other(+57℃)로 떨어졌다.
+    # Pb는 SnBi L2의 3원 보정(_sn_pb_bi_base)이 처리한다.
+    if bi > 5 and not sac_matrix_lowin:
         if inp == 0:
             return "SnBi"
         if inp <= 14.0 and bi >= inp:
             return "SnBi"
     # Sn-In: Bi 미량(≤1%)까진 허용. In≥5이면 In 강하가 지배하므로 SnIn 경로.
     # (단, Ag>0 + In≥5는 Sn-Ag 반응도 병존 → SnAg 경로에서 In/Bi 보정 처리.)
-    if inp > 5 and bi <= 1 and pb == 0 and ag == 0:
+    # [2026-09-25] `pb == 0 and ag == 0` → Pb 1% 미만(위에서 Pb≥1은 SnPb), Ag 1% 미만 허용.
+    # 이전에는 Sn48In52(117℃)에 Ag·Pb 0.05%만 섞여도 other로 떨어져 +29℃.
+    if inp > 5 and bi <= 1 and ag < 1.0:
         return "SnIn"
     # Sn-Zn-Bi 3원계 (Bi ≤ 5%): Sn8Zn3Bi 등 상용 조성 — Bi 없음을 요구하던 기존 조건이
     # 54°C 규모 오차 발생시켜 완화.
@@ -437,9 +548,10 @@ def _phase_diagram_predict(norm, family):
     # ── Sn-Bi 계 ─────────────────────────────────────────────────────────────
     if family == "SnBi":
         # 유효 Bi 비율: Bi/(Sn+Bi) 기준
-        denom  = sn + bi
-        eff_bi = (bi / denom * 100) if denom > 0 else bi
-        sol, liq = _interp(eff_bi, SN_BI_PHASE)
+        # Pb가 없으면 Sn-Bi 이원 표 그대로. Pb 동반 시 Sn-Pb-Bi 3원 보정(3원 공정 96℃).
+        sol, liq, g_pb = _sn_pb_bi_base(sn, pb, bi)
+        # Sn-Bi 공정(139℃) 바닥 — Pb 동반 시 3원 공정 쪽으로 함께 내려간다.
+        eut = 139.0 - (139.0 - SN_PB_BI_TERNARY_EUTECTIC["T"]) * g_pb
 
         # Ag 존재 시 삼원계 공정점(139°C) 인력 보정
         # Sn-Ag-Bi 삼원계: Bi≥10%, Ag≥1%에서 solidus 139°C 공정점으로 빠르게 수렴 (문헌)
@@ -447,12 +559,12 @@ def _phase_diagram_predict(norm, family):
         # 오차. 실측 정합을 위해 수렴 속도(ag/2.5·bi/15) 및 최대 가중(0.97) 상향.
         if ag >= 1.0 and bi >= 10.0:
             pull  = min(1.0, (ag / 2.5) * (bi / 15.0))
-            sol   = sol * (1.0 - pull * 0.97) + 139.0 * (pull * 0.97)
+            sol   = sol * (1.0 - pull * 0.97) + eut * (pull * 0.97)
         elif ag > 0:
             # 소량 Ag: liquidus 소폭 상승만
             liq_adj = min(ag * 12.5, 20.0)
             liq    += liq_adj
-            sol     = max(sol, 139.0)
+            sol     = max(sol, eut)
 
         if cu > 0:
             liq += cu * 3.5
@@ -471,7 +583,7 @@ def _phase_diagram_predict(norm, family):
             dl_in = inp * (2.15 - 0.42 * damp_hi_bi)
             sol -= ds_in
             liq -= dl_in
-            sol = max(sol, 128.0)
+            sol = max(sol, 128.0 - (128.0 - SN_PB_BI_TERNARY_EUTECTIC["T"]) * g_pb)
         # Bi가 높고 Cu가 낮은 구간에서 고상선 plateau 앵커 (Cu 과대상승 방지)
         sol, _ = _snbi_highbi_lowcu_plateau(norm, family, sol)
         return sol, liq, 0.92
@@ -481,23 +593,41 @@ def _phase_diagram_predict(norm, family):
         denom  = sn + inp
         eff_in = (inp / denom * 100) if denom > 0 else inp
         sol, liq = _interp(eff_in, SN_IN_PHASE)
+        # [2026-09-25] Zn 동반 시 Sn-Zn 이원 강하를 더한다(가산 근사). SnZn 경로의 In 항과
+        # 같은 식이라 In=5% 분류 경계(SnZn↔SnIn)에서 값이 일치한다. 이전에는 Zn을 무시해
+        # Sn89Zn6In5가 In 5.00→5.02%에서 고상 200→220℃로 튀었다.
+        if zn > 0:
+            s_zn, l_zn = _interp(zn, SN_ZN_PHASE)
+            sol, liq = _combine_sn_in_zn(sol, liq, s_zn, l_zn)
         if ag > 0:
             liq += ag * 5.0
         if bi > 0:
-            sol  = max(sol - bi * 1.5, 117.0)
+            sol  = max(sol - bi * 1.5, min(117.0, sol))
             liq  = max(liq - bi * 0.8, sol)
         return sol, liq, 0.90
 
     # ── Sn-Pb 계 ─────────────────────────────────────────────────────────────
     if family == "SnPb":
-        denom  = sn + pb
-        eff_pb = (pb / denom * 100) if denom > 0 else pb
-        sol, liq = _interp(eff_pb, SN_PB_PHASE)
-        return sol, liq, 0.92
+        # Bi가 없으면 Sn-Pb 이원 표 그대로. Bi 동반 시 Sn-Pb-Bi 3원 보정.
+        sol, liq, _g = _sn_pb_bi_base(sn, pb, bi)
+        # [2026-09-25] Ag: Sn-Pb 공정 183 → Sn62Pb36Ag2 179℃(3원 공정). Sn쪽·공정 부근만 적용하고
+        # Pb-rich(Pb/(Sn+Pb) 60→80%)에서는 서서히 해제(Pb-Ag 거동이 다름).
+        if ag > 0:
+            eff_pb = (pb / (sn + pb) * 100.0) if (sn + pb) > 0 else 100.0
+            sn_side = 1.0 - _smoothstep01((eff_pb - 60.0) / 20.0)
+            d_ag = 2.0 * min(float(ag), 2.0) * sn_side
+            sol -= d_ag
+            liq -= d_ag
+        return sol, max(liq, sol), 0.92
 
     # ── Sn-Zn 계 ─────────────────────────────────────────────────────────────
     if family == "SnZn":
         sol, liq = _interp(zn, SN_ZN_PHASE)
+        # [2026-09-25] In 동반 시 Sn-In 이원 강하를 더한다(SnIn 경로의 Zn 항과 같은 식).
+        if inp > 0:
+            eff_in = (inp / (sn + inp) * 100.0) if (sn + inp) > 0 else 100.0
+            s_in, l_in = _interp(eff_in, SN_IN_PHASE)
+            sol, liq = _combine_sn_in_zn(s_in, l_in, sol, liq)
         # Sn-Zn-Bi 3원계 Bi depression: 상업 조성 Sn8Zn3Bi(실측 190/197) 정합.
         # 기존 liquidus만 depression하던 식에 solidus 하강도 추가.
         if bi > 0:
@@ -550,7 +680,10 @@ def _phase_diagram_predict(norm, family):
         if inp > 0:
             sol -= inp * 2.35
             liq -= inp * 2.58
-            sol  = max(sol, 190.0)
+            # [2026-09-25] 바닥 190℃는 저-Bi SAC+In용. Bi가 많으면(2→8%) Sn-Bi 공정 쪽으로 풀어준다.
+            # 이전에는 앞 Bi 블록이 139℃ 쪽으로 내린 고상선을 190으로 되돌려, Bi=In 분류 경계
+            # (Sn79 Ag1 Cu1 Bi9.5 In9.5)에서 고상 +22℃ 점프, 탐색에 고상 189℃ 가짜 후보가 나왔다.
+            sol  = max(sol, _in_floor_relaxed_by_bi(190.0, bi))
 
         # Sb 첨가 효과
         if sb > 0:
@@ -573,27 +706,133 @@ def _phase_diagram_predict(norm, family):
         if inp > 0:
             sol -= inp * 3.0
             liq -= inp * 1.4
-            sol  = max(sol, 190.0)
+            sol  = max(sol, _in_floor_relaxed_by_bi(190.0, bi))
         # Sn-Ag-Bi 소량(Bi ≤ 5%): Ag3Sn IMC와 Bi-solidus-depression의 공존.
+        # Bi>5%(In>Bi라 SnBi가 아닌 경우)는 바닥 170℃를 Sn-Bi 공정 쪽으로 푼다.
         if bi > 0:
             sol -= bi * 2.5
             liq -= bi * 1.2
-            sol  = max(sol, 170.0)
+            floor_bi = 170.0 - (170.0 - 139.0) * _smoothstep01((float(bi) - 5.0) / 5.0)
+            sol  = max(sol, floor_bi)
         return sol, liq, 0.85
 
     # ── Sn-Cu 이원계 ─────────────────────────────────────────────────────────
     if family == "SnCu":
         sol, liq = _interp(cu, SN_CU_PHASE)
+        # [2026-09-25] Sb: Sn-Sb 이원 상승분을 더한다(가산 근사, 고상선 포함). SnSb 경로의 Cu 항과
+        # 같은 식이라 미량 Cu 첨가로 SnSb→SnCu 분류가 바뀌어도 값이 이어진다.
+        # (이전: liq += sb*1.5만 반영, 고상선은 Sb 무시 → Sn93.7Sb6.3에 Cu 0.05%로 −4.5℃)
         if sb > 0:
-            liq += sb * 1.5
-        return sol, liq, 0.85
+            s_sb, l_sb = _interp(sb, SN_SB_PHASE)
+            sol += s_sb - SN_SB_PHASE[0][1]
+            liq += l_sb - SN_SB_PHASE[0][2]
+        return sol, max(liq, sol), 0.85
 
     # ── Sn-Sb 계 ─────────────────────────────────────────────────────────────
     if family == "SnSb":
         sol, liq = _interp(sb, SN_SB_PHASE)
-        return sol, liq, 0.82
+        if cu > 0:
+            s_cu, l_cu = _interp(cu, SN_CU_PHASE)
+            sol += s_cu - SN_CU_PHASE[0][1]
+            liq += l_cu - SN_CU_PHASE[0][2]
+        return sol, max(liq, sol), 0.82
 
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L2 분류 경계 완충 [2026-09-25 계산 로직 점검]
+#   _classify는 조건 분기라 경계에서 계열이 바뀌면 상태도 식 전체가 바뀐다.
+#   경계 앞뒤 폭 안에서는 양쪽 계열의 L2를 smoothstep으로 섞어 0.01% 차이로 값이 튀지 않게 한다.
+#   양쪽 계열은 경계 바로 바깥 조성을 _classify에 넣어 정한다(분류 규칙은 한 곳에만 둠).
+# ─────────────────────────────────────────────────────────────────────────────
+# (축, 경계값, 반폭 wt%) — "A-B"는 A−B 차이 축(A+B 합은 유지)
+_L2_CORRIDORS = (
+    ("Bi-In", 0.0, 1.0),   # SnBi(Bi≥In) ↔ SAC/SnAg(Bi<In)
+    ("Pb-Bi", 0.0, 1.0),   # SnPb(Pb≥Bi) ↔ SnBi(Bi>Pb)
+    ("In", 5.0, 0.5),      # SnZn ↔ SnIn
+    ("Ag", 1.0, 0.5),      # SnIn(Ag<1) ↔ 그 외
+    ("Pb", 1.0, 0.5),      # Pb 1% 경계
+    ("Bi", 5.0, 0.5),      # Bi 5% 경계(SAC 모재가 아닌 경우)
+)
+
+
+def _shift_axis(norm, axis, value):
+    """축 값을 value로 옮긴 조성(차이는 Sn으로 보상, Sn이 모자라면 None)."""
+    c = {k: float(v) for k, v in norm.items()}
+    if "-" in axis:
+        a, b = axis.split("-", 1)
+        va, vb = c.get(a, 0.0), c.get(b, 0.0)
+        tot = va + vb
+        na = (tot + value) / 2.0
+        nb = (tot - value) / 2.0
+        if na < 0.0 or nb < 0.0:
+            return None
+        c[a], c[b] = na, nb
+        return c
+    cur = c.get(axis, 0.0)
+    delta = float(value) - cur
+    sn = c.get("Sn", 0.0) - delta
+    if value < 0.0 or sn < 0.0:
+        return None
+    c[axis] = float(value)
+    c["Sn"] = sn
+    return c
+
+
+def _axis_value(norm, axis):
+    if "-" in axis:
+        a, b = axis.split("-", 1)
+        return float(norm.get(a, 0) or 0.0) - float(norm.get(b, 0) or 0.0)
+    return float(norm.get(axis, 0) or 0.0)
+
+
+def _l2_family_parts(norm, family):
+    """
+    L2 계열 구성: [(계열, 가중, L2결과 또는 None)]. 보통은 [(family, 1.0, L2)] 한 개.
+    분류 경계 폭 안에서는 경계 양쪽 계열 두 개(가중 합 1). 두 번째 값은 완충 메타(없으면 None).
+    하류의 계열별 가중(L2·L3·L4)도 이 가중으로 섞어야 경계에서 연속이 된다.
+    """
+    for axis, thr, half in _L2_CORRIDORS:
+        if "-" in axis:
+            a, b = axis.split("-", 1)
+            if float(norm.get(a, 0) or 0) <= 0 or float(norm.get(b, 0) or 0) <= 0:
+                continue
+        x = _axis_value(norm, axis)
+        if abs(x - thr) >= half:
+            continue
+        lo_c = _shift_axis(norm, axis, thr - half)
+        hi_c = _shift_axis(norm, axis, thr + half)
+        if lo_c is None or hi_c is None:
+            continue
+        fam_lo, fam_hi = _classify(lo_c), _classify(hi_c)
+        if fam_lo == fam_hi:
+            continue
+        w = _smoothstep01((x - (thr - half)) / (2.0 * half))
+        parts = [
+            (fam_lo, 1.0 - w, _phase_diagram_predict(norm, fam_lo)),
+            (fam_hi, w, _phase_diagram_predict(norm, fam_hi)),
+        ]
+        meta = {"axis": axis, "families": [fam_lo, fam_hi], "weight_hi": round(w, 4)}
+        return [p for p in parts if p[1] > 0.0], meta
+    return [(family, 1.0, _phase_diagram_predict(norm, family))], None
+
+
+def _phase_diagram_predict_smooth(norm, family):
+    """
+    _phase_diagram_predict + 분류 경계 완충(값만).
+    반환: (sol, liq, conf, blend_meta 또는 None). L2가 없으면 (None, None, 0.0, meta).
+    한쪽 계열에 L2가 없으면(other) 신뢰도는 가중만큼 줄이고 값은 있는 쪽을 쓴다.
+    """
+    parts, meta = _l2_family_parts(norm, family)
+    have = [(wt, r) for _f, wt, r in parts if r is not None]
+    wsum = sum(wt for wt, _r in have)
+    if wsum <= 1e-12:
+        return None, None, 0.0, meta
+    sol = sum(float(r[0]) * wt for wt, r in have) / wsum
+    liq = sum(float(r[1]) * wt for wt, r in have) / wsum
+    conf = sum(float(r[2]) * wt for wt, r in have)
+    return sol, liq, conf, meta
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -671,27 +910,35 @@ def _anchor_binary_eutectic_mixtures(norm, family, sol, liq):
         cu = float(norm.get("Cu", 0) or 0.0)
         zn = float(norm.get("Zn", 0) or 0.0)
         sb = float(norm.get("Sb", 0) or 0.0)
+        inp = float(norm.get("In", 0) or 0.0)
     except (TypeError, ValueError):
         return float(sol), float(liq)
     s = float(sol)
     l = float(liq)
-    if family == "SnCu" and 0.63 <= cu <= 0.78:
+    # [2026-09-25] 창 끝에서 가중이 0이 되기 전에 조건이 끊겨 0.01%에 최대 2.8℃ 튀던 것을 수정
+    # (페이드아웃이 끝나는 지점까지 창을 넓힘). 또 다른 용질이 있으면 이원 공정점 앵커를 약화해,
+    # 미량 원소로 계열이 바뀌어도 앵커가 갑자기 켜지거나 꺼지지 않게 한다.
+    if family == "SnCu" and 0.63 <= cu <= 0.84:
         w = _smoothstep01((cu - 0.63) / 0.12) * (1.0 - _smoothstep01((cu - 0.78) / 0.06))
+        w *= 1.0 - _smoothstep01(sb / 1.0)
         tgt = 227.0
         bs = 0.50 * w
-        bl = min(0.97, 0.70 + 0.30 * w)
+        bl = (0.70 + 0.27 * w) * _smoothstep01((cu - 0.63) / 0.12) * (1.0 - _smoothstep01((cu - 0.78) / 0.06))
+        bl *= 1.0 - _smoothstep01(sb / 1.0)
         s = s * (1.0 - bs) + tgt * bs
         l = l * (1.0 - bl) + tgt * bl
-    elif family == "SnZn" and 8.2 <= zn <= 9.8:
+    elif family == "SnZn" and 8.2 <= zn <= 10.05:
         w = _smoothstep01((zn - 8.2) / 0.35) * (1.0 - _smoothstep01((zn - 9.8) / 0.25))
+        w *= 1.0 - _smoothstep01(inp / 1.0)
         ts, tl = 198.5, 198.5
         b = 0.52 * w
         s = s * (1.0 - b) + ts * b
         l = l * (1.0 - b) + tl * b
-    elif family == "SnSb" and 8.8 <= sb <= 11.2:
+    elif family in ("SnSb", "SnCu") and 8.8 <= sb <= 11.55:
         w = _smoothstep01((sb - 8.8) / 0.45) * (1.0 - _smoothstep01((sb - 11.2) / 0.35))
+        w *= 1.0 - _smoothstep01(cu / 0.3)
         ts, tl = 240.0, 246.0
-        b = 0.35 + 0.58 * w
+        b = 0.93 * w
         s = s * (1.0 - b) + ts * b
         l = l * (1.0 - b) + tl * b
     return s, l
@@ -1055,6 +1302,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
 
     db_exact_match = best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
     ext_calphad_detail = None
+    l2_blend_meta = None
     knn_augment_meta: Optional[Dict[str, Any]] = None
     knn_ref_sol: Optional[float] = None
     knn_ref_liq: Optional[float] = None
@@ -1092,18 +1340,22 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
                 l1_w = max(l1_w, 0.18 / (1.0 + float(best_dist) * 0.11))
 
         # ─── L2: 상태도 보간 ─────────────────────────────────────────────────
-        phase_result = _phase_diagram_predict(norm, family)
-        l2_sol, l2_liq, l2_conf = (phase_result if phase_result
-                                    else (None, None, 0.0))
+        l2_sol, l2_liq, l2_conf, l2_blend_meta = _phase_diagram_predict_smooth(norm, family)
+        # 계열 구성(보통 1개, 분류 경계 폭 안에서는 2개) — 아래 계열별 가중을 이 비율로 섞는다.
+        l2_parts, _ = _l2_family_parts(norm, family)
 
-        is_simple = family in ("SnBi", "SnIn", "SnPb", "SAC", "SAC_BI_TRANSITION", "SnAg",
-                                "SnCu", "SnSb", "SnZn")
-        if l2_sol is not None:
-            l2_w = l2_conf * (
-                float(prof["l2_simple_mult"]) if is_simple else float(prof["l2_other_mult"])
-            )
-        else:
-            l2_w = 0.0
+        def _is_simple(fam):
+            return fam in ("SnBi", "SnIn", "SnPb", "SAC", "SAC_BI_TRANSITION", "SnAg",
+                           "SnCu", "SnSb", "SnZn")
+
+        is_simple = _is_simple(family)
+        l2_w = 0.0
+        for _fam, _wt, _r in l2_parts:
+            if _r is not None:
+                l2_w += _wt * float(_r[2]) * (
+                    float(prof["l2_simple_mult"]) if _is_simple(_fam) else float(prof["l2_other_mult"])
+                )
+        snbi_frac = sum(_wt for _fam, _wt, _r in l2_parts if _fam == "SnBi")
 
         ref_sol, ref_liq = _knn_reference_temperatures(l2_sol, l2_liq, knn_raw)
         knn5, knn_augment_meta = _knn_pool_with_temp_or_band(
@@ -1144,42 +1396,51 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
                     l3_conf, 0.07 + 0.31 * math.exp(-(knn_d0 - 3.0) * 0.11)
                 )
             # 이원계+L2가 있을 때 KNN(L3) 비중이 크면 공정부 근처에서 액상선이 과대(예: Sn-Cu 227→231)
-            l3_w = l3_conf * (
-                float(prof["l3_knn_with_l2_simple"])
-                if is_simple and l2_sol is not None
-                else float(prof["l3_knn_default"])
-            )
+            l3_mult = 0.0
+            for _fam, _wt, _r in l2_parts:
+                l3_mult += _wt * (
+                    float(prof["l3_knn_with_l2_simple"])
+                    if _is_simple(_fam) and _r is not None
+                    else float(prof["l3_knn_default"])
+                )
+            l3_w = l3_conf * l3_mult
             # Sn-Bi 계열: DB 이웃이 멀면(KNN 거리↑) 성분이 달라 이웃 고상·액상이 왜곡되기 쉬움 → L3 추가 억제.
-            if family == "SnBi":
+            if snbi_frac > 0.0:
                 d0 = float(knn5[0][0])
                 if d0 > 5.5:
-                    l3_w *= math.exp(-(d0 - 5.5) * 0.11)
+                    l3_w *= (1.0 - snbi_frac) + snbi_frac * math.exp(-(d0 - 5.5) * 0.11)
         else:
             l3_sol, l3_liq, l3_w = 217.0, 221.0, 0.1
 
         # Sn-Bi(-Ag-Cu-In): DB에 서로 비슷한 거리의 행이 여럿일 때 L1(최근접 1행)만으로 수렴하는 현상 완화.
         # (l3_knn_with_l2_simple 기본값이 매우 작아 L3가 사실상 무시되기 쉬움 → 근접 2번째 이웃이 있으면 KNN 비중 상향)
-        if best_item is not None and family == "SnBi" and knn5 and len(knn5) >= 2:
+        if best_item is not None and snbi_frac > 0.0 and knn5 and len(knn5) >= 2:
             d0 = float(knn5[0][0])
             d1 = float(knn5[1][0])
             if d0 > 1e-9 and d0 < 4.5 and d1 <= d0 * 1.55:
-                tight = max(0.0, min(1.0, (1.55 - d1 / d0) / 0.55))
+                tight = max(0.0, min(1.0, (1.55 - d1 / d0) / 0.55)) * snbi_frac
                 l1_w *= 1.0 - 0.35 * tight
                 l3_w *= 1.0 + 2.0 * tight
                 l3_w = min(l3_w, float(prof["l3_knn_default"]) * 2.3)
 
         # ─── L4: CALPHAD ───────────────────────────────────────────────────────
         l4_sol, l4_liq, l4_conf = _calphad_approx(norm, family)
-        # 상태도(L2)가 있으면 CALPHAD는 보조만. SnBi는 Bi 공정 인력 합산이 과추정되기 쉬워 항상 제외.
-        if l2_sol is not None and (family == "SnBi" or l2_conf > 0.85):
-            l4_w = 0.0
-        elif l2_sol is not None:
-            l4_w = l4_conf * float(prof["l4_if_l2_weak_mult"])
-        else:
-            l4_w = l4_conf * float(prof["l4_if_no_l2_mult"])
-        if family == "other" and l2_sol is None and best_item is not None:
-            bd = float(best_dist)
-            l4_w *= min(1.0, 2.6 / (1.0 + max(0.0, bd - 2.0) * 0.11))
+        # 상태도(L2)가 있으면 CALPHAD는 보조만. SnBi(신뢰도 0.92)는 Bi 공정 인력 합산이 과추정되기 쉬워 제외.
+        # [2026-09-25] 이전 `l2_conf > 0.85`·`family == "SnBi"` 하드 조건은 분류 경계에서 L4를
+        # 켰다 껐다 해 점프를 만들었다. 계열 구성별로 신뢰도 0.85→0.90에서 서서히 끄고 섞는다.
+        # (완충 구간 밖의 단일 계열은 기존과 동일: 신뢰도 0.82·0.85 → 켜짐, 0.90·0.92 → 꺼짐)
+        l4_mult = 0.0
+        for _fam, _wt, _r in l2_parts:
+            if _r is not None:
+                fade = 1.0 - _smoothstep01((float(_r[2]) - 0.85) / 0.05)
+                l4_mult += _wt * float(prof["l4_if_l2_weak_mult"]) * fade
+            else:
+                m = float(prof["l4_if_no_l2_mult"])
+                if _fam == "other" and best_item is not None:
+                    bd = float(best_dist)
+                    m *= min(1.0, 2.6 / (1.0 + max(0.0, bd - 2.0) * 0.11))
+                l4_mult += _wt * m
+        l4_w = l4_conf * l4_mult
 
         # ─── 앙상블 ───────────────────────────────────────────────────────────
         layers = []
@@ -1324,6 +1585,8 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         detail["unknown_noncore_pct"] = round(unk_pct_global, 4)
     if unknown_blend_detail:
         detail["unknown_metals_melting_blend"] = unknown_blend_detail
+    if l2_blend_meta:
+        detail["l2_family_corridor"] = l2_blend_meta
     if ext_calphad_detail:
         detail["external_calphad"] = ext_calphad_detail
 
