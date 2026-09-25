@@ -1315,7 +1315,7 @@ class AlloyAnalyzer:
                 not any(ai_summary_txt.startswith(m) for m in _local_summary_markers)
             )
         # 어떤 조성이 들어와도 조성 기반 규칙 설명이 최소 포함되도록 보강 (엔지니어=비전문가 모드: 기술 보강 생략)
-        rule_phase_txt = self.phase_predictor.predict(norm)
+        rule_phase_txt = self.phase_predictor.predict(norm, solidus=solidus, liquidus=liquidus)
         ai_phase_txt = str(full_ai.get("phase", "") or "").strip() if isinstance(full_ai, dict) else ""
         if ai_phase_txt:
             phase_txt = ai_phase_txt
