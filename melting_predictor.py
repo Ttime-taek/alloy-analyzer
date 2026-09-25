@@ -1552,7 +1552,9 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
 
     # ─── 피크 온도 (IPC-J-STD-020E 권역과 정합되도록 오프셋; JIS 조립·시험은 TM-650·Z3198 등과 병행 검토) ──
     delta_t     = final_liq - final_sol
-    peak_offset = 20.0 if delta_t < 5 else 25.0
+    # [2026-09-25 계산 로직 점검 P2] 이전 `20 if ΔT < 5 else 25`는 ΔT가 5 ℃를 넘나들 때 권장 피크가
+    # 5 ℃ 튀었다(Sn97.2Ag2.8 249.0 → Sn97.1Ag2.9 243.1). ΔT 4→5 ℃에서 연속 전환(밖은 기존과 동일).
+    peak_offset = 20.0 + 5.0 * _smoothstep01(delta_t - 4.0)
     final_peak  = final_liq + peak_offset
 
     prediction_uncertainty = _prediction_uncertainty(
