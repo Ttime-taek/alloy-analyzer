@@ -647,6 +647,15 @@ def _phase_diagram_predict(norm, family):
         liq = liq_ag
         if cu > 0.7:
             liq += (cu - 0.7) * 9.0
+        # [2026-09-25 계산 로직 점검 P2] 액상선은 초정상 액상면 중 가장 높은 것이다.
+        # 위 식(Sn-Ag 액상선 + Cu 9 ℃/%)은 β-Sn/Ag3Sn 초정 영역용이라, Cu가 많아 Cu6Sn5가 초정인
+        # 저Ag·고Cu 조성에서는 Sn-Cu 액상선(약 33 ℃/%)을 크게 밑돌았다. Sn-0.3Ag-xCu에서
+        # Cu 2.0 → 270(DB) 다음 Cu 2.5 → 248 ℃로 오히려 떨어지고, Sn0.3Ag2.0Cu 홀드아웃 −25 ℃.
+        # Cu6Sn5 액상면 = Sn-Cu 이원 액상선 − Ag 강하(3원 공정 217 ℃ ≈ 이원 227 ℃ − 10 ℃ @ Ag 3.5 %).
+        # 일반 SAC(Cu ≤ 약 0.9 %)에서는 이 면이 더 낮아 기존 값 그대로다.
+        _, liq_cu6sn5 = _interp(cu, SN_CU_PHASE)
+        liq_cu6sn5 -= (227.0 - SAC_TERNARY_EUTECTIC["solidus"]) * min(float(ag), 3.5) / 3.5
+        liq = max(liq, liq_cu6sn5)
 
         # Bi 소량 첨가 효과 (SAC 4원계: Bi ≤ 5%)
         # In 동시 첨가(inp≤8, SAC 분류) 시 고상·액상 간격은 주로 아래 In 블록 계수로 맞추고,
