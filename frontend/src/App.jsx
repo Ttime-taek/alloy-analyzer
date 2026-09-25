@@ -4667,12 +4667,30 @@ export function isDbRegisteredMelt(result, key) {
   return result?.melting_detail?.db_exact_match === true;
 }
 
+// [2026-09-25 계산 로직 점검]
+//   변경 전: 판정 패널은 "DB 범위 밖 · 사용 중단"인데 큰 KPI 타일은 "(추정)"만 붙여 183/212/237 ℃를
+//            그대로 강조(Sn43Pb43Bi14, 실측 144/163 ℃). 타일만 보면 쓸 수 있는 값처럼 보였음.
+//   변경 후: 계약 상태가 out_of_domain이면 타일 설명에 사용 중단을 명시. 피크는 액상선 기준.
+//   검증: src/out-of-domain-melt-hint.regression-1.test.js
+export function isOutOfDomainMelt(result, key) {
+  return result?.prediction_contract?.properties?.[key]?.state === "out_of_domain";
+}
+
 export function meltSummaryHint(result, variant) {
   if (variant === "solidus" && isDbRegisteredMelt(result, "solidus_c")) {
     return "DB 등록값 · 응고가 시작되는 쪽 온도";
   }
   if (variant === "liquidus" && isDbRegisteredMelt(result, "liquidus_c")) {
     return "DB 등록값 · 완전 액상";
+  }
+  if (variant === "solidus" && isOutOfDomainMelt(result, "solidus_c")) {
+    return "DB 범위 밖 · 사용 중단 (참고용 추정)";
+  }
+  if (variant === "liquidus" && isOutOfDomainMelt(result, "liquidus_c")) {
+    return "DB 범위 밖 · 사용 중단 (참고용 추정)";
+  }
+  if (variant === "peak" && isOutOfDomainMelt(result, "liquidus_c")) {
+    return "DB 범위 밖 · 공정 권장 중단 (참고용 추정)";
   }
   return SUMMARY_VARIANT_HINT[variant] || null;
 }

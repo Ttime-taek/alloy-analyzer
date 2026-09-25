@@ -46,7 +46,9 @@ function PropertyEvidence({ name, value }) {
       ? `${formatNumber(interval.lower)}–${formatNumber(interval.upper)} ${value.unit}`
       : value.state === "exact_match"
         ? "등록 DB 값"
-        : "오차범위 없음";
+        : value.state === "out_of_domain"
+          ? "산정 불가 (검증 범위 밖)"
+          : "오차범위 없음";
   return (
     <div
       style={{

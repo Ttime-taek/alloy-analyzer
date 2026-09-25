@@ -230,15 +230,21 @@ def _property_result(
     if point_f is None:
         state = "unavailable"
         reasons = ["NO_VALIDATION_DATA"]
-    return {
-        "point": round(point_f, 3) if point_f is not None else None,
-        "unit": unit,
-        "interval": _interval(
+    # [2026-09-25 계산 로직 점검] 경험적 90% 범위는 계열의 '검증 범위 안' 홀드아웃 잔차로 만든다.
+    # DB 범위 밖(out_of_domain)에 그대로 붙이면 의미가 없고 오히려 정밀해 보인다
+    # (예: Sn43Pb43Bi14 → Pb 계열 잔차 ±0.3℃가 붙었지만 실측과 39℃ 차이). 범위를 내지 않는다.
+    interval = None
+    if state != "out_of_domain":
+        interval = _interval(
             point_f,
             profile,
             exact=state == "exact_match",
             lower_bound=0.0 if unit == "MPa" else None,
-        ),
+        )
+    return {
+        "point": round(point_f, 3) if point_f is not None else None,
+        "unit": unit,
+        "interval": interval,
         "method": method,
         "state": state,
         "state_label_ko": STATE_LABEL_KO[state],
