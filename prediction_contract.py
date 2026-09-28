@@ -179,6 +179,8 @@ def _interval(
     profile: Dict[str, Any],
     *,
     exact: bool,
+    state: str = "in_domain",
+    distance: float | None = None,
     lower_bound: float | None = None,
 ) -> Dict[str, Any] | None:
     if point is None:
@@ -193,10 +195,27 @@ def _interval(
     radius = _finite_float(profile.get("p90_absolute_error"))
     if radius is None:
         return None
+    widened = False
+    # [2026-09-28 계산 로직 점검 P4] weak_support(검증 거리 q90~q99 사이)는 in_domain과
+    # 같은 90% 범위를 그대로 붙였다 — 실제로는 도메인 밖으로 갈수록 오차가 커지는데
+    # 그 커짐을 표현하지 못해 위험을 과소평가했다. distance_q90→q99 구간에서
+    # p90_absolute_error → p95_absolute_error(없으면 ×1.3)로 선형 확대한다.
+    if state == "weak_support" and distance is not None:
+        q90 = _finite_float(profile.get("distance_q90"))
+        q99 = _finite_float(profile.get("distance_q99"))
+        if q90 is not None and q99 is not None and q99 > q90:
+            frac = max(0.0, min(1.0, (float(distance) - q90) / (q99 - q90)))
+            wide = _finite_float(profile.get("p95_absolute_error"))
+            if wide is None or wide <= radius:
+                wide = radius * 1.3
+            new_radius = radius + (wide - radius) * frac
+            if new_radius > radius:
+                radius = new_radius
+                widened = True
     lower = point - radius
     if lower_bound is not None:
         lower = max(float(lower_bound), lower)
-    return {
+    out = {
         "lower": round(lower, 3),
         "upper": round(point + radius, 3),
         "level": 0.90,
@@ -205,6 +224,9 @@ def _interval(
         "sample_count": int(profile.get("sample_count") or 0),
         "cohort": str(profile.get("cohort") or "global"),
     }
+    if widened:
+        out["kind"] = str(out["kind"]) + "_distance_widened"
+    return out
 
 
 def _property_result(
@@ -239,6 +261,8 @@ def _property_result(
             point_f,
             profile,
             exact=state == "exact_match",
+            state=state,
+            distance=distance,
             lower_bound=0.0 if unit == "MPa" else None,
         )
     return {
