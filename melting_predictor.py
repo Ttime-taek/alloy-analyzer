@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "12"
+MELTING_ENGINE_VERSION = "13"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -1358,10 +1358,25 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
     else:
         prof = get_ensemble_profile(family)
         # L1: 최근접 DB 행 — _db_neighbor_gate 로 거리에 따라 0~1 부드럽게 섞어 L2/L3와 앙상블
+        # [2026-09-28 계산 로직 점검 P4] 단일 최근접 행만 쓰면, 조성이 두 DB 행의 경계를
+        # 지날 때(둘째로 가까운 행이 첫째와 자리를 바꾸는 지점) 값이 계단으로 튄다
+        # (예: Sn100+Ni 0.01→0.03 고상 231.8→227.1, "Sn100"에서 "Sn-0.03Ni-0.015P"로 전환).
+        # 2번째로 가까운 행을 역거리 가중으로 함께 섞으면 두 행이 자리를 바꾸는 지점(d0=d1)에서
+        # 가중치가 그대로 이어져 연속이 된다(가까운 쪽이 항상 지배적이라는 성질은 유지).
         l1_sol, l1_liq, l1_w = None, None, 0.0
         if best_item is not None:
             l1_sol = float(best_item["solidus"])
             l1_liq = float(best_item["liquidus"])
+            if len(knn_raw) > 1:
+                d1, item1 = knn_raw[1]
+                d1 = float(d1)
+                if d1 < 9999.0:
+                    eps_d = 0.02
+                    w0 = 1.0 / (float(best_dist) + eps_d)
+                    w1 = 1.0 / (d1 + eps_d)
+                    wsum = w0 + w1
+                    l1_sol = (l1_sol * w0 + float(item1["solidus"]) * w1) / wsum
+                    l1_liq = (l1_liq * w0 + float(item1["liquidus"]) * w1) / wsum
             gate = _db_neighbor_gate(best_dist)
             l1_w = math.exp(-best_dist * 6.0) * (4.0 + 22.0 * gate)
             # 성분 거리가 커도 최근접 solder_db 융점을 0으로 만들면 other+L4만 남는 경우가 있음 —
