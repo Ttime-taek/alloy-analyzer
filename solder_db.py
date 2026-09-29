@@ -182,7 +182,8 @@ _raw_db = [
     *SN_PB_SOLDER_ENTRIES,
     {"name": "Sn1.75Ag1.9Sb1In", "comp": {"Ag": 1.75, "Sb": 1.9, "In": 1.0, "Sn": 95.35}, "solidus": 219, "liquidus": 228},
     {"name": "Sn1.75Ag1.5Sb1In", "comp": {"Ag": 1.75, "Sb": 1.5, "In": 1.0, "Sn": 95.75}, "solidus": 219, "liquidus": 228},
-    {"name": "Sn42In1Cu1Zn", "comp": {"In": 42.0, "Cu": 1.0, "Zn": 1.0, "Sn": 56.0}, "solidus": 117, "liquidus": 151},
+    # [2026-09-29] 원본 희성 요약표 HSE-100 Sn-In-Cu-Zn(사용자 확인: Sn-42In-1Cu-1Zn) = 119/121 °C (이전 입력 117/151 대체)
+    {"name": "Sn42In1Cu1Zn", "comp": {"In": 42.0, "Cu": 1.0, "Zn": 1.0, "Sn": 56.0}, "solidus": 119, "liquidus": 121},
     {"name": "Sn3Ag15Bi", "comp": {"Ag": 3.0, "Bi": 15.0, "Sn": 82.0}, "solidus": 139, "liquidus": 206},
     {"name": "Sn1Ag25Bi", "comp": {"Ag": 1.0, "Bi": 25.0, "Sn": 74.0}, "solidus": 137.8, "liquidus": 196.6},
     {"name": "Sn1Ag25Bi0.5Cu", "comp": {"Ag": 1.0, "Bi": 25.0, "Cu": 0.5, "Sn": 73.5}, "solidus": 137.5, "liquidus": 194.9},
