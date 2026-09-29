@@ -164,7 +164,8 @@ _raw_db = [
     {"name": "Sn3.5Ag0.5CuNiGe", "comp": {"Ag": 3.5, "Cu": 0.5, "Ni": 0.0, "Ge": 0.0, "Sn": 96.0}, "solidus": 217, "liquidus": 217},
     {"name": "Sn3.5Ag0.5Bi3.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 3.0, "Sn": 93.0}, "solidus": 207, "liquidus": 214},
     {"name": "Sn3.5Ag0.5Bi6.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 6.0, "Sn": 90.0}, "solidus": 202, "liquidus": 212},
-    {"name": "Sn-5Sb", "comp": {"Sb": 5.0, "Sn": 95.0}, "solidus": 238, "liquidus": 242, "density": 7.3},
+    # [2026-09-29] 원본 희성 요약표 HSE-55 Sn-5Sb = 223/238 °C (사용자 지시로 7/14 입력값 238/242에서 교체, 비중 7.3 유지)
+    {"name": "Sn-5Sb", "comp": {"Sb": 5.0, "Sn": 95.0}, "solidus": 223, "liquidus": 238, "density": 7.3},
     # [2026-09-29] 원본 희성 요약표 HSE-04(M) Sn-0.5Cu = 227/227 °C, 비중 7.3 (이전 입력 312 °C는 Sn3.0Cu 값 오기)
     {"name": "Sn0.5Cu", "comp": {"Cu": 0.5, "Sn": 99.5}, "solidus": 227, "liquidus": 227, "density": 7.3},
     {"name": "Sn3.0Cu", "comp": {"Cu": 3.0, "Sn": 97.0}, "solidus": 227, "liquidus": 312},

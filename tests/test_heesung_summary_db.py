@@ -55,9 +55,10 @@ class HeesungSummaryDbTest(unittest.TestCase):
         self.assertAlmostEqual(float(out["props"]["density"]), 7.3, places=3)
 
     def test_sb_rows_updated_with_requested_melting_and_density(self):
+        # 2026-09-29: 원본 희성 요약표 HSE-55 값(223/238 °C)으로 교체
         row_5 = _find_by_name("Sn-5Sb")
-        self.assertAlmostEqual(float(row_5["solidus"]), 238.0, places=3)
-        self.assertAlmostEqual(float(row_5["liquidus"]), 242.0, places=3)
+        self.assertAlmostEqual(float(row_5["solidus"]), 223.0, places=3)
+        self.assertAlmostEqual(float(row_5["liquidus"]), 238.0, places=3)
         self.assertAlmostEqual(float(row_5["density"]), 7.3, places=3)
 
         row_10 = _find_by_name("Sn-10Sb")
@@ -68,8 +69,8 @@ class HeesungSummaryDbTest(unittest.TestCase):
     def test_analyzer_uses_updated_sb_exact_match(self):
         out_5 = self.analyzer.analyze_all({"Sn": 95.0, "Sb": 5.0})
         self.assertEqual(out_5["best"]["name"], "Sn-5Sb")
-        self.assertAlmostEqual(float(out_5["solidus"]), 238.0, places=3)
-        self.assertAlmostEqual(float(out_5["liquidus"]), 242.0, places=3)
+        self.assertAlmostEqual(float(out_5["solidus"]), 223.0, places=3)
+        self.assertAlmostEqual(float(out_5["liquidus"]), 238.0, places=3)
         self.assertAlmostEqual(float(out_5["props"]["density"]), 7.3, places=3)
 
         out_10 = self.analyzer.analyze_all({"Sn": 90.0, "Sb": 10.0})
