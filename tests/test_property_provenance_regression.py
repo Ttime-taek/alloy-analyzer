@@ -156,11 +156,13 @@ def test_wetting_metadata_distinguishes_exact_measurement_from_idw(
     assert predicted_meta["provenance_status"] == "unconfirmed"
     assert predicted_meta["verification_status"] == "unverified"
     assert predicted_meta["comparison_allowed"] is False
+    # [2026-09-30 계산 로직 2차 점검 P1] 젖음 IDW 가중을 1/거리 → 1/(거리+1e-3)²로 바꿔
+    # (정확일치 행과 바로 옆 조성이 이어지도록) 예측값이 1.942/1.088 → 2.090/0.956으로 바뀜.
     assert predicted["props"]["wetting_fmax_pred_mn"] == pytest.approx(
-        1.9420975102139408, rel=0.0, abs=1e-15
+        2.0899373062888493, rel=0.0, abs=1e-12
     )
     assert predicted["props"]["wetting_t0_pred_s"] == pytest.approx(
-        1.0876494427841128, rel=0.0, abs=1e-15
+        0.9564745643822791, rel=0.0, abs=1e-12
     )
 
     for result, expected in ((exact, exact_meta), (predicted, predicted_meta)):

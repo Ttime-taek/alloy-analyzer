@@ -228,20 +228,17 @@ class PropertyModels:
     @staticmethod
     def _idw_comp_weight(dist: float, comp: dict) -> float:
         """
-        Cu ~0.55–0.72 wt% 구간은 실측 샘플이 성길 때 이웃 가중 전환이 급격해질 수 있음.
-        거리 바닥(floor)과 멱을 살짝 올려 IDW 절벽을 완화.
+        젖음성 IDW 가중 = 1 / (거리 + 1e-3)².
+
+        [2026-09-30 계산 로직 2차 점검 P1] 이전: 1/거리(멱 1), Cu 0.55–0.72 %에서만 바닥 0.035·멱 1.15.
+        그 Cu 구간 규칙 때문에 거리 → 0에서도 실측 행 값으로 수렴하지 않아 정확일치 행과 바로 옆이
+        달랐고(Sn0.7Cu 젖음 점수 10.0 → Cu +0.01 %에 15.2, +0.1 %에 27.6), Cu 0.55·0.72 % 경계에도
+        작은 계단이 있었다. 멱 2는 실측점에서 기울기가 0이라 정확일치와 이웃이 매끈하게 이어진다
+        (10.0 → 10.1 → 15.1). 6개 합금 leave-one-out 오차는 Fmax 0.184 → 0.193 mN, T0 0.156 → 0.162 s로
+        거의 같다. ``comp`` 인자는 호출부 호환을 위해 남겨 둔다.
         """
-        floor = 1e-6
-        power = 1.0
-        try:
-            cu = float(comp.get("Cu", 0) or 0)
-            if 0.55 <= cu <= 0.72:
-                floor = max(floor, 0.035)
-                power = 1.15
-        except (TypeError, ValueError):
-            pass
         d = max(0.0, float(dist))
-        return 1.0 / (d + floor) ** power
+        return 1.0 / (d + 1e-3) ** 2
 
     @staticmethod
     def _rec_fmax_t0_at_temp(rec, temp_c):
