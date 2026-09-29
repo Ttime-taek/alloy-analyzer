@@ -48,7 +48,12 @@ def _property_db_weight(best_dist):
     """
     물성 DB 가중치.
 
-    가까운 DB는 더 강하게 신뢰하고, 1 wt% 이내는 사실상 DB 우선으로 둔다.
+    가까운 DB일수록 강하게 신뢰한다: 거리 0에서 1, 거리 3에서 0으로 매끈하게 줄어든다.
+
+    [2026-09-30 계산 로직 2차 점검 P1] 이전: 거리 1.0에서 1.0 → 0.58, 2.0에서 0.41 → 0.55(역전),
+    3.0에서 0.44 → 0으로 계단이었다(Sn-0.29Cu-xNi, Ni 0.26 → 0.28 %에서 인장 +5.3·전단 +8.3 MPa).
+    곡선 모양은 물성 DB 합금별 leave-one-out으로 골랐다(인장 MAE 7.64 → 7.44, 항복 7.24 → 6.97,
+    연신 9.69 → 9.26 MPa·%p, 전단 4.56 → 4.75 — 새 DB 보간 커널·물성별 거리와 함께 측정).
     """
     if best_dist is None:
         return 0.0
@@ -56,13 +61,14 @@ def _property_db_weight(best_dist):
         d0 = float(best_dist)
     except Exception:
         return 0.0
-    if d0 <= 1.0:
+    if not math.isfinite(d0):
+        return 0.0
+    if d0 <= 0.0:
         return 1.0
-    if d0 <= 2.0:
-        return max(0.0, min(0.95, 1.0 / (1.0 + d0 / 1.4)))
-    if d0 <= 3.0:
-        return max(0.0, min(0.80, 1.0 / (1.0 + d0 / 2.4)))
-    return 0.0
+    if d0 >= 3.0:
+        return 0.0
+    t = d0 / 3.0
+    return 1.0 - t * t * (3.0 - 2.0 * t)
 
 
 _MECHANICAL_PROPERTY_KEYS = (
@@ -1014,15 +1020,28 @@ class AlloyAnalyzer:
         mdl_w = 1.0 - db_w
         db_exact_hit = (db_best_dist is not None) and (float(db_best_dist) <= _DB_EXACT_EPS)
 
-        if db_pred and db_w > 0.0:
+        # 물성별로 '그 물성 값을 가진' 가장 가까운 합금 거리로 가중치를 정한다
+        # (가장 가까운 합금에 전단 값이 없으면 전단은 먼 합금 값이라 덜 믿어야 함).
+        db_near_by_prop = (
+            (db_out.get("nearest_by_prop") if isinstance(db_out, dict) else None) or {}
+        )
+        if db_pred:
             def _blend(key_out, key_db):
                 dv = db_pred.get(key_db, None)
                 mv = props.get(key_out, None)
                 if dv is None or mv is None:
                     return
+                d_p = db_near_by_prop.get(key_db, db_best_dist)
                 try:
-                    props[key_out] = float(dv) if db_exact_hit else (float(mv) * mdl_w + float(dv) * db_w)
-                    prop_sources[key_out] = f"DB(blend,w={db_w:.2f})"
+                    w_p = _property_db_weight(d_p)
+                except Exception:
+                    w_p = 0.0
+                if w_p <= 0.0:
+                    return
+                exact_p = db_exact_hit or (d_p is not None and float(d_p) <= _DB_EXACT_EPS)
+                try:
+                    props[key_out] = float(dv) if exact_p else (float(mv) * (1.0 - w_p) + float(dv) * w_p)
+                    prop_sources[key_out] = f"DB(blend,w={w_p:.2f})"
                 except Exception:
                     return
 

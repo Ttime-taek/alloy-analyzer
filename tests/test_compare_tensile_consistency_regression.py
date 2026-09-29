@@ -38,7 +38,9 @@ def test_unregistered_alloy_tensile_matches_between_single_and_compare() -> None
     # 2번째 이웃까지 섞도록 바뀌면서(경계 연속성 개선) 예측 고상·액상이 미세하게 바뀌었고,
     # 이 조성의 인장강도 모델도 그 값을 입력으로 써서 0.01 MPa 수준으로 같이 움직였다.
     # 이 테스트의 핵심은 단일/비교 API 간 일치(아래 비교)이므로 절대값은 갱신만 한다.
-    assert single_tensile == pytest.approx(76.6003539485307)
+    # [2026-09-30 계산 로직 2차 점검 P1] 물성 DB 가중치 곡선(거리 0→3에서 1→0, 매끈)과
+    # 보간 커널(거리² 역가중) 변경으로 76.60 → 76.82 MPa.
+    assert single_tensile == pytest.approx(76.81626521462508)
     assert compared_tensile == pytest.approx(single_tensile)
     assert (
         compared["prediction_contract"]["properties"]["tensile_strength_mpa"]["usage"]

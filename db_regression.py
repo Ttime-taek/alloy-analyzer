@@ -331,40 +331,95 @@ def predict_shear_from_db_with_detail(input_comp, max_dist=_SHEAR_IDW_MAX_DIST, 
     return {"value": float(value), "best_dist": float(best_dist), "top": top}
 
 
+# [2026-09-30 계산 로직 2차 점검 P1] 물성 DB 보간 커널.
+# 이전: 정확일치면 그 합금 평균만, 0.0001만 벗어나도 가까운 5개를 1/(1+거리)로 섞어
+#   (먼 합금까지 크게 반영) 값이 튀었다 — 순수 Sn 연신 45 → Ni 0.01 % 첨가 34.4 %,
+#   SAC305 항복 39.5 → Ag +0.01 %에 36.9. 인장은 별도 컷오프로 이웃이 들고 날 때 계단.
+# 이제: 가중 = 시험 수 / (거리 + ε)², 최근접 거리 d0에서 폭 max(1, 0.5·d0) 안에서만
+#   매끈하게 0까지 줄임. 거리 → 0이면 그 합금 값으로 연속 수렴한다.
+#   합금별 leave-one-out(DB 단독 예측) MAE: 인장 8.4 → 7.9, 항복 10.1 → 8.6,
+#   연신 7.2 → 6.6, 전단 12.1 → 5.4.
+_PROP_KERNEL_EPS = 0.02
+_PROP_KERNEL_POWER = 2.0
+
+
+def _prop_kernel_taper_width(best_dist):
+    return max(1.0, 0.5 * max(0.0, float(best_dist)))
+
+
+def _prop_kernel_weight(dist, best_dist, n):
+    width = _prop_kernel_taper_width(best_dist)
+    t = max(0.0, min(1.0, (float(dist) - float(best_dist)) / width))
+    taper = 1.0 - t * t * (3.0 - 2.0 * t)
+    if taper <= 0.0:
+        return 0.0
+    return float(n) * taper / (max(0.0, float(dist)) + _PROP_KERNEL_EPS) ** _PROP_KERNEL_POWER
+
+
 def predict_from_db(input_comp):
+    return predict_from_db_with_distances(input_comp)[0]
+
+
+def predict_from_db_with_distances(input_comp):
+    """
+    물성별 DB 예측 + 그 물성 값을 가진 가장 가까운 합금까지의 거리.
+
+    [2026-09-30] 가장 가까운 합금에 해당 물성이 없으면(예: Sn58Bi는 전단 없음) 값은 먼 합금에서
+    오는데, 블렌드 가중치는 가까운 합금 거리로 정해져 먼 값을 과신했다. 분석기는 물성별 거리로
+    가중치를 정한다.
+    """
     by_name = _unique_alloy_candidates(input_comp)
     candidates = sorted(
         ((name, float(item["dist"])) for name, item in by_name.items()),
         key=lambda x: x[1],
     )
-    top = candidates[:5]
 
     predictions = {}
+    nearest = {}
     props = ["tensile", "yield_strength", "elongation", "shear"]
     exact = [item for item in candidates if item[1] <= 1e-4]
-    effective_top = exact[:5] if exact else top
-    tensile_top = _select_tensile_candidates(candidates)
 
     for p in props:
         weighted_values = []
         weights = []
 
-        selected = tensile_top if p == "tensile" else effective_top
-        for alloy_name, dist in selected:
+        if exact:
+            # 등록 합금은 그 합금의 시험 평균(정확일치 값). 커널도 거리 0에서 같은 값으로 수렴한다.
+            selected = [(name, dist, 1.0) for name, dist in exact]
+            nearest[p] = float(exact[0][1])
+        else:
+            usable = []
+            for alloy_name, dist in candidates:
+                stats = get_statistics(alloy_name)
+                if stats and stats[p]:
+                    usable.append((alloy_name, dist))
+            if not usable:
+                predictions[p] = None
+                nearest[p] = None
+                continue
+            d0 = usable[0][1]
+            nearest[p] = float(d0)
+            selected = [(name, dist, None) for name, dist in usable]
+
+        for alloy_name, dist, fixed_w in selected:
             stats = get_statistics(alloy_name)
             if not stats or not stats[p]:
                 continue
 
             mean = stats[p]["mean"]
             n    = stats[p]["n"]
-            weight = (1 / (1 + dist)) * n
+            weight = float(n) if fixed_w is not None else _prop_kernel_weight(dist, d0, n)
+            if weight <= 0.0:
+                continue
 
             weighted_values.append(mean * weight)
             weights.append(weight)
 
         predictions[p] = sum(weighted_values) / sum(weights) if weights else None
+        if predictions[p] is None:
+            nearest[p] = None
 
-    return predictions
+    return predictions, nearest
 
 
 def predict_from_db_with_detail(input_comp):
@@ -387,5 +442,5 @@ def predict_from_db_with_detail(input_comp):
             [(item["alloy"], item["dist"]) for item in candidates]
         )
     ]
-    pred = predict_from_db(input_comp)
-    return {"pred": pred or {}, "top": top, "tensile_top": tensile_top}
+    pred, nearest = predict_from_db_with_distances(input_comp)
+    return {"pred": pred or {}, "top": top, "tensile_top": tensile_top, "nearest_by_prop": nearest}
