@@ -51,4 +51,5 @@ def test_tensile_bi_term_has_no_steps(label, comps) -> None:
     ],
 )
 def test_values_away_from_boundaries_unchanged(comp, expected) -> None:
-    assert M.predict_tensile_strength(comp, 139.0, 139.0) == pytest.approx(expected, abs=1e-9)
+    # P2(같은 날)에서 순수 Sn 쪽 보정 인자 1 − exp(−첨가량/0.35)가 곱해져 10⁻³ MPa 수준만 달라진다.
+    assert M.predict_tensile_strength(comp, 139.0, 139.0) == pytest.approx(expected, abs=0.01)

@@ -56,6 +56,10 @@ def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> floa
     tb = default_wetting_temp_c(liquidus_b)
     return float(max(ta, tb))
 
+# 순수 Sn 인장강도(MPa) — 물성 DB LT 데이터시트 Sn100 실측
+_PURE_SN_TENSILE_MPA = 14.0
+
+
 class PropertyModels:
 
     def __init__(self):
@@ -121,16 +125,33 @@ class PropertyModels:
             bi = float(comp.get("Bi", 0) or 0.0)
             sn = float(comp.get("Sn", 0) or 0.0)
 
+            inp = float(comp.get("In", 0) or 0.0)
+            pb = float(comp.get("Pb", 0) or 0.0)
+            zn = float(comp.get("Zn", 0) or 0.0)
+
             comp_factor = 0.0
             comp_factor += self._sat(ag, A=15, tau=3.5)
             comp_factor += self._sat(comp.get("Cu", 0), A=10, tau=2)
             comp_factor += self._bi_tensile_term(sn, bi, ag)
             comp_factor += self._sat(comp.get("Sb", 0),  A=35, tau=8)
-            comp_factor += self._sat(comp.get("In", 0),  A=12, tau=10)
+            comp_factor += self._sat(inp, A=12, tau=10)
             comp_factor += self._sat(comp.get("Ni", 0),  A=15, tau=0.5)
-            comp_factor += self._sat(comp.get("Zn", 0),  A=10, tau=5)
+            # [2026-09-30 계산 로직 2차 점검 P2] 원소 항 보정 (물성 DB 실측 기준)
+            #  - Zn: A=10 → 30 (Sn8Zn3Bi 실측 78 MPa, 이전 모델 53)
+            #  - Pb: 항이 없었음 (Sn63Pb37 실측 47, 이전 모델 37)
+            #  - In 고함량 연화: In은 무르므로 8 % 넘으면 강도가 크게 떨어짐 (Sn42In1Cu1Zn 실측 19, 이전 모델 54)
+            comp_factor += self._sat(zn, A=30, tau=4)
+            comp_factor += self._sat(pb, A=12, tau=15)
+            comp_factor -= self._sat(max(0.0, inp - 8.0), A=45, tau=20)
 
-            return base + temp_factor + comp_factor
+            alloyed = base + temp_factor + comp_factor
+            # 순수 Sn은 합금 모델 기준값(29 + 온도항 8 = 37)보다 훨씬 약함(실측 14 MPa).
+            # 미량 첨가로도 빠르게 강해지므로 전체 첨가량 s에 대해 14 → 합금값으로 매끈하게 올린다.
+            solute = max(0.0, 100.0 - sn) if sn > 0 else sum(
+                float(v or 0.0) for k, v in comp.items() if k != "Sn"
+            )
+            dilute = 1.0 - math.exp(-solute / 0.35)
+            return _PURE_SN_TENSILE_MPA + (alloyed - _PURE_SN_TENSILE_MPA) * dilute
         except Exception as exc:
             log_exception("predict tensile unavailable", exc)
             return None
@@ -153,17 +174,35 @@ class PropertyModels:
     # 연신율(%)
     # -----------------------------------------------------
     def predict_elongation(self, comp, solidus, liquidus):
+        """
+        [2026-09-30 계산 로직 2차 점검 P2] 이전 모델은 고상–액상 간격 ΔT × 0.3 %p를 깎았는데,
+        실측은 ΔT와 무관했다(Sn3.0Cu ΔT 85 ℃ 32 %, Sn3.0Cu0.5Ni ΔT 166 ℃ 30 % — 모델 10 %, 3 %).
+        Bi도 방향이 틀렸다: 2.5~3 %만 넣어도 10~17 %로 크게 떨어지고(모델 28~32 %),
+        공정 Sn58Bi는 오히려 24~25 %(모델 3~5 %). ΔT 항을 빼고 Bi를 "빠르게 떨어졌다가 공정 쪽에서 일부 회복"
+        모양으로 바꾸고 Pb·In 감소 항을 넣었다. 인자는 물성 DB 실측에 맞춘 값.
+        """
         try:
+            # 융점 예측이 없으면 물성도 '예측 불가'로 둔다(다른 물성 모델과 같은 규칙).
+            float(liquidus) - float(solidus)
             base = 42.0
-            delta_t = max(0, liquidus - solidus)
-            base -= delta_t * 0.3
+            bi = float(comp.get("Bi", 0) or 0.0)
+            zn = float(comp.get("Zn", 0) or 0.0)
+            pb = float(comp.get("Pb", 0) or 0.0)
+            inp = float(comp.get("In", 0) or 0.0)
 
-            # 취성 원소 페널티 (포화)
-            bi_penalty = self._sat(comp.get("Bi", 0), A=38, tau=15)
+            bi_penalty = 30.0 * (1.0 - math.exp(-max(0.0, bi) / 1.2))
+            bi_penalty *= 1.0 - 0.45 * self._smoothstep01((bi - 15.0) / 40.0)
+            # Sn-Zn 기지에서는 같은 Bi 3 %여도 연신이 유지됨(Sn8Zn3Bi 실측 34.7 %) — 실측 1개 기준.
+            bi_penalty *= 1.0 - 0.7 * self._smoothstep01(zn / 8.0)
             sb_penalty = self._sat(comp.get("Sb", 0), A=20, tau=10)
-            cu_penalty = self._sat(comp.get("Cu", 0), A=8,  tau=2)
+            cu_penalty = self._sat(comp.get("Cu", 0), A=6, tau=2)
+            pb_penalty = self._sat(pb, A=25, tau=15)
+            in_penalty = self._sat(max(0.0, inp - 5.0), A=30, tau=25)
 
-            return max(3.0, base - bi_penalty - sb_penalty - cu_penalty)
+            return max(
+                3.0,
+                base - bi_penalty - sb_penalty - cu_penalty - pb_penalty - in_penalty,
+            )
         except Exception as exc:
             log_exception("predict elongation unavailable", exc)
             return None
