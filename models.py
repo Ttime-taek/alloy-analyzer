@@ -78,6 +78,36 @@ class PropertyModels:
         return t * t * (3.0 - 2.0 * t)
 
     # -----------------------------------------------------
+    # Bi 인장 기여 (연속)
+    # -----------------------------------------------------
+    @classmethod
+    def _bi_tensile_term(cls, sn, bi, ag):
+        """
+        Bi가 인장강도에 더하는 몫(MPa).
+
+        [2026-09-30 계산 로직 2차 점검 P1] 이전에는 if/elif 분기(Sn 50 %, Bi 12·20 %,
+        Ag 0.3·0.5 %)마다 다른 곡선을 골라 경계에서 값이 튀었다
+        (Sn49.9Bi50.1 → Sn50.1Bi49.9 인장 −15 MPa, Ag 0.4 %면 −38 MPa; Ag 없는 Bi 11.99 → 12 % +14 MPa).
+        같은 곡선들을 매끈한 가중으로 섞는다. 경계에서 먼 조성(DB 합금 포함)은 이전 값과 같다.
+          · 저Bi 곡선: Ag 0.3 → 0.7 %에서 A=50/τ=15 → A=42/τ=2.5 (SAC+Bi 강화)
+          · Sn-rich 고Bi 곡선: Bi 12 → 18 %에서 저Bi 곡선 → A=36/τ=11
+          · Bi-rich 곡선(Sn58Bi 쪽): Ag 0.2 → 0.4 %에서 A=52/τ=16 → A=80/τ=20
+          · Bi-rich 가중 = [Bi 18 → 22 %] × [Sn 54 → 46 %]
+        """
+        if bi <= 0.0:
+            return 0.0
+        s = cls._smoothstep01
+        a_lo = s((ag - 0.3) / 0.4)
+        low_bi = cls._sat(bi, A=50, tau=15) * (1.0 - a_lo) + cls._sat(bi, A=42, tau=2.5) * a_lo
+        high_bi = cls._sat(max(0.0, bi - 8.0), A=36, tau=11)
+        t_hi = s((bi - 12.0) / 6.0)
+        sn_rich = low_bi * (1.0 - t_hi) + high_bi * t_hi
+        a_hi = s((ag - 0.2) / 0.2)
+        bi_rich = cls._sat(bi, A=52, tau=16) * (1.0 - a_hi) + cls._sat(bi, A=80, tau=20) * a_hi
+        r = s((bi - 18.0) / 4.0) * (1.0 - s((sn - 46.0) / 8.0))
+        return sn_rich * (1.0 - r) + bi_rich * r
+
+    # -----------------------------------------------------
     # 인장강도(MPa)
     # -----------------------------------------------------
     def predict_tensile_strength(self, comp, solidus, liquidus):
@@ -94,25 +124,7 @@ class PropertyModels:
             comp_factor = 0.0
             comp_factor += self._sat(ag, A=15, tau=3.5)
             comp_factor += self._sat(comp.get("Cu", 0), A=10, tau=2)
-            # SAC+Bi: the low-Bi strengthening curve and the Sn-rich high-Bi
-            # curve describe different regimes.  Blend them over 12–18 wt%
-            # Bi so an input rounding at 12.00% cannot create a 30 MPa step.
-            if sn >= 50.0 and bi >= 12.0:
-                low_bi = self._sat(bi, A=42, tau=2.5)
-                high_bi = self._sat(max(0.0, bi - 8.0), A=36, tau=11)
-                transition = self._smoothstep01((bi - 12.0) / 6.0)
-                comp_factor += low_bi * (1.0 - transition) + high_bi * transition
-            elif bi >= 20.0:
-                # Ag가 거의 없는 순수 Sn-Bi는 내부 DB 평균이 더 낮아
-                # 고Bi(Ag-rich)와 같은 강한 A=80 곡선을 쓰면 과대가 된다.
-                if ag >= 0.3:
-                    comp_factor += self._sat(bi, A=80, tau=20)
-                else:
-                    comp_factor += self._sat(bi, A=52, tau=16)
-            elif ag >= 0.5 and 0.0 < bi < 12.0:
-                comp_factor += self._sat(bi, A=42, tau=2.5)
-            elif bi > 0.0:
-                comp_factor += self._sat(bi, A=50, tau=15)
+            comp_factor += self._bi_tensile_term(sn, bi, ag)
             comp_factor += self._sat(comp.get("Sb", 0),  A=35, tau=8)
             comp_factor += self._sat(comp.get("In", 0),  A=12, tau=10)
             comp_factor += self._sat(comp.get("Ni", 0),  A=15, tau=0.5)
