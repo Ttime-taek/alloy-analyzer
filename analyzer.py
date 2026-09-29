@@ -1036,6 +1036,20 @@ class AlloyAnalyzer:
                     w_p = _property_db_weight(d_p)
                 except Exception:
                     w_p = 0.0
+                # 가장 가까운 등록 합금에 이 물성 실측이 없으면, 그 합금 위에서는 모델 값을 쓴다
+                # (다른 합금 값을 빌려오지 않는 규칙). 바로 옆 조성에서 먼 합금 값이 갑자기 들어와
+                # 튀지 않도록, 그 합금에서 거리 1.0까지 DB 가중을 0 → 원래 값으로 매끈하게 올린다.
+                # 예: 순수 Sn(전단 실측 없음) 24 MPa ↔ Ni 0.01 % 첨가 조성.
+                try:
+                    if (
+                        d_p is not None
+                        and db_best_dist is not None
+                        and float(db_best_dist) + 1e-9 < float(d_p)
+                    ):
+                        t_near = max(0.0, min(1.0, float(db_best_dist) / 1.0))
+                        w_p *= t_near * t_near * (3.0 - 2.0 * t_near)
+                except Exception:
+                    pass
                 if w_p <= 0.0:
                     return
                 exact_p = db_exact_hit or (d_p is not None and float(d_p) <= _DB_EXACT_EPS)
