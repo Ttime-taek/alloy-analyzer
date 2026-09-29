@@ -23,9 +23,14 @@ def test_sn_cu_liquidus_table_is_physically_shaped() -> None:
     assert liq[3.0] == float(db["Sn3.0Cu"]["liquidus"])
 
 
-def test_copied_liquidus_rows_are_quarantined() -> None:
+def test_copied_liquidus_rows_are_resolved_from_source_sheet() -> None:
+    # [2026-09-29] 원본 희성 요약표 대조: Sn0.3Ag0.2Cu(= Sn0.3Ag2.0Cu 소수점 오기)는 삭제,
+    # Sn0.5Cu는 요약표 HSE-04(M) 값 227/227 °C로 교체. 격리 목록은 비어 있어야 한다.
     names = {row["name"] for row in SOLDER_DB}
     assert not names & set(QUARANTINED_RAW_ROWS)
+    assert "Sn0.3Ag0.2Cu" not in names
+    db = {row["name"]: row for row in SOLDER_DB}
+    assert (db["Sn0.5Cu"]["solidus"], db["Sn0.5Cu"]["liquidus"]) == (227, 227)
 
 
 def test_low_cu_predictions_stay_near_eutectic() -> None:
@@ -37,10 +42,11 @@ def test_low_cu_predictions_stay_near_eutectic() -> None:
         body = client.post("/api/v1/analyses", json={"comp": comp}).json()
         return body["prediction_contract"]["properties"]["liquidus_c"]["point"]
 
-    # 이전: Sn-0.5Cu 238.9 °C(격리 전 269 °C 근처까지 끌림) → 상태도 ~229 °C
-    assert 227.0 <= liq({"Sn": 99.5, "Cu": 0.5}) <= 232.0
-    # SAC105 제조사 자료 217–227 °C
-    assert 223.0 <= liq({"Sn": 98.5, "Ag": 1.0, "Cu": 0.5}) <= 229.0
+    # 이전: Sn-0.5Cu 238.9 °C(격리 전 269 °C 근처까지 끌림). 이제 요약표 실측 227 °C가 DB 일치로 나온다.
+    assert liq({"Sn": 99.5, "Cu": 0.5}) == 227.0
+    # [2026-09-29] 저Ag SAC는 요약표 실측(Sn-1.0Ag-0.5Cu-0.015P 217/219 °C)을 따른다. 312·270 °C 같은
+    # 복사값으로 끌려 올라가지 않는지만 본다.
+    assert 217.0 <= liq({"Sn": 98.5, "Ag": 1.0, "Cu": 0.5}) <= 229.0
 
 
 def test_global_explanation_cap_applies_across_clients() -> None:

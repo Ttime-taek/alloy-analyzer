@@ -156,7 +156,6 @@ _raw_db = [
     {"name": "Sn0.7Cu", "comp": {"Cu": 0.7, "Sn": 99.3}, "solidus": 227, "liquidus": 227},
     {"name": "Sn8.0Zn3.0Bi", "comp": {"Zn": 8.0, "Bi": 3.0, "Sn": 89.0}, "solidus": 190, "liquidus": 197},
     {"name": "Sn3.5Ag", "comp": {"Ag": 3.5, "Sn": 96.5}, "solidus": 221, "liquidus": 221},
-    {"name": "Sn0.3Ag0.2Cu", "comp": {"Ag": 0.3, "Cu": 0.2, "Sn": 99.5}, "solidus": 217, "liquidus": 270},
     {"name": "Sn0.3Ag2.0Cu", "comp": {"Ag": 0.3, "Cu": 2.0, "Sn": 97.7}, "solidus": 217, "liquidus": 270},
     {"name": "Sn3.0Ag0.5Cu", "comp": {"Ag": 3.0, "Cu": 0.5, "Sn": 96.5}, "solidus": 217, "liquidus": 221},
     {"name": "Sn1.0Ag0.7Cu", "comp": {"Ag": 1.0, "Cu": 0.7, "Sn": 98.3}, "solidus": 217, "liquidus": 224},
@@ -166,7 +165,8 @@ _raw_db = [
     {"name": "Sn3.5Ag0.5Bi3.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 3.0, "Sn": 93.0}, "solidus": 207, "liquidus": 214},
     {"name": "Sn3.5Ag0.5Bi6.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 6.0, "Sn": 90.0}, "solidus": 202, "liquidus": 212},
     {"name": "Sn-5Sb", "comp": {"Sb": 5.0, "Sn": 95.0}, "solidus": 238, "liquidus": 242, "density": 7.3},
-    {"name": "Sn0.5Cu", "comp": {"Cu": 0.5, "Sn": 99.5}, "solidus": 227, "liquidus": 312},
+    # [2026-09-29] 원본 희성 요약표 HSE-04(M) Sn-0.5Cu = 227/227 °C, 비중 7.3 (이전 입력 312 °C는 Sn3.0Cu 값 오기)
+    {"name": "Sn0.5Cu", "comp": {"Cu": 0.5, "Sn": 99.5}, "solidus": 227, "liquidus": 227, "density": 7.3},
     {"name": "Sn3.0Cu", "comp": {"Cu": 3.0, "Sn": 97.0}, "solidus": 227, "liquidus": 312},
     {"name": "Sn3.0Cu0.5Ni", "comp": {"Cu": 3.0, "Ni": 0.5, "Sn": 96.5}, "solidus": 228, "liquidus": 394},
     {"name": "Sn58Bi", "comp": {"Bi": 58.0, "Sn": 42.0}, "solidus": 139, "liquidus": 139},
@@ -176,7 +176,7 @@ _raw_db = [
     {"name": "Sn3.5Ag0.5Bi8.0In", "comp": {"Ag": 3.5, "Bi": 0.5, "In": 8.0, "Sn": 88.0}, "solidus": 198, "liquidus": 210},
     {"name": "Sn-10Sb", "comp": {"Sb": 10.0, "Sn": 90.0}, "solidus": 242, "liquidus": 249.25, "density": 7.3},
     {"name": "Sn100", "comp": {"Sn": 100.0}, "solidus": 231.9, "liquidus": 231.9},
-    {"name": "Sn0.3Ag0.7Cu", "comp": {"Ag": 0.3, "Cu": 0.7, "Sn": 99.0}, "solidus": 217, "liquidus": 227},
+    {"name": "Sn0.3Ag0.7Cu", "comp": {"Ag": 0.3, "Cu": 0.7, "Sn": 99.0}, "solidus": 217, "liquidus": 227, "density": 7.3},  # 요약표 HSE-11(L)
     {"name": "Sn63Pb37", "comp": {"Sn": 63.0, "Pb": 37.0}, "solidus": 183, "liquidus": 183},
     *SN_PB_SOLDER_ENTRIES,
     {"name": "Sn1.75Ag1.9Sb1In", "comp": {"Ag": 1.75, "Sb": 1.9, "In": 1.0, "Sn": 95.35}, "solidus": 219, "liquidus": 228},
@@ -226,39 +226,22 @@ _HEESUNG_SUMMARY_20130628 = [
 ]
 
 
-# [2026-09-18 점검 패치] 저Ag SAC 액상선 219 °C 행 격리
-#   결과: SAC105(Sn-1.0Ag-0.5Cu) 액상선 예측 219.8 → 226.4 °C (제조사 자료 225–227 °C 범위),
-#         Sn-1.2Ag-0.5Cu 226.3 °C. SAC305(221)·SAC405(219.7) 등 다른 SAC 예측은 변화 없음.
-#   부수 효과: 서로를 완벽히 '맞히던' 근접 중복행이 빠져 홀드아웃 검증 통계가 현실화됨
-#         (SAC 액상선 표본 54→47, MAE 9.50→9.88 °C, 전체 액상선 p90 12.7→21.4 °C).
-#   검증: tests/test_audit_2026_09_18_regression.py::test_contradictory_low_ag_sac_rows_are_quarantined
-# 원본 요약표 값이 상태도·동일 DB 행과 모순되어 학습/정확일치에서 제외하는 행.
-# 원본 기록은 위 목록에 그대로 보존하고, 출처 재확인 후 여기서 빼면 다시 합류한다.
-# - Sn-(1.0~1.2)Ag-0.5Cu 계열 액상선 219 °C: 저Ag SAC 액상선은 통상 224~227 °C
-#   (같은 DB Sn1.0Ag0.7Cu = 224 °C, SAC105 제조사 자료 217–227 °C).
-#   미량 Ni/Ge/P 첨가로 액상선이 5~8 °C 내려가지 않으므로 전기 오류로 판단.
-QUARANTINED_SOURCE_ROWS = {
-    "Sn-1.0Ag-0.5Cu-0.015P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-    "Sn-1.0Ag-0.015P": "Sn-1Ag liquidus 219 °C contradicts binary Sn-Ag liquidus (~227 °C)",
-    "Sn-1.0Ag-0.5Cu-0.003Ni-0.0075Ge": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0035Ge-0.01P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-    "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge-0.0035P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-    "Sn-1.2Ag-0.5Cu-0.02Ni-0.0085Ge-0.0035P": "low-Ag SAC liquidus 219 °C contradicts ~224–227 °C",
-}
+# 원본 요약표 값이 상태도·동일 DB 행과 모순되어 학습/정확일치에서 제외하는 행 (현재 없음).
+# 원본 기록은 위 목록에 그대로 두고, 이름을 여기에 넣으면 학습에서만 빠진다.
+# [2026-09-29] 원본 희성 요약표(2013-06-28) 사진과 대조: 9/18에 격리했던 저Ag SAC 7행
+#   (Sn-1.0Ag-0.5Cu-0.015P, Sn-1.0Ag-0.015P, Sn-1.0Ag-0.5Cu-0.003Ni-0.0075Ge, Sn-1.2Ag-0.5Cu-… 4행)은
+#   원본 '고상선/액상선' 열에 217/219 °C로 적힌 실측값이라 입력 오류가 아님 → 사용자 확인에 따라 격리 해제.
+#   영향: SAC105 계열 예측 액상선이 약 226 °C → 요약표 값(219 °C) 쪽으로 내려간다.
+QUARANTINED_SOURCE_ROWS: dict[str, str] = {}
 _known_source_names = {row["name"] for row in _HEESUNG_SUMMARY_20130628}
 assert set(QUARANTINED_SOURCE_ROWS) <= _known_source_names, "quarantine list references unknown rows"
 
-# [2026-09-21 정확도 패치] 기본 DB(_raw_db) 중 액상선이 다른 행 값을 복사한 것으로 보이는 행 격리
-#   - Sn0.5Cu 액상선 312 °C = Sn3.0Cu 값과 동일. Sn-Cu 공정(0.7Cu, 227 °C) 근처 아공정이라 상태도상 ~229 °C.
-#   - Sn0.3Ag0.2Cu 액상선 270 °C = Sn0.3Ag2.0Cu 값과 동일. Sn 과잉 저합금이라 상태도상 ~229 °C.
-#   두 행이 학습에 남아 있으면 인접 조성(Sn-0.5Cu-Ni-P 등) 예측이 270 °C 근처로 끌려 올라감.
-#   결과: SAC 액상선 홀드아웃 MAE·p90 변화는 tests/test_accuracy_2026_09_21_regression.py 와 PR 설명 참고.
-#   실측값을 확보하면 여기서 빼고 _raw_db 값을 고쳐 다시 합류시킨다.
-QUARANTINED_RAW_ROWS = {
-    "Sn0.5Cu": "liquidus 312 °C duplicates Sn3.0Cu; hypoeutectic Sn-0.5Cu liquidus is ~229 °C",
-    "Sn0.3Ag0.2Cu": "liquidus 270 °C duplicates Sn0.3Ag2.0Cu; Sn-rich low-alloy liquidus is ~229 °C",
-}
+# 기본 DB(_raw_db) 중 학습에서 제외하는 행 (현재 없음).
+# [2026-09-29] 원본 희성 요약표 대조로 정리:
+#   - Sn0.3Ag0.2Cu 217/270 °C: 요약표에 없는 조성. 같은 값의 Sn0.3Ag2.0Cu(HSE-14 Sn-0.3Ag-2.0Cu)의
+#     소수점 오기(2.0 → 0.2)로 판단해 행 삭제.
+#   - Sn0.5Cu 227/312 °C: 요약표 HSE-04(M) Sn-0.5Cu = 227/227 °C로 값 교체 후 격리 해제.
+QUARANTINED_RAW_ROWS: dict[str, str] = {}
 assert set(QUARANTINED_RAW_ROWS) <= {row["name"] for row in _raw_db}, "raw quarantine list references unknown rows"
 
 

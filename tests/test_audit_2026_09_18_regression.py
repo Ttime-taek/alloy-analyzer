@@ -75,11 +75,21 @@ def test_high_lead_sn_pb_solidus_matches_datasheets() -> None:
     assert rich == sorted(rich)
 
 
-def test_contradictory_low_ag_sac_rows_are_quarantined() -> None:
+def test_low_ag_sac_rows_follow_source_sheet() -> None:
+    # [2026-09-29] 9/18에 격리했던 저Ag SAC 7행은 원본 희성 요약표에 217/219 °C로 기재된 실측값이라
+    # 사용자 확인에 따라 다시 합류시켰다(격리 목록은 비어 있음).
     names = {row["name"] for row in SOLDER_DB}
-    assert not names & set(QUARANTINED_SOURCE_ROWS)
-    for row in SOLDER_DB:
-        comp = row["comp"]
-        ag, cu = comp.get("Ag", 0.0), comp.get("Cu", 0.0)
-        if 0.9 <= ag <= 1.3 and 0.4 <= cu <= 0.8 and sum(v for k, v in comp.items() if k not in ("Sn", "Ag", "Cu")) < 0.2:
-            assert row["liquidus"] >= 222.0, row["name"]
+    assert not QUARANTINED_SOURCE_ROWS
+    restored = [
+        "Sn-1.0Ag-0.5Cu-0.015P",
+        "Sn-1.0Ag-0.015P",
+        "Sn-1.0Ag-0.5Cu-0.003Ni-0.0075Ge",
+        "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge",
+        "Sn-1.2Ag-0.5Cu-0.05Ni-0.0035Ge-0.01P",
+        "Sn-1.2Ag-0.5Cu-0.05Ni-0.0075Ge-0.0035P",
+        "Sn-1.2Ag-0.5Cu-0.02Ni-0.0085Ge-0.0035P",
+    ]
+    db = {row["name"]: row for row in SOLDER_DB}
+    for name in restored:
+        assert name in names, name
+        assert (db[name]["solidus"], db[name]["liquidus"]) == (217.0, 219.0), name
