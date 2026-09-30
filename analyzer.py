@@ -885,13 +885,13 @@ class AlloyAnalyzer:
 
     def compare_wetting_temp_c(self, comp_a, comp_b, user_wetting_temp_c=None):
         """
-        비교 모드 젖음 온도: 사용자 지정이 없으면 A·B 자동 스냅값 중 max(공통 온도).
-        Returns (snapped_temp_c, basis).
+        비교 모드 젖음 온도: 사용자 지정이 없으면 A·B 자동 목표(액상선+30℃, 250–290℃ 클램프) 중 max(공통 온도).
+        Returns (temp_c, basis).
         """
-        from .models import compare_default_wetting_temp_c, snap_wetting_temp_to_bd_grid
+        from .models import clamp_wetting_temp_to_db_range, compare_default_wetting_temp_c
 
         if user_wetting_temp_c is not None:
-            return snap_wetting_temp_to_bd_grid(float(user_wetting_temp_c)), "user"
+            return clamp_wetting_temp_to_db_range(float(user_wetting_temp_c)), "user"
         la = self.liquidus_for_comp(comp_a)
         lb = self.liquidus_for_comp(comp_b)
         return compare_default_wetting_temp_c(la, lb), "compare_shared"

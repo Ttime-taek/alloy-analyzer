@@ -119,8 +119,17 @@ def test_wetting_metadata_distinguishes_exact_measurement_from_idw(
     exact_meta = exact["props"]["wetting_metadata"]
     predicted_meta = predicted["props"]["wetting_metadata"]
 
-    assert exact["props"]["wetting_fmax_pred_mn"] == 2.32
-    assert exact["props"]["wetting_t0_pred_s"] == 0.71
+    # [2026-09-30 계산 로직 2차 점검] 평가 온도를 250℃ 격자로 스냅하지 않고 액상선+30℃(≈251℃) 그대로 쓰며,
+    # 정확일치 합금은 자기 레코드(250℃ 2.32/0.71, 260℃ 2.42/0.53)를 온도 보간(PCHIP)한 값을 그대로 쓴다.
+    from test7.wetting_db import WETTING_DB
+
+    wet_t = exact["props"]["wetting_temp_c"]
+    assert 250.0 < wet_t < 260.0
+    rec = next(r for r in WETTING_DB if r["name"] == "Sn3.0Ag0.5Cu")
+    f_rec, t0_rec = PropertyModels._rec_fmax_t0_at_temp(rec, wet_t)
+    assert exact["props"]["wetting_fmax_pred_mn"] == pytest.approx(f_rec)
+    assert exact["props"]["wetting_t0_pred_s"] == pytest.approx(t0_rec)
+    assert 2.32 < f_rec < 2.42 and 0.53 < t0_rec < 0.71
     assert exact["props"]["wetting_neighbors"] == [
         {
             "name": "Sn3.0Ag0.5Cu",
@@ -148,6 +157,7 @@ def test_wetting_metadata_distinguishes_exact_measurement_from_idw(
         ],
         "neighbor_semantics": "value_contributors_v2",
         "confidence_neighbor_semantics": "distance_support_v1",
+        "temperature_interpolated": True,
     }
     assert predicted_meta["source_kind"] == "idw_prediction"
     assert predicted_meta["value_type"] == "idw_prediction"

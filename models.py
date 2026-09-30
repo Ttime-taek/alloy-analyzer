@@ -30,26 +30,29 @@ def _optional_finite_float(value):
     return number if math.isfinite(number) else None
 
 
-def snap_wetting_temp_to_bd_grid(target_c: float) -> float:
-    """250–290℃ 범위로 클램프한 뒤, 측정 DB와 동일한 입력 온도 목록에 가장 가깝게 스냅."""
+def clamp_wetting_temp_to_db_range(target_c: float) -> float:
+    """측정 DB 온도 범위(250–290℃)로만 클램프한다(격자 스냅 없음).
+
+    측정 온도 사이 값은 레코드별로 온도 선형 보간해 평가하므로, 목표 온도가
+    격자 경계(예: 285℃)를 넘을 때 평가 온도가 10℃씩 건너뛰며 점수가 튀지 않는다.
+    """
     target = _optional_finite_float(target_c)
     if target is None:
         raise ValueError("wetting temperature must be finite")
     lo, hi = min(WETTING_TEMPS_C), max(WETTING_TEMPS_C)
-    t = max(min(target, hi), lo)
-    return float(min(WETTING_TEMPS_C, key=lambda x: (abs(x - t), -x)))
+    return float(max(min(target, hi), lo))
 
 
 def default_wetting_temp_c(liquidus: float) -> float:
-    """기본: 액상선+30℃를 측정 DB 온도 축(250–290℃)에 맞춤."""
+    """기본: 액상선+30℃를 측정 DB 온도 범위(250–290℃)로 클램프(사이 온도는 보간)."""
     liquidus_value = _optional_finite_float(liquidus)
     if liquidus_value is None:
         raise ValueError("liquidus is required for automatic wetting temperature")
-    return snap_wetting_temp_to_bd_grid(liquidus_value + 30.0)
+    return clamp_wetting_temp_to_db_range(liquidus_value + 30.0)
 
 
 def compare_default_wetting_temp_c(liquidus_a: float, liquidus_b: float) -> float:
-    """비교 모드 자동: 더 높은 액상선+30℃ 목표를 DB 격자에 한 번 스냅해 공통 온도로 사용."""
+    """비교 모드 자동: 더 높은 액상선+30℃ 목표(DB 온도 범위로 클램프)를 공통 온도로 사용."""
     # A missing liquidus is an unavailable prediction, not 0 °C.  Do not let
     # the DB-grid clamp turn that sentinel into a plausible 250 °C test point.
     ta = default_wetting_temp_c(liquidus_a)
@@ -322,19 +325,25 @@ class PropertyModels:
         """
         comp = self._ensure_sn(comp)
         t_test = float(t_test)
+        # 측정 온도(격자) 사이에서 평가하면 각 레코드 값은 온도 선형 보간값이다.
+        temp_interpolated = not any(abs(t_test - float(g)) < 1e-9 for g in WETTING_TEMPS_C)
 
         f_terms = []
         t_terms = []
         w_terms = []
         neighbors = []
 
+        # 점수 정규화는 DB 전체(모든 합금 × 모든 측정 온도)의 Fmax·T0 범위로 고정한다.
+        # 온도마다 그 온도의 6개 합금 min–max로 늘이면, 고온에서 합금 간 차이가
+        # 0.1 mN뿐이어도 10↔100점으로 벌어져 평가 온도가 몇 ℃만 움직여도 점수가 크게 흔들렸다.
         f_vals = []
         t_vals = []
         for rec in WETTING_DB:
-            f_i, t_i = self._rec_fmax_t0_at_temp(rec, t_test)
-            if f_i is not None and t_i is not None:
-                f_vals.append(f_i)
-                t_vals.append(t_i)
+            for grid_t in WETTING_TEMPS_C:
+                f_i, t_i = self._rec_fmax_t0_at_temp(rec, float(grid_t))
+                if f_i is not None and t_i is not None:
+                    f_vals.append(f_i)
+                    t_vals.append(t_i)
         if not f_vals:
             raise ValueError("wetting db normalization empty")
         f_min, f_max = min(f_vals), max(f_vals)
@@ -405,6 +414,7 @@ class PropertyModels:
                     "missing_conditions": list(_WETTING_LEGACY_MISSING_CONDITIONS),
                     "neighbor_semantics": "value_contributors_v2",
                     "confidence_neighbor_semantics": "distance_support_v1",
+                    "temperature_interpolated": temp_interpolated,
                 },
             }
 
@@ -470,6 +480,7 @@ class PropertyModels:
                 "missing_conditions": list(_WETTING_LEGACY_MISSING_CONDITIONS),
                 "neighbor_semantics": "value_contributors_v2",
                 "confidence_neighbor_semantics": "distance_support_v1",
+                "temperature_interpolated": temp_interpolated,
             },
         }
 
@@ -493,13 +504,14 @@ class PropertyModels:
     ):
         """
         대표 젖음 행( fMAX / T0 / 점수 ).
-        - wetting_temp_c 가 있으면: 해당 값을 측정 DB 온도(250–290℃)에 맞춤.
-        - 없으면: 액상선+30℃ 후 동일 축에 맞춤 (기본 공정 온도 프록시).
+        - wetting_temp_c 가 있으면: 해당 값을 측정 DB 온도 범위(250–290℃)로 클램프.
+        - 없으면: 액상선+30℃ 후 동일 범위로 클램프 (기본 공정 온도 프록시).
+        - 측정 온도 사이 값은 레코드별 온도 선형 보간(점수 정규화도 같은 온도에서).
         peak 는 하위 호환용으로만 남김(젖음 온도 선택에는 사용하지 않음).
         """
         comp = self._ensure_sn(comp)
         if wetting_temp_c is not None:
-            t_test = snap_wetting_temp_to_bd_grid(float(wetting_temp_c))
+            t_test = clamp_wetting_temp_to_db_range(float(wetting_temp_c))
             basis = wetting_temp_basis or "user"
             target_for_ui = float(wetting_temp_c)
         else:

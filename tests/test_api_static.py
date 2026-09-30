@@ -126,7 +126,10 @@ class ApiStaticSmokeTest(unittest.TestCase):
         ta = data["a"]["props"].get("wetting_temp_c")
         tb = data["b"]["props"].get("wetting_temp_c")
         self.assertEqual(ta, tb)
-        self.assertEqual(ta, 260.0)
+        # [2026-09-30 계산 로직 2차 점검] 공통 온도 = max(액상선 A, B)+30℃를 250–290℃로 클램프만(격자 스냅 없음).
+        # B(Sn96.2Ag0.3Cu0.5Bi3) 액상선 ≈225℃ → 255℃ (이전에는 260℃로 스냅).
+        self.assertGreater(ta, 250.0)
+        self.assertLess(ta, 260.0)
         self.assertEqual(data["a"]["props"].get("wetting_temp_basis"), "compare_shared")
         self.assertEqual(data["b"]["props"].get("wetting_temp_basis"), "compare_shared")
 

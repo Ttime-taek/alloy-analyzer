@@ -202,7 +202,9 @@ def test_exact_analyzer_report_calls_wetting_a_measurement_not_idw() -> None:
     )
     report = analyzer.ai.build_lab_report("Sn96.5Ag3Cu0.5", result, [])
 
-    assert "젖음 Fmax: 2.32 mN [측정 DB(시험조건 미확인)" in report
+    # [2026-09-30 계산 로직 2차 점검] 젖음 평가 온도를 DB 격자(250℃)로 스냅하지 않고 액상선+30℃(251℃)에서
+    # 같은 합금 레코드의 온도 보간값(2.332)을 쓰므로 보고서 표기 2.32 → 2.33 mN.
+    assert "젖음 Fmax: 2.33 mN [측정 DB(시험조건 미확인)" in report
     assert "IDW·측정 DB" not in report
     assert "기계물성 검증률이 아님" in report
 
