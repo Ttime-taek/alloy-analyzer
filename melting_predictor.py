@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "13"
+MELTING_ENGINE_VERSION = "14"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -842,8 +842,31 @@ def _l2_family_parts(norm, family):
         ]
         meta = {"axis": axis, "families": [fam_lo, fam_hi], "weight_hi": round(w, 4)}
         return [p for p in parts if p[1] > 0.0], meta
+    # [2026-09-30 계산 로직 2차 점검 P3] 0에서 시작하는 경계(Cu·Ag가 0 → 조금): Sn-Ag에 Cu, Sn-Cu에 Ag가
+    # 조금만 들어가도 SAC(3원 공정 217 ℃)로 바뀌어 고상선이 계단(Sn-3.5Ag + Cu 0.05 % 221 → 214.5 ℃).
+    # 0 → 0.2 %에서 '그 원소가 없을 때 계열' → 현재 계열로 섞는다(DB: Cu 0.2 %, Ag 0.3 %에서 이미 217 ℃).
+    for axis in _L2_ZERO_RAMPS:
+        x = float(norm.get(axis, 0) or 0.0)
+        if x <= 0.0 or x >= _L2_ZERO_RAMP_WIDTH:
+            continue
+        base_c = _shift_axis(norm, axis, 0.0)
+        if base_c is None:
+            continue
+        fam_lo = _classify(base_c)
+        if fam_lo == family:
+            continue
+        w = _smoothstep01(x / _L2_ZERO_RAMP_WIDTH)
+        parts = [
+            (fam_lo, 1.0 - w, _phase_diagram_predict(norm, fam_lo)),
+            (family, w, _phase_diagram_predict(norm, family)),
+        ]
+        meta = {"axis": f"{axis}0", "families": [fam_lo, family], "weight_hi": round(w, 4)}
+        return [p for p in parts if p[1] > 0.0], meta
     return [(family, 1.0, _phase_diagram_predict(norm, family))], None
 
+
+_L2_ZERO_RAMPS = ("Cu", "Ag")
+_L2_ZERO_RAMP_WIDTH = 0.2
 
 def _phase_diagram_predict_smooth(norm, family):
     """
