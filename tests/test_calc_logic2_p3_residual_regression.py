@@ -25,7 +25,7 @@ def _p(comp, db=DB):
 
 
 def test_engine_version() -> None:
-    assert MELTING_ENGINE_VERSION == "15"
+    assert MELTING_ENGINE_VERSION == "16"
 
 
 def test_measured_points_are_reproduced_exactly() -> None:

@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "15"
+MELTING_ENGINE_VERSION = "16"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -404,6 +404,12 @@ def _classify(norm):
     pure_sn_sb = (
         sb > 0 and ag == 0 and cu == 0 and bi == 0 and inp == 0 and pb == 0 and zn == 0
     )
+    # [2026-09-30 계산 로직 2차 점검] Sn-Bi 이원은 Bi ≤ 5 %에서 'other'(L4 휴리스틱)로 떨어져
+    # 액상선이 순수 Sn보다 높게(Sn-4Bi 236 ℃) 나오다가 Bi 4.6→5 %에서 231 → 224 ℃로 급락했다.
+    # Sn-Bi 상태도 표(SN_BI_PHASE)는 Bi 0 %부터 정의되어 있으므로 이원 조성은 처음부터 SnBi.
+    pure_sn_bi = (
+        bi > 0 and ag == 0 and cu == 0 and inp == 0 and pb == 0 and zn == 0 and sb == 0
+    )
 
     # Define this before the broad Bi classifier so the transition cannot be
     # swallowed by the SnBi return path once Sn falls below the SAC cutoff.
@@ -419,6 +425,8 @@ def _classify(norm):
         return "SnPb"
     if sac_bi_transition:
         return "SAC_BI_TRANSITION"
+    if pure_sn_bi:
+        return "SnBi"
     # Bi > 5%: Sn-Bi 계열. (Bi ≤ 5%인 SAC+Bi/In 첨가는 SAC 경로.)
     # 과거 inp==0 일 때만 SnBi로 두면 Bi≥In 인 고Bi+In(예: Bi10 In6 …)이 neither SAC nor SnBi 가 되어
     # other+L4로 고상·액상이 과대(≈250℃+) 평가된다.
