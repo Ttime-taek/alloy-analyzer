@@ -35,7 +35,7 @@ except ImportError:
     from test7.interp_pchip import interp_pchip_table_solidus_liquidus
 
 # AI 디스크 캐시 키 무효화용 — hybrid_melting_predict 로직·계수를 바꿀 때만 올린다.
-MELTING_ENGINE_VERSION = "14"
+MELTING_ENGINE_VERSION = "15"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 이원계 상태도 데이터
@@ -868,6 +868,7 @@ def _l2_family_parts(norm, family):
 _L2_ZERO_RAMPS = ("Cu", "Ag")
 _L2_ZERO_RAMP_WIDTH = 0.2
 
+
 def _phase_diagram_predict_smooth(norm, family):
     """
     _phase_diagram_predict + 분류 경계 완충(값만).
@@ -1318,7 +1319,123 @@ def _external_calphad_http(norm):
 # ─────────────────────────────────────────────────────────────────────────────
 # 메인: 하이브리드 앙상블 예측
 # ─────────────────────────────────────────────────────────────────────────────
-def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
+# ─────────────────────────────────────────────────────────────────────────────
+# DB 잔차 보정 (2026-09-30 계산 로직 2차 점검 P3)
+# ─────────────────────────────────────────────────────────────────────────────
+# 이전: 최근접 DB 행의 실측 '절대값'을 L1 레이어로 섞었는데, 그 가중이 거리 0.1~0.5 안에서만
+# 크고 곧바로 줄어, 실측이 상태도·이웃과 다른 행(실측 1개뿐인 조성) 주변에 바늘이 생겼다
+#   (Sn-xSb 고상 4.5 % 234.7 → 5.0 % 223.0 → 5.5 % 235.7 ℃,
+#    Sn-xIn-1Cu-1Zn 액상 41.8 % 150.6 → 42 % 121.0 → 42.2 % 148.0 ℃).
+# 이제: 모델 예측(L2/L3/L4 + 후처리, '사전값')에 DB 행들의 잔차(실측 − 그 조성의 사전값)를
+#   거리² 역가중으로 섞어 더한다. DB 행 위에서는 실측과 같고(거리 → 0에서 연속),
+#   주변에서는 실측 차이가 모델의 모양을 따라 매끈하게 퍼지며, 멀어지면(폭 2.5) 0이 된다.
+_RESIDUAL_EPS = 0.02
+_RESIDUAL_TAPER = 2.5
+_RESIDUAL_SHRINK = 0.1
+_RESIDUAL_CACHE: Dict[Any, Dict[int, Tuple[float, float]]] = {}
+_RESIDUAL_CACHE_MAX = 256
+
+
+def _db_residual_key(db_prepared):
+    rows = []
+    for item in db_prepared:
+        comp = tuple(sorted((str(k), round(float(v), 6)) for k, v in (item.get("comp") or {}).items()))
+        rows.append((comp, round(float(item["solidus"]), 4), round(float(item["liquidus"]), 4)))
+    return tuple(rows)
+
+
+def _db_residual_table(db_prepared):
+    """이 DB 내용에 대한 잔차 캐시(행 번호 → (고상 잔차, 액상 잔차)). 필요한 행만 채운다."""
+    key = _db_residual_key(db_prepared)
+    table = _RESIDUAL_CACHE.get(key)
+    if table is None:
+        if len(_RESIDUAL_CACHE) >= _RESIDUAL_CACHE_MAX:
+            _RESIDUAL_CACHE.clear()
+        table = {}
+        _RESIDUAL_CACHE[key] = table
+    return table
+
+
+def _db_row_residual(db_prepared, table, i):
+    """i번째 DB 행의 잔차(실측 − 그 조성의 사전값). 처음 쓸 때 계산해 캐시."""
+    got = table.get(i)
+    if got is not None:
+        return got
+    item = db_prepared[i]
+    try:
+        ps, pl = hybrid_melting_predict(item["comp"], db_prepared, None, _prior_only=True)
+        got = (float(item["solidus"]) - ps, float(item["liquidus"]) - pl)
+    except Exception:
+        got = (0.0, 0.0)
+    table[i] = got
+    return got
+
+
+def _db_residuals(db_prepared):
+    """db_prepared 순서대로 모든 행의 (고상 잔차, 액상 잔차) — 점검·테스트용."""
+    table = _db_residual_table(db_prepared)
+    return [_db_row_residual(db_prepared, table, i) for i in range(len(db_prepared))]
+
+
+_RESIDUAL_ELEMENT_PENALTY = 1.5
+
+
+def _element_mismatch_penalty(a, b):
+    """
+    한쪽에만 들어 있는 원소(0.1 % 이상)의 수. 잔차는 그 원소 때문에 생겼을 수 있으므로
+    (예: Sn3.0Cu0.5Ni 액상 +83 ℃는 Ni 탓) 그런 이웃의 잔차는 덜 퍼뜨린다. 함량에 대해 연속.
+    """
+    total = 0.0
+    for el in set(a) | set(b):
+        if el == "Sn":
+            continue
+        x = max(0.0, float(a.get(el, 0.0) or 0.0))
+        y = max(0.0, float(b.get(el, 0.0) or 0.0))
+        hi, lo = max(x, y), min(x, y)
+        if hi <= 0.0:
+            continue
+        total += _smoothstep01((hi - lo) / 0.3) * (1.0 - _smoothstep01(lo / 0.1))
+    return total
+
+
+def _residual_correction(knn_raw, db_prepared, norm=None):
+    """주변 DB 행 잔차의 가중 평균(거리² 역가중 × 테이퍼, 먼 곳은 0으로 수축)."""
+    if not db_prepared:
+        return 0.0, 0.0, []
+    table = _db_residual_table(db_prepared)
+    index_of = {id(item): i for i, item in enumerate(db_prepared)}
+    num_s = num_l = den = 0.0
+    contrib = []
+    for d, item in knn_raw:
+        d = float(d)
+        if d >= _RESIDUAL_TAPER:
+            break
+        if norm is not None:
+            d = d + _RESIDUAL_ELEMENT_PENALTY * _element_mismatch_penalty(norm, item.get("comp") or {})
+            if d >= _RESIDUAL_TAPER:
+                continue
+        i = index_of.get(id(item))
+        if i is None:
+            continue
+        t = d / _RESIDUAL_TAPER
+        w = (1.0 - t * t * (3.0 - 2.0 * t)) / (d + _RESIDUAL_EPS) ** 2
+        rs, rl = _db_row_residual(db_prepared, table, i)
+        num_s += w * rs
+        num_l += w * rl
+        den += w
+        contrib.append((str(item.get("name", "")), round(d, 3), round(rs, 2), round(rl, 2), w))
+    if den <= 0.0:
+        return 0.0, 0.0, []
+    total = den + _RESIDUAL_SHRINK
+    contrib.sort(key=lambda x: -x[4])
+    top = [
+        {"name": n, "dist": dd, "residual_sol": a, "residual_liq": b, "weight_share": round(w / total, 4)}
+        for n, dd, a, b, w in contrib[:3]
+    ]
+    return num_s / total, num_l / total, top
+
+
+def hybrid_melting_predict(norm, db_prepared, ai_engine=None, _prior_only=False):
     """
     Parameters
     ----------
@@ -1357,8 +1474,11 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
 
     knn_raw.sort(key=lambda x: x[0])
 
-    db_exact_match = best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
+    db_exact_match = (
+        not _prior_only and best_item is not None and best_dist <= DB_EXACT_MATCH_EPS
+    )
     ext_calphad_detail = None
+    residual_detail = None
     l2_blend_meta = None
     knn_augment_meta: Optional[Dict[str, Any]] = None
     knn_ref_sol: Optional[float] = None
@@ -1532,12 +1652,14 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
                 layers.append((es, el, ew * ec, "L4e:ext_calphad"))
                 ext_calphad_detail = {"applied": True, "weight": round(ew * ec, 4)}
 
-        total_w = sum(w for _, _, w, _ in layers)
+        # [P3] 사전값은 L1(최근접 DB 절대값)을 빼고 계산한다. DB는 아래 잔차 보정으로 반영.
+        prior_layers = [x for x in layers if x[3] != "L1:DB_neighbor"]
+        total_w = sum(w for _, _, w, _ in prior_layers)
         if total_w == 0:
             final_sol, final_liq = 217.0, 221.0
         else:
-            final_sol = sum(s * w for s, _, w, _ in layers) / total_w
-            final_liq = sum(l * w for _, l, w, _ in layers) / total_w
+            final_sol = sum(s * w for s, _, w, _ in prior_layers) / total_w
+            final_liq = sum(l * w for _, l, w, _ in prior_layers) / total_w
 
         final_sol, final_liq = _anchor_binary_eutectic_mixtures(norm, family, final_sol, final_liq)
 
@@ -1545,7 +1667,13 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         l6_delta_sol, l6_delta_liq = 0.0, 0.0
         l6_applied = False
         # 미지 원소 첨가 시 화학계 미포함 → AI 델타가 오히려 오차를 키울 수 있음
-        if ai_engine is not None and best_dist > 3.0 and family == "other" and unk_pct_global <= 1e-12:
+        if (
+            not _prior_only
+            and ai_engine is not None
+            and best_dist > 3.0
+            and family == "other"
+            and unk_pct_global <= 1e-12
+        ):
             try:
                 ai_result = ai_engine.get_melting_data(norm)
                 l6_delta_sol = max(-12.0, min(12.0, ai_result.get("delta_solidus",  0.0)))
@@ -1606,6 +1734,27 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
             **blend_meta,
         }
 
+    if _prior_only:
+        return float(final_sol), float(final_liq)
+
+    if not db_exact_match and db_prepared and measured_anchor_detail is None:
+        c_sol, c_liq, c_top = _residual_correction(knn_raw, db_prepared, norm)
+        prior_sol, prior_liq = final_sol, final_liq
+        final_sol += c_sol
+        final_liq += c_liq
+        residual_detail = {
+            "prior_solidus_c": round(prior_sol, 2),
+            "prior_liquidus_c": round(prior_liq, 2),
+            "correction_solidus_c": round(c_sol, 2),
+            "correction_liquidus_c": round(c_liq, 2),
+            "top": c_top,
+        }
+        # 보고용: L1 항목은 이제 '사전값 + 잔차 보정'을 가리킨다(가중은 불확실성 판정용으로 유지).
+        layers = [
+            ((final_sol, final_liq, w, "L1:DB_residual") if name == "L1:DB_neighbor" else (s, l, w, name))
+            for s, l, w, name in layers
+        ]
+
     # ─── 물리 제약 ───────────────────────────────────────────────────────────
     if final_liq < final_sol:
         final_liq = final_sol + 1.0
@@ -1663,5 +1812,7 @@ def hybrid_melting_predict(norm, db_prepared, ai_engine=None):
         detail["l2_family_corridor"] = l2_blend_meta
     if ext_calphad_detail:
         detail["external_calphad"] = ext_calphad_detail
+    if residual_detail:
+        detail["db_residual_correction"] = residual_detail
 
     return round(final_sol, 1), round(final_liq, 1), round(final_peak, 1), detail

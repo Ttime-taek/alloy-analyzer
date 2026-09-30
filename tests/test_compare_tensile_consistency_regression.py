@@ -40,7 +40,8 @@ def test_unregistered_alloy_tensile_matches_between_single_and_compare() -> None
     # 이 테스트의 핵심은 단일/비교 API 간 일치(아래 비교)이므로 절대값은 갱신만 한다.
     # [2026-09-30 계산 로직 2차 점검 P1] 물성 DB 가중치 곡선(거리 0→3에서 1→0, 매끈)과
     # 보간 커널(거리² 역가중) 변경으로 76.60 → 76.82 MPa.
-    assert single_tensile == pytest.approx(76.81626521462508)
+    # [같은 날 P3] 융점 엔진 v14(DB 잔차 보정)로 이 조성의 예측 고상·액상이 바뀌어 76.816 → 76.812.
+    assert single_tensile == pytest.approx(76.81215969689185)
     assert compared_tensile == pytest.approx(single_tensile)
     assert (
         compared["prediction_contract"]["properties"]["tensile_strength_mpa"]["usage"]
