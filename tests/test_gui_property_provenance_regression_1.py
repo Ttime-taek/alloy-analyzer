@@ -84,7 +84,9 @@ def test_compare_report_blocks_unverified_deltas_winners_and_recommendations(
     assert "84.50 MPa ▲" not in report
     assert "+56.50 MPa" not in report
     assert "A IDW 예측(검증 보류) / B 측정 DB(시험조건 미확인)" in report
-    assert "\t1.94 mN\t2.32 mN\t비교 보류" in report
+    # [2026-09-30 계산 로직 2차 점검] 젖음 IDW 1/(d+1e-3)²(A 1.94 → 2.13 mN)와 평가 온도 격자 스냅 제거
+    # (공통 온도 = 최고 액상선 221+30 = 251℃, B 정확일치 2.32 → 2.33 mN) 반영. 핵심은 '비교 보류' 표기.
+    assert "\t2.13 mN\t2.33 mN\t비교 보류" in report
     assert "시험조건·출처 미확인 물성과 비교 보류 젖음값은 추천 점수에서 제외" in report
     assert "강도열세" not in report
     assert "Fmax열세" not in report
