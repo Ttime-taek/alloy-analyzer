@@ -11,7 +11,7 @@ import math
 import os
 import re
 import time
-from .utils import normalize_subscript
+from .utils import log_exception, normalize_subscript
 from .literature import crossref_search, semantic_scholar_search, semantic_scholar_lookup_by_doi
 from .standards_refs import ipc_jis_literature_lines, standards_search_hints
 
@@ -70,6 +70,29 @@ def _remote_ai_timeout_s(default: float = 15.0) -> float:
 
 
 class AIEngine:
+    @staticmethod
+    def _gemini_error_reason(msg: str) -> str:
+        """Gemini 예외 메시지에서 HTTP 코드·상태 코드만 뽑는다(원문·키는 노출하지 않음)."""
+        t = str(msg or "")
+        parts = []
+        m = re.search(r"\b([45]\d\d)\b", t)
+        if m:
+            parts.append(m.group(1))
+        m = re.search(
+            r"\b(PERMISSION_DENIED|NOT_FOUND|INVALID_ARGUMENT|UNAUTHENTICATED|FAILED_PRECONDITION|"
+            r"UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|API_KEY_INVALID|RESOURCE_EXHAUSTED)\b",
+            t,
+        )
+        if m:
+            parts.append(m.group(1))
+        if not parts:
+            low = t.lower()
+            if "timed out" in low or "timeout" in low:
+                parts.append("timeout")
+            elif "api key" in low:
+                parts.append("API key")
+        return " ".join(parts)
+
     @staticmethod
     def _is_quota_error_message(msg: str) -> bool:
         t = str(msg or "").lower()
@@ -282,6 +305,9 @@ class AIEngine:
             except Exception:
                 pass
             self.last_error_detail = emsg
+            # Render 로그에서 원인을 볼 수 있게 남긴다(화면에는 코드만 표시).
+            log_exception("Gemini generate_content", e)
+            reason = self._gemini_error_reason(emsg)
 
             # 1순위 폴백: Cerebras (키·SDK 살아있을 때만)
             fb = self._cerebras_ask(prompt, parse_list=parse_list)
@@ -289,7 +315,11 @@ class AIEngine:
                 if is_quota:
                     self.status_detail = "Cerebras 폴백 사용 중 (Gemini 쿼터 429)"
                 else:
-                    self.status_detail = "Cerebras 폴백 사용 중 (Gemini 호출 오류)"
+                    self.status_detail = (
+                        f"Cerebras 폴백 사용 중 (Gemini 호출 오류: {reason})"
+                        if reason
+                        else "Cerebras 폴백 사용 중 (Gemini 호출 오류)"
+                    )
                 return fb
 
             # Cerebras도 못 쓰면 기존 메시지 유지

@@ -2941,7 +2941,7 @@ class AlloyGUI:
                         _wt_basis = ""
                         if props.get("wetting_temp_basis") == "auto_liq_plus_30" and props.get("wetting_temp_target_c") is not None:
                             _wt_basis = (
-                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→시험 온도 격자 "
+                                f"   |   기준: 액상선+30≈{self._fmt_num(props.get('wetting_temp_target_c'),1)}℃→평가 온도 "
                                 f"{self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
                         elif props.get("wetting_temp_basis") == "compare_shared":
@@ -2949,7 +2949,7 @@ class AlloyGUI:
                                 f"   |   기준: 비교 공통 {self._fmt_num(props.get('wetting_temp_c'),0)}℃"
                             )
                         elif props.get("wetting_temp_basis") == "user":
-                            _wt_basis = "   |   기준: 선택 온도(시험 온도 격자)"
+                            _wt_basis = "   |   기준: 선택 온도"
                         _row(
                             f"젖음({wetting_source})",
                             f"fMAX {self._fmt_num(props.get('wetting_fmax_pred_mn'),2)} mN   /   "

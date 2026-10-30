@@ -479,7 +479,7 @@ class CompareRequest(BaseModel):
     comp_b: Dict[str, float]
     wetting_temp_c: float | None = Field(
         default=None,
-        description="젖음 대표 온도(℃). 생략 시 A·B 공통: 각 액상선+30℃ 스냅값 중 더 높은 DB 격자 온도.",
+        description="젖음 대표 온도(℃). 생략 시 A·B 공통: max(액상선 A, B)+30℃를 측정 DB 범위(250–290℃)로 제한한 값(측정 온도 사이는 보간).",
     )
     include_wetting_grid: bool = Field(
         default=False,

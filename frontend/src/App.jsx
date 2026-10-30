@@ -2422,7 +2422,7 @@ export default function App() {
                 <span className="app-helper-copy app-helper-copy--compact" style={{ fontSize: 12, color: "#7b8794", maxWidth: 420, lineHeight: 1.45 }}>
                   {mode === "compare"
                     ? "비교 시 A·B 모두 같은 온도에서 젖음을 봅니다. 자동이면 더 높은 기준 온도를 씁니다."
-                    : "기본은 액상선보다 약 +30℃를 목표로 하고, DB 기준과 가장 가까운 250–290℃ 값으로 맞춥니다."}
+                    : "기본은 액상선+30℃에서 평가합니다. 측정 DB 범위(250–290℃) 밖이면 범위 끝값을 쓰고, 측정 온도 사이는 보간합니다."}
                 </span>
               </div>
             </div>
@@ -4284,7 +4284,7 @@ function AiExplanationButton({ result, loading, onClick }) {
   );
 }
 
-function friendlyAiStatusMessage(raw) {
+export function friendlyAiStatusMessage(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
   if (/^연결됨$/i.test(s)) return "";
@@ -4292,7 +4292,10 @@ function friendlyAiStatusMessage(raw) {
     if (/쿼터|429/i.test(s)) {
       return "Gemini 한도(429) 도달 — Cerebras로 자동 전환되어 응답을 생성했습니다.";
     }
-    return "Gemini 호출 오류 — Cerebras 폴백으로 응답을 생성했습니다.";
+    const code = s.match(/Gemini 호출 오류: ([^)]+)\)/);
+    return code
+      ? `Gemini 호출 오류(${code[1].trim()}) — Cerebras 폴백으로 응답을 생성했습니다.`
+      : "Gemini 호출 오류 — Cerebras 폴백으로 응답을 생성했습니다.";
   }
   if (/쿼터.*429|429.*쿼터|AI 쿼터 초과/i.test(s)) {
     return "AI 호출 한도에 도달해 일부 문단은 로컬 요약으로 대체되었습니다.";
@@ -4975,6 +4978,14 @@ function SummaryCard({ label, value, variant, hint }) {
   );
 }
 
+function targetIsGridTemp(temp, rows) {
+  if (temp == null) return false;
+  return rows.some((r) => {
+    const t = optionalFiniteNumber(r?.temp_c);
+    return t != null && Math.abs(t - temp) < 1e-6;
+  });
+}
+
 function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, basis, targetC, onLoadGrid, loadPending, loadError }) {
   const list = Array.isArray(rows) ? rows : [];
   const proxyTempNumber = optionalFiniteNumber(proxyTemp);
@@ -5124,7 +5135,9 @@ function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, bas
       ) : null}
       <p style={{ fontSize: 11, color: "#7b8794", margin: "8px 0 0 0", lineHeight: 1.45 }}>
         높은 Fmax·낮은 T₀가 일반적으로 유리합니다. {sourceKind === "measured_db"
-          ? "표와 상단 카드는 등록 조성·온도와 일치한 측정값입니다."
+          ? targetIsGridTemp(proxyTempNumber, list)
+            ? "표와 상단 카드는 등록 조성·온도와 일치한 측정값입니다."
+            : "표는 등록 조성의 측정 온도별 기록이고, 상단 카드는 그 기록을 평가 온도로 보간한 값입니다."
           : sourceKind === "idw_prediction"
             ? "표와 상단 카드는 측정 DB를 조성·온도로 IDW 보간한 예측값입니다."
             : "표시된 원출처와 검증 상태를 먼저 확인하세요."}
@@ -5531,13 +5544,22 @@ export function wettingSourceLabel(result) {
   return "근거 미확인";
 }
 
+export function wettingTemperatureInterpolated(result) {
+  return result?.props?.wetting_metadata?.temperature_interpolated === true;
+}
+
 export function wettingSourceDescription(result) {
   const kind = wettingSourceKind(result);
   if (kind === "measured_db") {
+    const interpolated = wettingTemperatureInterpolated(result);
     if (wettingIsVerified(result)) {
-      return "등록 조성·온도와 일치한 측정값(Fmax·T₀)입니다.";
+      return interpolated
+        ? "등록 조성의 측정값(Fmax·T₀)을 평가 온도로 보간한 값입니다."
+        : "등록 조성·온도와 일치한 측정값(Fmax·T₀)입니다.";
     }
-    return "등록 조성·온도의 직접 DB 기록입니다. 원출처·시험조건 확인 전까지 참고 전용입니다.";
+    return interpolated
+      ? "등록 조성의 DB 기록을 평가 온도로 보간한 값입니다. 원출처·시험조건 확인 전까지 참고 전용입니다."
+      : "등록 조성·온도의 직접 DB 기록입니다. 원출처·시험조건 확인 전까지 참고 전용입니다.";
   }
   if (kind === "idw_prediction") {
     return "인접한 젖음 측정 DB를 조성·온도로 IDW 보간한 예측값(Fmax·T₀)입니다.";
