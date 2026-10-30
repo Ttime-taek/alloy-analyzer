@@ -84,3 +84,20 @@ def test_google_genai_ask_reports_client_error_without_retrying_gemini() -> None
     assert result.startswith("AI 오류:")
     assert calls == [("gemini-2.5-flash", "Return exactly OK")]
     assert engine.usage_stats["ask_errors"] == 1
+
+
+def test_gemini_default_timeout_is_long_enough_for_reports(monkeypatch) -> None:
+    # Regression: 2026-10-30 운영 실행 점검 — 기본 15초로는 상세 보고서 JSON이 매번 504 DEADLINE_EXCEEDED.
+    monkeypatch.delenv("AI_REMOTE_TIMEOUT_S", raising=False)
+    fake_genai = SimpleNamespace(
+        Client=_FakeGenaiClient,
+        types=SimpleNamespace(HttpOptions=lambda *, timeout: {"timeout": timeout}),
+    )
+    monkeypatch.setattr(ai_engine, "genai", fake_genai)
+    monkeypatch.setattr(ai_engine, "_GENAI_BACKEND", "google.genai")
+    monkeypatch.setattr(AIEngine, "_load_key_from_env_files", staticmethod(lambda: ""))
+
+    engine = AIEngine(api_key="test-key-not-real")
+
+    assert engine.request_timeout_s == 40.0
+    assert _FakeGenaiClient.last_http_options == {"timeout": 40000}

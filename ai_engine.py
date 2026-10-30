@@ -60,6 +60,9 @@ _DOPANT_REFERENCE_NOTE = (
 )
 
 
+_GEMINI_DEFAULT_TIMEOUT_S = 40.0
+
+
 def _remote_ai_timeout_s(default: float = 15.0) -> float:
     """Bound one remote AI request so analysis can fall back locally."""
     try:
@@ -154,7 +157,9 @@ class AIEngine:
         self.status_detail = ""
         self.last_error_detail = ""
         self.api_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
-        self.request_timeout_s = _remote_ai_timeout_s()
+        # [2026-10-30 운영 실행 점검] 생각 단계를 꺼도 상세 보고서 JSON(요약 10문장+)은 15초 안에 끝나지 않아
+        # 매번 504 DEADLINE_EXCEEDED → Cerebras 폴백이었다. Gemini만 기본 40초(환경변수로 덮어쓰기 가능).
+        self.request_timeout_s = _remote_ai_timeout_s(default=_GEMINI_DEFAULT_TIMEOUT_S)
         self.usage_stats = {
             "ask_attempts": 0,
             "ask_success": 0,
@@ -205,7 +210,7 @@ class AIEngine:
         """gemini-2.5-flash의 '생각(thinking)' 단계를 끈 생성 설정.
 
         [2026-10-30 운영 실행 점검] 기본 설정은 답하기 전에 생각 단계를 거쳐, 보고서 길이의 프롬프트에서
-        요청 제한 시간(AI_REMOTE_TIMEOUT_S, 기본 15초)을 넘겨 매번 504 DEADLINE_EXCEEDED → Cerebras 폴백이 됐다.
+        요청 제한 시간(AI_REMOTE_TIMEOUT_S, 당시 기본 15초)을 넘겨 매번 504 DEADLINE_EXCEEDED → Cerebras 폴백이 됐다.
         설명·요약 생성에는 생각 단계가 필요 없으므로 끈다. SDK가 지원하지 않으면 None(기본 설정).
         """
         try:
