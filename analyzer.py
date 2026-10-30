@@ -44,7 +44,20 @@ def cached_distance(a_tuple, b_tuple):
     return composition_distance(a, b)
 
 
-def _property_db_weight(best_dist):
+# 물성별 DB 혼합 반경(거리 0에서 가중 1 → 이 거리에서 0).
+# [2026-10-30] 인장·항복은 P2에서 조성 모델을 재보정한 뒤 먼 합금 값을 섞을수록 오차가 커져
+# 반경 3 → 1.5 (합금별 leave-one-out: 인장 4.90 → 3.90, 항복 6.01 → 4.75 MPa).
+# 연신·전단은 반경 3이 여전히 가장 낫다(3.75 %p, 4.81 MPa). 조성 모델이 같은 DB로 맞춰져 있어
+# 실제 개선 폭은 이 수치보다 작을 수 있다.
+_PROPERTY_DB_RADIUS = {
+    "tensile": 1.5,
+    "yield_strength": 1.5,
+    "elongation": 3.0,
+    "shear": 3.0,
+}
+
+
+def _property_db_weight(best_dist, radius=3.0):
     """
     물성 DB 가중치.
 
@@ -65,9 +78,10 @@ def _property_db_weight(best_dist):
         return 0.0
     if d0 <= 0.0:
         return 1.0
-    if d0 >= 3.0:
+    r = float(radius)
+    if d0 >= r:
         return 0.0
-    t = d0 / 3.0
+    t = d0 / r
     return 1.0 - t * t * (3.0 - 2.0 * t)
 
 
@@ -582,7 +596,12 @@ class AlloyAnalyzer:
         for mk, dk in mapping.items():
             if db_pred.get(dk) is None or pb.get(mk) is None:
                 continue
-            out[mk] = f"DB(blend_GUI,w={db_w:.2f})"
+            w_k = db_w
+            if isinstance(db_out, dict):
+                w_k = _property_db_weight(db_best_dist, _PROPERTY_DB_RADIUS.get(dk, 3.0))
+                if w_k <= 0.0:
+                    continue
+            out[mk] = f"DB(blend_GUI,w={w_k:.2f})"
         return out
 
     def overall_confidence(self, conf, score, melting_detail, props, norm=None):
@@ -1033,7 +1052,7 @@ class AlloyAnalyzer:
                     return
                 d_p = db_near_by_prop.get(key_db, db_best_dist)
                 try:
-                    w_p = _property_db_weight(d_p)
+                    w_p = _property_db_weight(d_p, _PROPERTY_DB_RADIUS.get(key_db, 3.0))
                 except Exception:
                     w_p = 0.0
                 # 가장 가까운 등록 합금에 이 물성 실측이 없으면, 그 합금 위에서는 모델 값을 쓴다
