@@ -4978,6 +4978,28 @@ function SummaryCard({ label, value, variant, hint }) {
   );
 }
 
+// 대표 온도가 측정 온도 행과 같으면 그 행, 사이에 있으면(보간) 양옆 두 행을 강조한다.
+export function wettingHighlightTemps(temp, rows) {
+  const out = new Set();
+  if (temp == null || !Array.isArray(rows)) return out;
+  const temps = rows
+    .map((r) => optionalFiniteNumber(r?.temp_c))
+    .filter((t) => t != null)
+    .sort((a, b) => a - b);
+  const exact = temps.find((t) => Math.abs(t - temp) < 1e-6);
+  if (exact != null) {
+    out.add(exact);
+    return out;
+  }
+  const lower = temps.filter((t) => t < temp).pop();
+  const upper = temps.find((t) => t > temp);
+  if (lower != null && upper != null) {
+    out.add(lower);
+    out.add(upper);
+  }
+  return out;
+}
+
 function targetIsGridTemp(temp, rows) {
   if (temp == null) return false;
   return rows.some((r) => {
@@ -4991,9 +5013,7 @@ function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, bas
   const proxyTempNumber = optionalFiniteNumber(proxyTemp);
   const targetNumber = optionalFiniteNumber(targetC);
   const liquidusNumber = optionalFiniteNumber(liquidus);
-  const hi =
-    proxyTempNumber != null &&
-    list.some((r) => optionalFiniteNumber(r?.temp_c) === proxyTempNumber);
+  const highlightTemps = wettingHighlightTemps(proxyTempNumber, list);
   if (list.length === 0) {
     const hint =
       source === "Heuristic"
@@ -5112,7 +5132,7 @@ function WettingByTempTable({ rows, proxyTemp, source, sourceKind, liquidus, bas
               const rowTemp = optionalFiniteNumber(r?.temp_c);
               const rowFmax = optionalFiniteNumber(r?.fmax_mn);
               const rowT0 = optionalFiniteNumber(r?.t0_s);
-              const rowHi = hi && rowTemp === proxyTempNumber;
+              const rowHi = rowTemp != null && highlightTemps.has(rowTemp);
               const cell = {
                 ...ruleTd,
                 ...(rowHi
