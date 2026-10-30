@@ -200,6 +200,20 @@ class AIEngine:
     # ---------------------------------------------------------
     # Gemini 요청 통합 함수
     # ---------------------------------------------------------
+    @staticmethod
+    def _gemini_generate_config():
+        """gemini-2.5-flash의 '생각(thinking)' 단계를 끈 생성 설정.
+
+        [2026-10-30 운영 실행 점검] 기본 설정은 답하기 전에 생각 단계를 거쳐, 보고서 길이의 프롬프트에서
+        요청 제한 시간(AI_REMOTE_TIMEOUT_S, 기본 15초)을 넘겨 매번 504 DEADLINE_EXCEEDED → Cerebras 폴백이 됐다.
+        설명·요약 생성에는 생각 단계가 필요 없으므로 끈다. SDK가 지원하지 않으면 None(기본 설정).
+        """
+        try:
+            types = genai.types
+            return types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0))
+        except Exception:
+            return None
+
     def _parse_list_text(self, txt):
         """Shared JSON/bracket list recovery used by both Gemini and Cerebras paths."""
         txt = normalize_subscript(str(txt or ""))
@@ -274,10 +288,11 @@ class AIEngine:
 
         try:
             if self.client:
-                res = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                )
+                gen_kwargs = {"model": "gemini-2.5-flash", "contents": prompt}
+                gen_config = self._gemini_generate_config()
+                if gen_config is not None:
+                    gen_kwargs["config"] = gen_config
+                res = self.client.models.generate_content(**gen_kwargs)
             else:
                 return "AI 연결 오류: Gemini 클라이언트 미준비"
 

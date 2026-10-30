@@ -49,11 +49,13 @@ def _engine_with_client(client) -> AIEngine:
 
 def test_google_genai_ask_uses_client_models_generate_content() -> None:
     calls = []
+    configs = []
 
     class FakeModels:
         @staticmethod
-        def generate_content(*, model, contents):
+        def generate_content(*, model, contents, config=None):
             calls.append((model, contents))
+            configs.append(config)
             return SimpleNamespace(text="OK")
 
     engine = _engine_with_client(SimpleNamespace(models=FakeModels()))
@@ -61,6 +63,9 @@ def test_google_genai_ask_uses_client_models_generate_content() -> None:
     assert engine.ask("Return exactly OK") == "OK"
     assert calls == [("gemini-2.5-flash", "Return exactly OK")]
     assert engine.usage_stats["ask_success"] == 1
+    # [2026-10-30] 생각 단계를 꺼서 15초 제한 안에 답하게 한다(504 DEADLINE_EXCEEDED 폴백 방지).
+    assert configs[0] is not None
+    assert configs[0].thinking_config.thinking_budget == 0
 
 
 def test_google_genai_ask_reports_client_error_without_retrying_gemini() -> None:
@@ -68,7 +73,7 @@ def test_google_genai_ask_reports_client_error_without_retrying_gemini() -> None
 
     class FailingModels:
         @staticmethod
-        def generate_content(*, model, contents):
+        def generate_content(*, model, contents, config=None):
             calls.append((model, contents))
             raise RuntimeError("test transport failure")
 
